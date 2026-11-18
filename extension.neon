@@ -1,0 +1,31 @@
+parameters:
+	contracts:
+		z3Binary: z3
+		timeoutMs: 10000
+
+parametersSchema:
+	contracts: structure([
+		z3Binary: string()
+		timeoutMs: int()
+	])
+
+services:
+	- PhpstanContracts\Contract\ContractReader
+	- PhpstanContracts\Translate\EnumRegistry
+	- PhpstanContracts\Translate\TypeMapper
+	- PhpstanContracts\Translate\DomainBuilder
+	- PhpstanContracts\Translate\MethodEncoder
+	- PhpstanContracts\Solver\ScriptRenderer
+	- PhpstanContracts\Report\ValueFormatter
+	- PhpstanContracts\Report\CounterexampleFormatter
+	-
+		class: PhpstanContracts\Solver\Z3Runner
+		arguments:
+			binary: %contracts.z3Binary%
+			timeoutMs: %contracts.timeoutMs%
+	-
+		class: PhpstanContracts\Rule\VerifyContractRule
+		arguments:
+			timeoutMs: %contracts.timeoutMs%
+		tags:
+			- phpstan.rules.rule

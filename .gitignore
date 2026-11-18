@@ -1,0 +1,6 @@
+/vendor/
+/.tools/
+/composer.lock
+/.phpstan.cache/
+/.z3/
+/.phpunit.cache/

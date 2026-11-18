@@ -1,0 +1,64 @@
+{
+    "name": "shaffe-fr/phpstan-contracts",
+    "description": "PHPStan extension that proves Design by Contract annotations on a pure PHP subset with the Z3 SMT solver.",
+    "type": "phpstan-extension",
+    "keywords": [
+        "phpstan",
+        "phpstan-extension",
+        "static analysis",
+        "formal verification",
+        "design by contract",
+        "preconditions",
+        "postconditions",
+        "smt",
+        "z3",
+        "contracts",
+        "ai"
+    ],
+    "license": "MIT",
+    "require": {
+        "php": "^8.3",
+        "phpstan/phpstan": "^2.1",
+        "symfony/process": "^7.1 || ^8.0"
+    },
+    "suggest": {
+        "ext-zip": "Needed by vendor/bin/phpstan-contracts-install-z3 to unpack the official Z3 build"
+    },
+    "bin": [
+        "bin/phpstan-contracts-install-z3"
+    ],
+    "autoload": {
+        "psr-4": {
+            "PhpstanContracts\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "PhpstanContracts\\Examples\\": "examples/",
+            "PhpstanContracts\\Tests\\": "tests/"
+        }
+    },
+    "extra": {
+        "phpstan": {
+            "includes": [
+                "extension.neon"
+            ]
+        }
+    },
+    "config": {
+        "sort-packages": true,
+        "platform": {
+            "php": "8.3.0"
+        }
+    },
+    "minimum-stability": "stable",
+    "require-dev": {
+        "phpunit/phpunit": "^12.0"
+    },
+    "scripts": {
+        "test": "phpunit --exclude-testsuite examples",
+        "test:examples": "phpunit --testsuite examples",
+        "test:all": "phpunit",
+        "analyse": "phpstan analyse --configuration=phpstan.src.neon --no-progress"
+    }
+}

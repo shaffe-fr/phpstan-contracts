@@ -1,0 +1,47 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+use PhpstanContracts\Solver\SolverFailure;
+use PhpstanContracts\Solver\Z3Installer;
+
+foreach ([__DIR__ . '/../vendor/autoload.php', __DIR__ . '/../../../autoload.php'] as $autoload) {
+    if (is_file($autoload)) {
+        require $autoload;
+        break;
+    }
+}
+
+if (!class_exists(Z3Installer::class)) {
+    fwrite(STDERR, "Composer autoloader not found. Run \"composer install\" first.\n");
+    exit(1);
+}
+
+$options = getopt('', ['dir:', 'force', 'help']);
+if (isset($options['help'])) {
+    echo "Usage: phpstan-contracts-install-z3 [--dir=<directory>] [--force]\n\n"
+        . "Downloads the official Z3 " . Z3Installer::VERSION . " build for this platform, checks its SHA-256\n"
+        . "and installs it in <directory> (default: " . Z3Installer::defaultDirectory() . ").\n"
+        . "The extension uses it automatically when parameters.contracts.z3Binary is left at its default.\n";
+    exit(0);
+}
+
+$directory = isset($options['dir']) && is_string($options['dir']) ? $options['dir'] : null;
+
+try {
+    $binary = (new Z3Installer($directory))->install(
+        static function (string $message): void {
+            echo $message, "\n";
+        },
+        isset($options['force']),
+    );
+} catch (SolverFailure $failure) {
+    fwrite(STDERR, 'Error: ' . $failure->getMessage() . "\n");
+    exit(1);
+}
+
+echo 'Z3 executable: ', $binary, "\n";
+if ($directory !== null) {
+    echo "Set parameters.contracts.z3Binary to this path, since it is not the default directory.\n";
+}
