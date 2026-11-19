@@ -125,7 +125,7 @@ The rule tests also cover the failure paths that the examples do not: an invalid
 1. PHP returns exactly the `$result` that the message announces.
 2. The contract is false in PHP for those values.
 
-This is the check that matters most to a user: a counterexample that does not reproduce would send them after a bug that does not exist. The replay covers integers, floats (including `NAN`), strings (including non-ASCII bytes), booleans, nullable values and enums.
+This is the check that matters most to a user: a counterexample that does not reproduce would send them after a bug that does not exist. The replay covers integers, floats (including `NAN`), strings (including non-ASCII bytes), booleans, nullable values and enums, and calls an enum instance method on the case that the message gives as `$this`.
 
 ## Does the suite catch bugs?
 

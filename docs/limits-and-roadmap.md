@@ -2,7 +2,7 @@
 
 ## What a green run guarantees
 
-For every input that satisfies the native parameter types, the PHPDoc ranges and every `#[Requires]`, a method that passes:
+For every input that satisfies the native parameter types, the PHPDoc ranges and every `#[Requires]`, a method that passes (in an enum or a readonly data class, `$this` is one of the inputs):
 
 1. runs without integer overflow, division by zero, unhandled `match`, invalid `Enum::from()` value, unrepresentable `(int)` cast or missing `return`,
 2. returns a value that its declared return type allows, and
@@ -14,7 +14,7 @@ The guarantee is **fail-closed**. A construct the translator does not know is re
 
 - **Callers are not checked.** The extension does not verify that a call to a verified method satisfies its `#[Requires]`. PHPDoc ranges are enforced by PHPStan itself at the call sites it analyses. A precondition expressed only as `#[Requires]` is an assumption of the proof that nobody checks on the caller's side. This is the largest gap, and the first item on the roadmap.
 - **PHPDoc ranges are trusted.** They hold wherever PHPStan can see the caller. A caller whose argument is `mixed`, or code that PHPStan does not analyse, can break them.
-- **A data class is trusted to hold its declared types.** An instance of a class whose constructor validates its arguments is assumed to hold values of its property types and nothing more. A constructor that throws is never seen by the proof, which is why such a class cannot be built with `new` in a verified method.
+- **A data class is trusted to hold its declared types.** An instance of a class whose constructor validates its arguments is assumed to hold values of its property types and nothing more. A constructor that throws is never seen by the proof, which is why such a class cannot be built with `new` in a verified method. The same holds for `$this` in a method of such a class.
 - **Verified methods cannot call each other**, so a rule has to be a single self-contained method.
 - **No model of the environment.** Time, randomness, I/O, memory and execution time are outside the verified subset. Methods that need them are rejected, not approximated.
 - **The translator is not itself verified.** It is tested (see [Testing](testing.md)): its PHP semantics are compared with PHP, every diagnostic has a fixture, and every counterexample is replayed in PHP. A test suite finds bugs, it does not prove their absence, and the answer of Z3 is taken at face value.
@@ -33,7 +33,7 @@ SMT solvers already reason about integers, bit-vectors, floating point, strings,
 | `list<int>`, `array<string, int>` and similar | an SMT array plus a length | Operations that do not iterate (length, element access, appending) are fine. Anything that visits every element needs a loop. |
 | calls between verified methods | an uninterpreted function constrained by the callee's contract | Needs the call-site check described above. |
 | `DateTimeImmutable`, `Money` and other library value objects | a record, as for data classes | The class has methods. The methods would need to be modelled or replaced by contracts. |
-| methods and getters on data classes | a function constrained by the method's contract | Same as calls between verified methods. |
+| methods and getters on data classes and enums, including `$this->isFinal()` | a function constrained by the method's contract | Same as calls between verified methods. A method that only reads `$this` is already supported. |
 | `substr()`, `strpos()`, `trim()`, `strtolower()`, `sprintf()` | the string theory has most of the primitives | Each PHP function has its own edge cases (negative offsets, locale, multibyte). Each one is a decision to reproduce its semantics exactly. |
 | `round()` | `fp.roundToIntegral` with ties away from zero | The result of `round()` changed between PHP versions, so the encoding would depend on the PHP version. |
 
@@ -71,6 +71,6 @@ These are directions in order of value for the effort, not commitments or dates.
 1. **Modular verification.** Check `#[Requires]` at every call site, and let a verified method call other verified methods using their contracts. This closes the largest gap above, and also lets a rule be split into smaller proven pieces.
 2. **A persistent Z3 process.** One long-lived process per PHPStan worker, reset between methods, to remove most of the process start-up cost that dominates a run for integer, string and data class methods (see [How it works](how-it-works.md#what-runs-where)). The cache of proofs keyed by script hash, which is the complement, is done: see [Cost](getting-started.md#cost).
 3. **Lists and bounded loops**, first as `list<T>` with a length and unrolling with an explicit bound, then with `#[Invariant]`.
-4. **Methods of data classes**, through their own contracts, which follows from modular verification.
+4. **Calls to methods of data classes and enums**, `$this->level()` included, through their own contracts, which follows from modular verification.
 5. **More string functions**, one at a time, each with its edge cases decided.
 6. **Cross-checking with a second solver** on `unsat` results, to reduce the trust placed in one solver.

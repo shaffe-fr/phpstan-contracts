@@ -14,6 +14,8 @@ A verified method can take and return the types below. Anything else is rejected
 
 Not supported: `array` and `list<T>`, `mixed`, `object`, `callable`, closures, unions of different types (`int|string`, `int|float`), `iterable`, `void`, `never`, interfaces and abstract classes, and classes with mutable properties.
 
+A class constant whose value is a single `int`, `float`, `string`, `bool` or enum case, such as `self::OFFSET` or `ErpCode::RANGE_END`, is inlined as that value, in the body and in contracts. `static::` needs a final class or a final constant. See [Class constants, `self` and `$this`](writing-contracts.md#class-constants-self-and-this).
+
 The rest of this page describes each type: what it can do, what it cannot, and the real bugs that the prover found in the [examples](real-world-examples.md).
 
 ## int
@@ -374,8 +376,11 @@ Pure enums and backed enums, with `int` or `string` backing values.
 | `$status->name` | A `string`. |
 | `Status::from($value)` | Carries a `contracts.invalidEnumValue` check: it throws `ValueError` for a value that is not a backing value. |
 | `Status::tryFrom($value)` | Returns `?Status`. The argument must be of the backing type. |
+| `self::Paid`, `static::Paid`, `self::from()`, `self::tryFrom()` | Inside the enum. An enum cannot be extended, so `static::` is the enum itself. |
+| a constant of the enum, `const DEFAULT = self::Pending;` | Inlined as the case or the scalar it holds. |
+| `$this` in an instance method | One of the cases: `===`, `!==`, `match ($this)`, `$this->value`, `$this->name`, and in contracts. |
 
-Not supported: `cases()`.
+Not supported: `cases()`, and calling another method on `$this` (`$this->isFinal()`), which is a method call.
 
 Parsing an untrusted value is the usual place for a bug. `from()` throws on anything unknown, and the prover shows the input that does it. `tryFrom()` with a default is proven, and the contract can state each case:
 
@@ -418,6 +423,62 @@ public static function roundTrip(Currency $currency): Currency
 {
     return Currency::from($currency->value);
 }
+```
+
+### Enum methods and `$this`
+
+Most enum logic is a `match ($this)`. An enum case has no mutable state, so the method is a function of `$this`, which the prover treats as an implicit parameter. The `match` is checked for exhaustiveness like any other:
+
+```php
+#[Ensures('implies($this === StockStatus::InStock, $result)')]
+#[Ensures('implies($this === StockStatus::TemporarilyUnavailable, !$result)')]
+public function isPurchasable(): bool
+{
+    return match ($this) {
+        self::InStock => true,
+        self::OutOfStock, self::TemporarilyUnavailable => false,
+    };
+}
+```
+
+A version that keeps selling during a temporary shortage is refuted, and the counterexample gives `$this` like a parameter:
+
+```php
+#[Ensures('implies($this === StockStatus::TemporarilyUnavailable, !$result)')]
+public function isPurchasableBroken(): bool
+{
+    return match ($this) {
+        self::InStock, self::TemporarilyUnavailable => true,
+        self::OutOfStock => false,
+    };
+}
+```
+
+```
+StockStatus.php:34: Postcondition #[Ensures('implies($this === StockStatus::TemporarilyUnavailable, !$result)')] can be violated.
+Counterexample: $this = StockStatus::TemporarilyUnavailable => $result = true (return at line 37).
+```
+
+Static methods that return the enum's own cases are written with `self::`, and a contract can use it too:
+
+```php
+#[Ensures('implies($result === StockAvailability::Immediate, $stockQuantity > 0)')]
+#[Ensures('implies($stockQuantity <= 0, $result === self::EndOfLife)')]
+public static function resolve(int $stockQuantity): self
+{
+    if ($stockQuantity > 0) {
+        return self::Immediate;
+    }
+
+    return self::EndOfLife;
+}
+```
+
+`resolveBroken`, the same method with `>=` instead of `>`, is refuted:
+
+```
+StockAvailability.php:34: Postcondition #[Ensures('implies($result === StockAvailability::Immediate, $stockQuantity > 0)')] can be violated.
+Counterexample: $stockQuantity = 0 => $result = StockAvailability::Immediate (return at line 38).
 ```
 
 ## Nullable values
@@ -609,8 +670,27 @@ final readonly class Receipt
 | `$cart->subtotalCents`, `$cart->coupon->percent` | Nested reads. A nullable object needs a null check or `?->`. |
 | `$cart->coupon?->minimumCents` | |
 | `new Receipt(0, $total, false)` | Positional or named arguments, all of them. Only for classes whose constructor does nothing but promote every property. |
+| `$this->onHand` in a method of the class, `new self(...)` | `$this` is an implicit parameter of the class, with the same domain as any other. |
 
-Not supported: calling a method (including getters), `$a === $b` and `$a == $b` between objects (identity is not modelled, compare the fields), writing to a property, and `instanceof`.
+Not supported: calling a method (including getters, and `$this->available()`), `$a === $b` and `$a == $b` between objects (identity is not modelled, compare the fields), writing to a property, and `instanceof`.
+
+A data class can carry its own rules. `$this` is a record of its properties, read like a parameter:
+
+```php
+#[Ensures('$result >= 0 && $result <= $this->onHand')]
+#[Ensures('implies($this->reserved <= $this->onHand, $result === $this->onHand - $this->reserved)')]
+public function available(): int
+{
+    return max(0, $this->onHand - $this->reserved);
+}
+```
+
+`availableBroken` returns `$this->onHand - $this->reserved` without the `max()`, and is refuted:
+
+```
+StockLine.php:35: Postcondition #[Ensures('$result >= 0')] can be violated.
+Counterexample: $this = StockLine(onHand: 0, reserved: 1000000) => $result = -1000000 (return at line 38).
+```
 
 A constructor that validates its arguments cannot be modelled, so the class can be received as a parameter but not built with `new`. The prover would otherwise skip a possible exception.
 

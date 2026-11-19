@@ -60,6 +60,9 @@ Available in contracts:
 | `match` | `match ($zone) { ... }` |
 | `??`, `?->`, `isset()`, `is_null()` | `($customerPercent ?? 0)`, `$cart->coupon?->minimumCents` |
 | enum cases, `->value`, `->name`, `::from()`, `::tryFrom()` | `$result === Currency::Usd`, `$result === $tier->value` |
+| `self::` and `static::` for the class that declares the method | `$result === self::EndOfLife` |
+| class constants holding an int, float, string, bool or enum case | `$result < ErpCode::RANGE_END`, `self::OFFSET + $webId` |
+| `$this` in a method of an enum or a readonly data class | `implies($this === StockStatus::InStock, $result)`, `$this->onHand` |
 | property reads on a data class, `new` | `$result->totalCents`, `$cart->coupon->percent` |
 | `implies($premise, $conclusion)`, contracts only | `implies($year % 400 === 0, $result)` |
 
@@ -69,7 +72,9 @@ PHP has no implication operator, so `implies($a, $b)` is provided. It means `!$a
 
 **Contract arithmetic on `float` is not.** A float expression in a contract is computed in IEEE 754, exactly as in the body, so `$result === $a + ($b + $c)` is a statement about rounding.
 
-**Class names in strings.** A contract string cannot see the file's `use` statements. A short name such as `OrderStatus` is resolved first against the enums and data classes in the method signature, then against the method's namespace, then globally. Use a fully qualified name for anything else.
+**Class names in strings.** A contract string cannot see the file's `use` statements. A short name such as `OrderStatus` is resolved first against the enums and data classes in the method signature, then against the method's namespace, then globally. Use a fully qualified name for anything else. `self` and `static` mean the class that declares the method, with the same rules as in the body (see [Class constants, `self` and `$this`](#class-constants-self-and-this)).
+
+**`$this` in a contract** is the object the method is called on. It cannot change during the call, so it means the same thing in `#[Requires]` and in `#[Ensures]`.
 
 **Quotes.** The contract is a single-quoted PHP string, so write the string literals inside it with double quotes: `#[Ensures('$result === "EUR"')]`.
 
@@ -125,7 +130,14 @@ Everything in the table in [the contract language](#the-contract-language) works
 | `round()` and any function other than those listed | `Call to round() is not part of the verified subset: purity cannot be established.` |
 | method calls | `Method calls and instantiations are not part of the verified subset yet: side effects cannot be ruled out.` |
 | `new` on a class that is not a plain data class | `Cannot instantiate Percentage: its constructor contains logic, which is not verified.` |
-| `$this` | `Object state ($this) is not part of the verified subset yet.` |
+| `$this` in a class that is not an enum or a readonly data class | `Object state ($this) is only part of the verified subset in enums and readonly data classes.`, followed by the reason, such as `Property Counter::$count must be public and readonly` |
+| a method call on `$this` | `Method calls and instantiations are not part of the verified subset yet: side effects cannot be ruled out.` |
+| `static::LIMIT` on a class that is not final, for a constant that is not final | `static::LIMIT is late bound: a subclass of CartLimits can override the constant. Use self::LIMIT, or make the class or the constant final.` |
+| `static::` for anything else on a class that is not final, such as `new static()` | `static:: is late bound and CartLimits is not final, so a subclass can change what it refers to; use self:: or make the class final.` |
+| `parent::` | `parent:: is not supported; write the name of the parent class.` |
+| a constant holding an array, or a value that PHPStan cannot fold | `Constant Rules::CODES has type array<int, int>; only constants holding a single int, float, string, bool or enum case are supported.` |
+| a private or protected constant that the class under verification cannot read | `Constant Foo::SECRET is not accessible here.` |
+| `Foo::class` | `Class name constants (::class) are not part of the verified subset.` |
 | `$$name`, `$f()` | `Variable variables ($$name) are forbidden in verified methods.` and `Dynamic function calls are forbidden in verified methods.` |
 | `$obj->$prop` | `Dynamic property access ($obj->$prop) is forbidden in verified methods.` |
 | arrays | `Arrays are not supported yet.` |
@@ -133,7 +145,57 @@ Everything in the table in [the contract language](#the-contract-language) works
 
 `min()` and `max()` take exactly two `int` arguments. `match` needs at least one arm, and without a `default` arm it must be exhaustive (see below).
 
-Instance methods are fine as long as they never touch `$this`. A method that reads `$this->state` is rejected.
+Instance methods of any class are fine as long as they never touch `$this`. In an enum or a readonly data class, `$this` is supported, see below. A method that reads `$this->state` on a class with mutable state is rejected.
+
+### Class constants, `self` and `$this`
+
+These need no new reasoning from the solver, only name resolution, and they are what most enum and value-object code is written with.
+
+**`self::` and `static::`** resolve to the class that declares the method, in the body and in contracts: `return self::Immediate;` in an enum, `self::tryFrom($code)`, `new self(...)` in a data class. `static::` is late bound, so it only means that class when no subclass can change it: always in an enum, and in a class declared `final`. A `@final` PHPDoc tag does not count, because it does not stop a subclass at runtime. `parent::` is rejected.
+
+**A class constant** is inlined as a literal when PHPStan folds its value to a single int, float, string, bool or enum case. That includes constants computed from other constants, such as `const SIZE = self::RANGE_END - self::OFFSET;`. The value comes from the constant's initializer, and a `float` constant written as an int literal holds the float, as in PHP:
+
+```php
+public const int OFFSET = 98_000_000;
+
+public const int RANGE_END = 99_000_000;
+```
+
+```php
+#[Ensures('implies($result !== null, $result >= 98000000 && $result < 99000000)')]
+#[Ensures('implies($result !== null, $result >= self::OFFSET && $result < ErpCode::RANGE_END)')]
+public static function tryFrom(int $webId): ?int
+{
+    return $webId >= 0 && $webId < self::RANGE_END - self::OFFSET
+        ? self::OFFSET + $webId
+        : null;
+}
+```
+
+The off-by-one version is refuted at the last id:
+
+```
+ErpCode.php:34: Postcondition #[Ensures('implies($result !== null, $result < self::RANGE_END)')] can be violated.
+Counterexample: $webId = 1000000 => $result = 99000000 (return at line 37).
+```
+
+`self::X` and `ClassName::X` are statically bound, so they are always accepted. `static::X` is accepted when the class is final or the constant is declared `final`. Otherwise a subclass can override the constant, and the access is rejected:
+
+```php
+/** Rejected: `static::` is late bound and MAX_ITEMS can be overridden. */
+#[Ensures('$result <= 50')]
+public static function itemsLateBound(int $items): int
+{
+    return min($items, static::MAX_ITEMS);
+}
+```
+
+```
+CartLimits.php:22: static::MAX_ITEMS is late bound: a subclass of PhpstanContracts\Examples\CartLimits can override the constant.
+Use self::MAX_ITEMS, or make the class or the constant final.
+```
+
+**`$this` in an enum** is one of the cases. An enum instance method is a function of an implicit parameter of the enum type, so `$this === self::InStock`, `match ($this)` with its exhaustiveness check, `$this->value` and `$this->name` all work. **`$this` in a readonly data class** is a record of its properties, read with `$this->onHand`, under the same conditions as a parameter of that class (see [Readonly data classes](types.md#readonly-data-classes)). In both cases `$this` is printed first in a counterexample, like a parameter. A call to another method on `$this`, such as `$this->isFinal()`, is still a method call and is rejected.
 
 ## What is checked automatically
 
@@ -179,7 +241,7 @@ can be violated. Counterexample: $totalItems = 100000000, $perPage = 1 => $resul
 ```
 
 - The error is reported on the line of the attribute that failed.
-- The values before `=>` are the parameters on entry. These are real inputs: you can paste them into a test.
+- The values before `=>` are the parameters on entry. These are real inputs: you can paste them into a test. In an enum or data class method, `$this` comes first: `$this = StockStatus::TemporarilyUnavailable`.
 - The value after `=>` is what the method returns for them, and `(return at line N)` is the `return` statement taken.
 - Z3 tends to pick values at the edge of the declared ranges, which is usually where the bug is.
 - Safety diagnostics (overflow, division by zero, unhandled match, missing return) show the inputs only, since the method does not return normally.

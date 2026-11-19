@@ -155,6 +155,12 @@ A readonly data class is a datatype with one constructor whose arguments are the
 
 A class whose constructor contains logic cannot be built in a verified method, because the logic could throw and the translation would not see it. The class can still be received as a parameter: an instance only exists if its constructor accepted it, so nothing more than the property types is assumed.
 
+## Constants, `self` and `$this`
+
+None of these adds a theory. `self::` and `static::` are resolved to the declaring class before translation, `static::` only where late binding cannot change the target. A class constant is read from PHPStan's reflection: its initializer is folded to a type, and a type with a single int, float, string, bool or enum case value becomes that literal in the script. No symbol is declared for it.
+
+In an instance method of an enum or of a readonly data class, `$this` is declared as one more input, before the parameters, with the sort of the class and the domain of a parameter of that type. It is declared only when the method or its contracts use it, so other instance methods are encoded exactly as before. Its value cannot change during the call, which is why the contracts and the body read the same constant.
+
 ## The return type is a goal
 
 After the body and the postconditions, one more check asks whether the returned value can leave the domain of the declared return type (a PHPDoc range, or the range of a property of a returned object). It runs after the `#[Ensures]` checks and is never assumed by them, so a bad value is first reported through the contract that states why it is bad, then as a violation of the type.

@@ -1,6 +1,6 @@
 # Real-world examples
 
-Thirteen business rules of the kind found in shops, booking engines and APIs. Each one is real code in [`examples/RealWorld`](../examples/RealWorld), checked by `phpstan analyse` with this extension. Sections 1 to 8 use integers, booleans and enums. [Section 9](#9-the-same-rules-over-richer-types) covers data classes, strings, floats and nullable values, which the [types page](types.md) shows in detail. The code blocks below are copied from those files with the prose descriptions of the docblocks left out, and the outputs are the actual diagnostics, shown with `--error-format=raw` and shortened paths.
+Seventeen business rules of the kind found in shops, booking engines and APIs. Each one is real code in [`examples/RealWorld`](../examples/RealWorld), checked by `phpstan analyse` with this extension. Sections 1 to 8 use integers, booleans and enums. [Section 9](#9-the-same-rules-over-richer-types) covers data classes, strings, floats, nullable values, enum methods and class constants, which the [types page](types.md) shows in detail. The code blocks below are copied from those files with the prose descriptions of the docblocks left out, and the outputs are the actual diagnostics, shown with `--error-format=raw` and shortened paths.
 
 Each section follows the same arc: the rule, the contract that states it, what the prover established, and a plausible bug it caught.
 
@@ -16,7 +16,7 @@ Each section follows the same arc: the rule, the contract that states it, what t
 | 6 | Shipping fee | 2 | 1 proven, 1 refuted |
 | 7 | Rate limiting | 3 | 2 proven, 1 refuted (two ways) |
 | 8 | Calendar | 3 | 2 proven, 1 refuted |
-| 9 | Richer types: data classes, strings, floats, nullables, enum parsing | 28 | 16 proven, 12 refuted |
+| 9 | Richer types: data classes, strings, floats, nullables, enum parsing, enum methods, class constants | 37 | 21 proven, 16 refuted |
 
 ## 1. Pagination
 
@@ -559,7 +559,7 @@ public static function daysInMonth(int $year, int $month): int
 
 ## 9. The same rules over richer types
 
-Real signatures are rarely just integers. The rules below use the types that sections 1 to 8 did not: readonly data classes, strings, floats, nullable values and string-backed enums. Each row is a file of `examples/RealWorld`, and the [types page](types.md) shows the code and the diagnostics of every one.
+Real signatures are rarely just integers. The rules below use the types that sections 1 to 8 did not: readonly data classes, strings, floats, nullable values and string-backed enums, and the way enums and value objects are usually written, with `self::`, class constants and `$this`. Each row is a file of `examples/RealWorld`, and the [types page](types.md) shows the code and the diagnostics of every one.
 
 | Rule | File | What it exercises | Methods | Result | The bug the prover found |
 |---|---|---|---|---|---|
@@ -568,6 +568,10 @@ Real signatures are rarely just integers. The rules below use the types that sec
 | [File uploads and storage keys](types.md#real-string-bugs) | `Uploads.php` | strings | 7 | 4 proven, 3 refuted | `str_contains()` accepts `shell.png.php`; a hidden file named `.jpg`; a key that starts with `/` |
 | [Optional values](types.md#real-nullable-bugs) | `Nullables.php` | nullable ints, `??`, null checks | 4 | 3 proven, 1 refuted | a clamp forgotten on the value that was given |
 | [Floating point](types.md#real-floating-point-bugs) | `Floats.php` | `float` | 8 | 3 proven, 5 refuted | a midpoint that overflows, `floor(19.99 * 100)` is 1998, `NAN`, a regrouped sum |
+| [Stock availability](types.md#enum-methods-and-this) | `StockAvailability.php` | an enum returning `self::` cases | 2 | 1 proven, 1 refuted | `>=` offers a product with no stock |
+| [Purchasable stock statuses](types.md#enum-methods-and-this) | `StockStatus.php` | `match ($this)`, `$this->value` | 3 | 2 proven, 1 refuted | a temporary shortage still for sale |
+| [Stock left to sell](types.md#readonly-data-classes) | `StockLine.php` | `$this` in a data class | 2 | 1 proven, 1 refuted | over-reservation makes the stock negative |
+| [A code range reserved in the ERP](writing-contracts.md#class-constants-self-and-this) | `ErpCode.php` | class constants, `self::` | 2 | 1 proven, 1 refuted | the last id gets the first code outside the range |
 
 Two of them are worth reading first. The checkout shows a rule over an object graph, with a nullable object inside a cart, which is the shape of most real signatures. The float page shows bugs that no unit test with ordinary values finds, such as a regrouped sum that differs in the last bit.
 

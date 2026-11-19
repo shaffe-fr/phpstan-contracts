@@ -26,7 +26,7 @@ A unit test checks a handful of examples. A proof covers every input in the decl
 
 ## What it gives you
 
-- **Exhaustive checking** of rules over `int`, `float`, `bool`, `string`, enums, nullable values and readonly data classes, in methods that use `if`/`elseif`/`else`, `match`, early returns and local variables. `float` is modelled exactly as IEEE 754, so `0.1 + 0.2 === 0.3` is refuted like any other false statement.
+- **Exhaustive checking** of rules over `int`, `float`, `bool`, `string`, enums, nullable values and readonly data classes, in methods that use `if`/`elseif`/`else`, `match`, early returns, local variables, class constants and `self::`. In enums and readonly data classes, instance methods can read `$this`. `float` is modelled exactly as IEEE 754, so `0.1 + 0.2 === 0.3` is refuted like any other false statement.
 - **Automatic safety checks** on those methods: no integer overflow, no division by zero, no `UnhandledMatchError`, no `ValueError` from `Enum::from()`, no path without a `return`, and a returned value that its declared type allows.
 - **Concrete counterexamples** with the line of the contract, the values of every parameter, the returned value and the `return` statement that produced it.
 - **A contract that cannot be silently weakened** by a refactoring: the proof is redone on every PHPStan run, and a refactoring that breaks the rule fails the build.
@@ -56,7 +56,7 @@ composer install
 vendor/bin/phpstan analyse
 ```
 
-The repository's `phpstan.neon.dist` sets `contracts.timeoutMs` to 30000 so that the float examples have a wide margin on a slow machine. The run takes about a minute and a half with a cold cache, because the two methods of `SolverLimits.php` wait for the full 30 seconds and the float methods take several seconds each. It reports the diagnostics of the methods that are meant to fail: the `*Broken`, `*Naive` and `*Unbounded` methods and `SolverLimits` in [`examples/RealWorld`](../examples/RealWorld), the cases in `examples/Rejected.php` that show each kind of rejection, and one method in `examples/Pricing.php`. Every other annotated method in those files is proven. A few diagnostics come from PHPStan's own rules and not from this extension (`argument.type`, `return.missing` and `match.unhandled`), on the deliberately broken methods.
+The repository's `phpstan.neon.dist` sets `contracts.timeoutMs` to 30000 so that the float examples have a wide margin on a slow machine. The run takes about a minute and a half with a cold cache, because the two methods of `SolverLimits.php` wait for the full 30 seconds and the float methods take several seconds each. It reports the diagnostics of the methods that are meant to fail: the `*Broken`, `*Naive` and `*Unbounded` methods and `SolverLimits` in [`examples/RealWorld`](../examples/RealWorld), the cases in `examples/Rejected.php` that show each kind of rejection, the late-bound `static::` constant in `examples/CartLimits.php`, and one method in `examples/Pricing.php`. Every other annotated method in those files is proven. A few diagnostics come from PHPStan's own rules and not from this extension (`argument.type`, `return.missing` and `match.unhandled`), on the deliberately broken methods.
 
 Of the 53 methods of `examples/RealWorld` that reach the solver, 31 are proven, 20 are refuted with a counterexample and 2 are not decided.
 
