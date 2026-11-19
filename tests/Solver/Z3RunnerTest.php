@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace PhpstanContracts\Tests\Solver;
 
+use PhpstanContracts\Solver\ProofCache;
 use PhpstanContracts\Solver\SolverFailure;
 use PhpstanContracts\Solver\Verdict;
 use PhpstanContracts\Solver\Z3Runner;
@@ -82,6 +83,35 @@ final class Z3RunnerTest extends TestCase
         self::assertSame('"a""b"', $results[0]->values['s']);
         self::assertSame(['_', 'NaN', '11', '53'], $results[0]->values['f']);
         self::assertSame(['some', '4'], $results[0]->values['o']);
+    }
+
+    public function testASettledScriptIsAnsweredFromTheCacheTheSecondTime(): void
+    {
+        $directory = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'contracts-runner-cache-' . bin2hex(random_bytes(6));
+        $script = "(set-option :produce-models true)\n(declare-const x Int)\n(assert (> x 5))\n(echo \"@@0\")\n(check-sat)\n(get-value (x))\n";
+
+        try {
+            $cached = new Z3Runner($this->requireZ3(), 10000, new ProofCache($directory));
+            $first = $cached->run($script, 1);
+            self::assertNotSame([], glob($directory . DIRECTORY_SEPARATOR . '*.json'), 'the first run stores its answer');
+
+            self::assertSame(Verdict::Sat, $first[0]->verdict);
+
+            // Rewriting the entry shows that the second answer is read from it and does not come from Z3.
+            $files = glob($directory . DIRECTORY_SEPARATOR . '*.json');
+            self::assertIsArray($files);
+            file_put_contents($files[0], '{"format":1,"results":[{"verdict":"unsat","values":[]}]}');
+
+            $second = (new Z3Runner($this->requireZ3(), 10000, new ProofCache($directory)))->run($script, 1);
+            self::assertSame(Verdict::Unsat, $second[0]->verdict);
+        } finally {
+            foreach (glob($directory . DIRECTORY_SEPARATOR . '*') ?: [] as $file) {
+                unlink($file);
+            }
+            if (is_dir($directory)) {
+                rmdir($directory);
+            }
+        }
     }
 
     public function testWindowsLineEndingsInTheScriptAreHandled(): void

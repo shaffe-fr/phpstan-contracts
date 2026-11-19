@@ -69,7 +69,7 @@ Most business rules fit a core of amounts, counts, flags, statuses, short string
 These are directions in order of value for the effort, not commitments or dates.
 
 1. **Modular verification.** Check `#[Requires]` at every call site, and let a verified method call other verified methods using their contracts. This closes the largest gap above, and also lets a rule be split into smaller proven pieces.
-2. **A persistent Z3 process.** One long-lived process per PHPStan worker, reset between methods, to remove most of the process start-up cost that dominates a run for integer, string and data class methods (see [How it works](how-it-works.md#what-runs-where)). A cache of proofs keyed by script hash is the complement.
+2. **A persistent Z3 process.** One long-lived process per PHPStan worker, reset between methods, to remove most of the process start-up cost that dominates a run for integer, string and data class methods (see [How it works](how-it-works.md#what-runs-where)). The cache of proofs keyed by script hash, which is the complement, is done: see [Cost](getting-started.md#cost).
 3. **Lists and bounded loops**, first as `list<T>` with a length and unrolling with an explicit bound, then with `#[Invariant]`.
 4. **Methods of data classes**, through their own contracts, which follows from modular verification.
 5. **More string functions**, one at a time, each with its edge cases decided.

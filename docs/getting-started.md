@@ -119,18 +119,22 @@ parameters:
 	contracts:
 		z3Binary: z3
 		timeoutMs: 10000
+		cacheDirectory: %tmpDir%/contracts
 ```
 
 | Parameter | Default | Meaning |
 |---|---|---|
 | `z3Binary` | `z3` | Executable name, looked up in `PATH`, or an absolute path. At the default value, the build installed by `phpstan-contracts-install-z3` takes precedence over `PATH`. |
 | `timeoutMs` | `10000` | Time Z3 may spend on each individual check. When it runs out, the check is reported as `contracts.unknown`. |
+| `cacheDirectory` | `%tmpDir%/contracts` | Where the answers of Z3 are remembered between runs. `null` turns the cache off. See [Cost](#cost). |
 
 If the executable cannot be found, every checked method reports `contracts.solver` with the name that was looked up.
 
 ## Cost
 
-Each checked method starts one Z3 process. On the Windows machine used for this documentation that costs about 0.2 s per method with a cold PHPStan cache, of which translating the PHP is under 1 ms. PHPStan's result cache skips files that did not change, so a second run on unchanged code does not start Z3 again. A method that does floating-point arithmetic is slower, from about a second to several seconds, because the solver reasons about every bit of the numbers (see [what is slow](types.md#what-is-slow)).
+Each checked method starts one Z3 process. On the Windows machine used for this documentation that costs about 0.2 s per method with a cold PHPStan cache, of which translating the PHP is under 1 ms. PHPStan's result cache skips files that did not change, so a second run on unchanged code does not start Z3 again.
+
+When a file does change, the proof cache still saves the methods that did not: the answers of Z3 are stored in `cacheDirectory`, keyed by the exact script that was sent and by the Z3 build. A method whose script is identical is answered from disk, even in another file or after a PHPStan cache reset. Only settled answers (`sat` and `unsat`) are stored, never `unknown`, so raising `timeoutMs` always gives a hard method another chance. An entry that cannot be read back exactly is ignored. The cache lives in PHPStan's temporary directory and is trusted like it, so keep it out of reach of anyone who should not be able to turn a failing proof green. Entries are small files that are never deleted automatically: remove the directory to clean up. On the repository's `examples` (61 scripts, 30 s timeout), a run with both caches cold took 87 s. With only the proof cache warm it took 64 s, and the time that remains is the methods Z3 cannot decide, which are asked again every time. With both caches warm it took 1.4 s. A method that does floating-point arithmetic is slower, from about a second to several seconds, because the solver reasons about every bit of the numbers (see [what is slow](types.md#what-is-slow)).
 
 ## Silencing a diagnostic
 

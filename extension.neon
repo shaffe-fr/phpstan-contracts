@@ -2,11 +2,13 @@ parameters:
 	contracts:
 		z3Binary: z3
 		timeoutMs: 10000
+		cacheDirectory: %tmpDir%/contracts
 
 parametersSchema:
 	contracts: structure([
 		z3Binary: string()
 		timeoutMs: int()
+		cacheDirectory: schema(string(), nullable())
 	])
 
 services:
@@ -18,6 +20,10 @@ services:
 	- PhpstanContracts\Solver\ScriptRenderer
 	- PhpstanContracts\Report\ValueFormatter
 	- PhpstanContracts\Report\CounterexampleFormatter
+	-
+		class: PhpstanContracts\Solver\ProofCache
+		arguments:
+			directory: %contracts.cacheDirectory%
 	-
 		class: PhpstanContracts\Solver\Z3Runner
 		arguments:

@@ -22,6 +22,7 @@ final class Z3Runner
     public function __construct(
         private readonly string $binary = 'z3',
         int $timeoutMs = 10000,
+        private readonly ProofCache $cache = new ProofCache(null),
     ) {
         if ($timeoutMs < 1 || $timeoutMs > self::MAXIMUM_TIMEOUT_MS) {
             throw new InvalidArgumentException(sprintf('The solver timeout must be between 1 and %d milliseconds, %d given.', self::MAXIMUM_TIMEOUT_MS, $timeoutMs));
@@ -39,7 +40,18 @@ final class Z3Runner
             throw new InvalidArgumentException(sprintf('A script holds between 1 and %d checks, %d given.', self::MAXIMUM_CHECKS, $checkCount));
         }
 
-        $process = new Process([$this->locate(), '-in', '-smt2', '-t:' . $this->timeoutMs]);
+        $binary = $this->locate();
+
+        $key = null;
+        if ($this->cache->isEnabled()) {
+            $key = $this->cache->key($binary, $script);
+            $cached = $this->cache->get($key, $checkCount);
+            if ($cached !== null) {
+                return $cached;
+            }
+        }
+
+        $process = new Process([$binary, '-in', '-smt2', '-t:' . $this->timeoutMs]);
         $process->setInput($script);
         $process->setTimeout(TimeLimits::processSeconds($this->timeoutMs, $checkCount));
 
@@ -49,7 +61,13 @@ final class Z3Runner
             throw new SolverFailure('Z3 exceeded its overall time limit.');
         }
 
-        return $this->parse($process->getOutput(), $checkCount);
+        $results = $this->parse($process->getOutput(), $checkCount);
+
+        if ($key !== null) {
+            $this->cache->put($key, $results);
+        }
+
+        return $results;
     }
 
     private function locate(): string

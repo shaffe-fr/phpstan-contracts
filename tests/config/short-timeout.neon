@@ -1,3 +1,4 @@
 parameters:
 	contracts:
 		timeoutMs: 2000
+		cacheDirectory: null
