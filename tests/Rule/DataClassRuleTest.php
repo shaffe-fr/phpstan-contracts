@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace PhpstanContracts\Tests\Rule;
 
 use PhpstanContracts\Tests\Fixtures\DataClassFixture;
+use PhpstanContracts\Tests\Fixtures\Interval;
 use PhpstanContracts\Tests\Support\RuleFixtureTestCase;
 
 final class DataClassRuleTest extends RuleFixtureTestCase
@@ -40,6 +41,22 @@ final class DataClassRuleTest extends RuleFixtureTestCase
                 'methodCallOnAnObject' => ['contracts.unsupported: Method calls'],
                 'nullableObjectWithoutACheck' => ['contracts.unsupported: may be null here'],
                 'everyConstructorArgumentIsRequired' => ['contracts.unsupported: Every constructor argument of Point must be passed explicitly'],
+            ],
+        ]);
+    }
+
+    public function testThisInADataClass(): void
+    {
+        $this->assertOutcomes([
+            Interval::class => [
+                'length' => [],
+                'contains' => [],
+                'stepOrOne' => [],
+                'withEnd' => [],
+
+                'lengthBroken' => ['contracts.ensuresViolated: Counterexample: $this = Interval(start: '],
+
+                'methodCallOnThis' => ['contracts.unsupported: Method calls'],
             ],
         ]);
     }

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace PhpstanContracts\Tests\Rule;
 
 use PhpstanContracts\Tests\Fixtures\EnumFixture;
+use PhpstanContracts\Tests\Fixtures\Stock;
 use PhpstanContracts\Tests\Support\RuleFixtureTestCase;
 
 final class EnumRuleTest extends RuleFixtureTestCase
@@ -31,6 +32,29 @@ final class EnumRuleTest extends RuleFixtureTestCase
                 'valueOfAPureEnumDoesNotExist' => ['contracts.unsupported: not a backed enum'],
                 'casesIsNotSupported' => ['contracts.unsupported: Call to count()'],
                 'tryFromNeedsTheBackingType' => ['contracts.unsupported: Code::tryFrom() expects a string'],
+            ],
+        ]);
+    }
+
+    public function testSelfAndThisInsideAnEnum(): void
+    {
+        $this->assertOutcomes([
+            Stock::class => [
+                'fromQuantity' => [],
+                'staticIsTheEnumItself' => [],
+                'tryFromThroughSelf' => [],
+                'constantHoldingACase' => [],
+                'isPurchasable' => [],
+                'identityOfThis' => [],
+                'valueOfThis' => [],
+                'nameOfThis' => [],
+                'thisInAPreconditionOnly' => [],
+
+                'isPurchasableBroken' => ['contracts.ensuresViolated: Counterexample: $this = Stock::TemporarilyUnavailable => $result = true'],
+                'partialMatchOnThis' => ['contracts.unhandledMatch: Counterexample: $this = Stock::TemporarilyUnavailable.'],
+
+                'methodCallOnThis' => ['contracts.unsupported: Method calls'],
+                'noThisInAStaticMethod' => ['contracts.unsupported: There is no $this in a static method.'],
             ],
         ]);
     }

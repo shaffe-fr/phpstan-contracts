@@ -155,7 +155,8 @@ abstract class RuleFixtureTestCase extends RuleTestCase
     {
         $names = [];
         foreach ((new ReflectionClass($class))->getMethods() as $method) {
-            if ($method->getDeclaringClass()->getName() === $class && !$method->isConstructor()) {
+            // An enum also declares cases(), from() and tryFrom(), which PHP provides.
+            if ($method->getDeclaringClass()->getName() === $class && !$method->isConstructor() && $method->isUserDefined()) {
                 $names[] = $method->getName();
             }
         }
@@ -178,7 +179,7 @@ abstract class RuleFixtureTestCase extends RuleTestCase
                 continue;
             }
             foreach ($reflection->getMethods() as $method) {
-                if ($method->getDeclaringClass()->getName() === $class) {
+                if ($method->getDeclaringClass()->getName() === $class && $method->isUserDefined()) {
                     $candidates[] = [$class, $method->getName(), (int) $method->getEndLine()];
                 }
             }

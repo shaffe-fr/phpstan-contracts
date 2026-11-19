@@ -4,11 +4,13 @@ declare(strict_types=1);
 
 namespace PhpstanContracts\Tests\Examples;
 
+use PhpstanContracts\Examples\CartLimits;
 use PhpstanContracts\Examples\Pricing;
 use PhpstanContracts\Examples\RealWorld\Calendar;
 use PhpstanContracts\Examples\RealWorld\CancellationPolicy;
 use PhpstanContracts\Examples\RealWorld\Checkout;
 use PhpstanContracts\Examples\RealWorld\CurrencyParser;
+use PhpstanContracts\Examples\RealWorld\ErpCode;
 use PhpstanContracts\Examples\RealWorld\Floats;
 use PhpstanContracts\Examples\RealWorld\Invoice;
 use PhpstanContracts\Examples\RealWorld\Nullables;
@@ -16,6 +18,9 @@ use PhpstanContracts\Examples\RealWorld\OrderWorkflow;
 use PhpstanContracts\Examples\RealWorld\Pagination;
 use PhpstanContracts\Examples\RealWorld\RateLimit;
 use PhpstanContracts\Examples\RealWorld\Shipping;
+use PhpstanContracts\Examples\RealWorld\StockAvailability;
+use PhpstanContracts\Examples\RealWorld\StockLine;
+use PhpstanContracts\Examples\RealWorld\StockStatus;
 use PhpstanContracts\Examples\RealWorld\Uploads;
 use PhpstanContracts\Examples\Rejected;
 use PhpstanContracts\Tests\Support\RuleFixtureTestCase;
@@ -23,7 +28,8 @@ use PhpstanContracts\Tests\Support\RuleFixtureTestCase;
 /**
  * The examples are what the documentation shows, so what the prover says about
  * each of them is part of the contract of this package. A `*Broken`, `*Naive` or
- * `*Unbounded` method is expected to be refuted, every other one to be proven.
+ * `*Unbounded` method is expected to be refuted, every other one to be proven,
+ * except in `Rejected` and `CartLimits`, which show what is rejected.
  *
  * `SolverLimits` is covered by its own test, with a short timeout.
  */
@@ -105,6 +111,23 @@ final class ExamplesTest extends RuleFixtureTestCase
                 'shippingCents' => [],
                 'shippingCentsBroken' => ['contracts.ensuresViolated'],
             ],
+            StockAvailability::class => [
+                'resolve' => [],
+                'resolveBroken' => ['contracts.ensuresViolated: Counterexample: $stockQuantity = 0 => $result = StockAvailability::Immediate'],
+            ],
+            ErpCode::class => [
+                'tryFrom' => [],
+                'tryFromBroken' => ['contracts.ensuresViolated: Counterexample: $webId = 1000000 => $result = 99000000'],
+            ],
+            StockStatus::class => [
+                'isPurchasable' => [],
+                'isPurchasableBroken' => ['contracts.ensuresViolated: Counterexample: $this = StockStatus::TemporarilyUnavailable => $result = true'],
+                'erpCode' => [],
+            ],
+            StockLine::class => [
+                'available' => [],
+                'availableBroken' => ['contracts.ensuresViolated: Counterexample: $this = StockLine('],
+            ],
             Uploads::class => [
                 'isAllowedImage' => [],
                 'isAllowedImageNaive' => ['contracts.ensuresViolated'],
@@ -129,6 +152,11 @@ final class ExamplesTest extends RuleFixtureTestCase
                 'mutableObject' => ['contracts.unsupported: must be public and readonly'],
                 'dynamic' => ['contracts.unsupported: Type object is not supported'],
                 'brokenContract' => ['contracts.invalidContract: is not valid PHP'],
+            ],
+            CartLimits::class => [
+                'itemsLateBound' => ['contracts.unsupported: static::MAX_ITEMS is late bound'],
+                'items' => [],
+                'quantity' => [],
             ],
         ]);
     }
