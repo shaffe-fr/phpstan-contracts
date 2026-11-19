@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace PhpstanContracts\Translate;
 
 use PhpstanContracts\Exception\VerificationRejected;
+use PhpstanContracts\Smt\EnumSort;
 use PhpstanContracts\Smt\Smt;
 use PhpstanContracts\Smt\Sort;
 use PhpstanContracts\Smt\SortKind;
@@ -33,6 +34,13 @@ use PhpParser\Node\Scalar\Float_;
 use PhpParser\Node\Scalar\Int_;
 use PhpParser\Node\Scalar\String_;
 use PhpParser\PrettyPrinter\Standard;
+use PHPStan\Reflection\ClassReflection;
+use PHPStan\Reflection\InitializerExprContext;
+use PHPStan\Reflection\InitializerExprTypeResolver;
+use PHPStan\Reflection\ReflectionProvider;
+use PHPStan\Type\FloatType;
+use PHPStan\Type\IntegerType;
+use PHPStan\Type\VerbosityLevel;
 
 /**
  * Whitelist translation of PHP expressions to SMT terms. Anything not handled
@@ -66,8 +74,11 @@ final class ExpressionTranslator
         private readonly TypeMapper $types,
         private readonly EnumRegistry $enums,
         private readonly ClassNameResolver $classes,
+        private readonly ReflectionProvider $reflection,
+        private readonly InitializerExprTypeResolver $initializers,
         private readonly bool $isContract,
         private readonly ?int $fixedLine = null,
+        private readonly string $thisRefusal = 'Object state ($this) is not part of the verified subset yet.',
     ) {
         $this->printer = new Standard();
     }
@@ -89,7 +100,7 @@ final class ExpressionTranslator
             $expr instanceof Ternary => $this->ternary($expr, $env, $pc),
             $expr instanceof Match_ => $this->match($expr, $env, $pc),
             $expr instanceof FuncCall => $this->functionCall($expr, $env, $pc),
-            $expr instanceof ClassConstFetch => $this->enumCase($expr),
+            $expr instanceof ClassConstFetch => $this->classConstant($expr),
             $expr instanceof StaticCall => $this->staticCall($expr, $env, $pc),
             $expr instanceof PropertyFetch => $this->propertyFetch($expr, $env, $pc),
             $expr instanceof NullsafePropertyFetch => $this->nullsafePropertyFetch($expr, $env, $pc),
@@ -218,7 +229,8 @@ final class ExpressionTranslator
             throw $this->reject($expr, 'Variable variables ($$name) are forbidden in verified methods.');
         }
         if ($expr->name === 'this') {
-            throw $this->reject($expr, 'Object state ($this) is not part of the verified subset yet.');
+            // Present only in a method of an enum or a readonly data class, see MethodEncoder.
+            return $env['this'] ?? throw $this->reject($expr, $this->thisRefusal);
         }
 
         return $env[$expr->name]
@@ -737,25 +749,126 @@ final class ExpressionTranslator
         return Smt::not(Smt::any(Smt::fpIs('fp.isNaN', $float), Smt::fpIs('fp.isInfinite', $float)));
     }
 
-    private function enumCase(ClassConstFetch $expr): Term
+    /**
+     * An enum case, or a class constant whose value PHPStan folds to one scalar or
+     * one enum case, which is then inlined as a literal.
+     */
+    private function classConstant(ClassConstFetch $expr): Term
     {
         if (!$expr->class instanceof Name || !$expr->name instanceof Identifier) {
             throw $this->reject($expr, 'Dynamic class constant access is forbidden in verified methods.');
         }
 
-        $className = $this->classes->resolve($expr->class, $this->lineOf($expr));
-        $enum = $this->enums->find($className)
-            ?? throw $this->reject($expr, sprintf('%s is not an enum; only enum cases are supported as class constants.', $className));
-
-        $case = $expr->name->toString();
-        if (!array_key_exists($case, $enum->cases)) {
-            throw $this->reject($expr, sprintf('Enum %s has no case %s.', $enum->shortName(), $case));
+        $name = $expr->name->toString();
+        if (strtolower($name) === 'class') {
+            throw $this->reject($expr, 'Class name constants (::class) are not part of the verified subset.');
         }
 
+        // Late static binding is checked below, per constant: a final constant is safe even on a non-final class.
+        $className = $this->classes->resolveStatically($expr->class, $this->lineOf($expr));
+        $enum = $this->enums->find($className);
+        if ($enum !== null && array_key_exists($name, $enum->cases)) {
+            return $this->enumCaseTerm($enum, $name);
+        }
+
+        if (!$this->reflection->hasClass($className)) {
+            throw $this->reject($expr, sprintf('Class %s cannot be resolved.', $className));
+        }
+        $class = $this->reflection->getClass($className);
+        if (!$class->hasConstant($name)) {
+            throw $this->reject($expr, $enum !== null
+                ? sprintf('Enum %s has no case %s.', $enum->shortName(), $name)
+                : sprintf('Class %s has no constant %s.', $class->getDisplayName(), $name));
+        }
+
+        $constant = $class->getConstant($name);
+        $label = sprintf('%s::%s', $class->getDisplayName(), $name);
+
+        if ($this->classes->isLateStatic($expr->class) && !$this->classes->declaringClassIsFinal() && !$constant->isFinalByKeyword()) {
+            throw $this->reject($expr, sprintf(
+                'static::%s is late bound: a subclass of %s can override the constant. Use self::%s, or make the class or the constant final.',
+                $name,
+                $class->getDisplayName(),
+                $name,
+            ));
+        }
+        if (!$this->canAccess($constant->getDeclaringClass(), $constant->isPrivate(), $constant->isPublic())) {
+            throw $this->reject($expr, sprintf('Constant %s is not accessible here.', $label));
+        }
+
+        // Not getValueType(): for a typed constant it is the declared type, which a subclass
+        // may narrow. The access is statically bound here, so the initializer is the value.
+        $type = $this->initializers->getType(
+            $constant->getValueExpr(),
+            InitializerExprContext::fromClassReflection($constant->getDeclaringClass()),
+        );
+        $nativeType = $constant->getNativeType();
+        if (
+            $nativeType !== null
+            && $type->isInteger()->yes()
+            && !$nativeType->isSuperTypeOf(new FloatType())->no()
+            && $nativeType->isSuperTypeOf(new IntegerType())->no()
+        ) {
+            // `const float RATE = 1;` (also `?float`, `float|string`) holds 1.0.
+            $type = $type->toFloat();
+        }
+
+        $cases = $type->getEnumCases();
+        if (count($cases) === 1 && $type->isObject()->yes()) {
+            $caseEnum = $this->enums->find($cases[0]->getClassName());
+            if ($caseEnum !== null && array_key_exists($cases[0]->getEnumCaseName(), $caseEnum->cases)) {
+                return $this->enumCaseTerm($caseEnum, $cases[0]->getEnumCaseName());
+            }
+        }
+
+        $values = $type->getConstantScalarValues();
+        if (count($values) === 1) {
+            $value = $values[0];
+
+            return match (true) {
+                is_int($value) => Smt::int($value),
+                is_float($value) => Smt::floatLiteral($value),
+                is_string($value) => Smt::stringLiteral($value),
+                is_bool($value) => Smt::bool($value),
+                default => Smt::nullLiteral(),
+            };
+        }
+
+        throw $this->reject($expr, sprintf(
+            'Constant %s has type %s; only constants holding a single int, float, string, bool or enum case are supported.',
+            $label,
+            $type->describe(VerbosityLevel::typeOnly()),
+        ));
+    }
+
+    private function enumCaseTerm(EnumSort $enum, string $case): Term
+    {
         $sort = Sort::enum($enum);
         $this->encoding->registerSort($sort);
 
         return Smt::symbol($enum->constructorOf($case), $sort);
+    }
+
+    /**
+     * PHPStan reports an inaccessible constant too, but a proof must not rest on code that throws.
+     */
+    private function canAccess(ClassReflection $owner, bool $isPrivate, bool $isPublic): bool
+    {
+        if ($isPublic) {
+            return true;
+        }
+
+        $here = $this->classes->declaringClass();
+        if ($here === null) {
+            return false;
+        }
+        if ($isPrivate) {
+            return $here->getName() === $owner->getName();
+        }
+
+        return $here->getName() === $owner->getName()
+            || $here->isSubclassOfClass($owner)
+            || $owner->isSubclassOfClass($here);
     }
 
     /**

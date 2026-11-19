@@ -10,9 +10,13 @@ use PhpstanContracts\Smt\Smt;
 use PhpstanContracts\Smt\Sort;
 use PhpstanContracts\Smt\SortKind;
 use PhpstanContracts\Smt\Term;
+use PhpParser\Node;
 use PhpParser\Node\Expr\Variable;
+use PhpParser\Node\Stmt\ClassMethod;
+use PhpParser\NodeFinder;
 use PHPStan\Analyser\Scope;
 use PHPStan\Node\InClassMethodNode;
+use PHPStan\Reflection\InitializerExprTypeResolver;
 use PHPStan\Reflection\ReflectionProvider;
 
 /**
@@ -27,6 +31,7 @@ final class MethodEncoder
         private readonly TypeMapper $types,
         private readonly DomainBuilder $domains,
         private readonly ReflectionProvider $reflectionProvider,
+        private readonly InitializerExprTypeResolver $initializers,
     ) {
     }
 
@@ -39,6 +44,33 @@ final class MethodEncoder
         $entry = [];
         /** @var array<string, string> $signatureClasses */
         $signatureClasses = [];
+
+        $declaringClass = $scope->getClassReflection();
+        $thisRefusal = $method->isStatic()
+            ? 'There is no $this in a static method.'
+            : 'Object state ($this) is not part of the verified subset yet.';
+
+        // An enum case or a readonly data object has no mutable state, so `$this` is an
+        // implicit first parameter. It is declared only when used, so that the
+        // counterexamples of other instance methods stay as they are.
+        if (!$method->isStatic() && $declaringClass !== null && $this->usesThis($method, $contract)) {
+            try {
+                $thisSpec = $this->types->mapClass($declaringClass->getName(), $method->getStartLine());
+            } catch (VerificationRejected $notData) {
+                $thisSpec = null;
+                $thisRefusal = sprintf(
+                    'Object state ($this) is only part of the verified subset in enums and readonly data classes. %s',
+                    $notData->getMessage(),
+                );
+            }
+
+            if ($thisSpec !== null) {
+                $term = $encoding->declareInput('this', $thisSpec->sort);
+                $encoding->assert($this->domains->constraint($thisSpec, $term, true));
+                $this->collectClasses($thisSpec->sort, $signatureClasses);
+                $entry['this'] = $term;
+            }
+        }
 
         foreach ($method->params as $param) {
             if (!$param->var instanceof Variable || !is_string($param->var->name)) {
@@ -67,20 +99,20 @@ final class MethodEncoder
         $this->collectClasses($resultSpec->sort, $signatureClasses);
         $result = $encoding->declareResult($resultSpec->sort);
 
-        $classes = new ClassNameResolver($this->reflectionProvider, $scope->getNamespace(), $signatureClasses);
+        $classes = new ClassNameResolver($this->reflectionProvider, $scope->getNamespace(), $signatureClasses, $declaringClass);
 
         // A precondition that checks for null tells the clauses after it, the body and the
         // postconditions that the value is not null, just like an `if` would.
         $view = $entry;
         foreach ($contract->requires as $clause) {
-            $contractExpressions = $this->translator($encoding, $classes, true, $clause->line);
+            $contractExpressions = $this->translator($encoding, $classes, true, $clause->line, $thisRefusal);
             $encoding->assert($contractExpressions->translateBoolean($clause->expression, $view, Smt::bool(true)));
             $view = $contractExpressions->narrow($clause->expression, true, $view);
         }
 
         $encoding->endAssumptions();
 
-        $statements = new StatementTranslator($this->translator($encoding, $classes, false, null), $encoding, $resultSpec->sort);
+        $statements = new StatementTranslator($this->translator($encoding, $classes, false, null, $thisRefusal), $encoding, $resultSpec->sort);
         $final = $statements->execute($method->stmts ?? [], (new State($entry, Smt::bool(true)))->withView($view));
 
         if (!$final->reached->isFalse()) {
@@ -107,7 +139,7 @@ final class MethodEncoder
 
         $postconditionEnv = [...$view, 'result' => $result];
         foreach ($contract->ensures as $clause) {
-            $contractExpressions = $this->translator($encoding, $classes, true, $clause->line);
+            $contractExpressions = $this->translator($encoding, $classes, true, $clause->line, $thisRefusal);
             $encoding->ensures[] = new EnsuresCheck(
                 $clause->source,
                 $clause->line,
@@ -118,9 +150,22 @@ final class MethodEncoder
         return $encoding;
     }
 
-    private function translator(Encoding $encoding, ClassNameResolver $classes, bool $isContract, ?int $line): ExpressionTranslator
+    private function translator(Encoding $encoding, ClassNameResolver $classes, bool $isContract, ?int $line, string $thisRefusal): ExpressionTranslator
     {
-        return new ExpressionTranslator($encoding, $this->types, $this->enums, $classes, $isContract, $line);
+        return new ExpressionTranslator($encoding, $this->types, $this->enums, $classes, $this->reflectionProvider, $this->initializers, $isContract, $line, $thisRefusal);
+    }
+
+    private function usesThis(ClassMethod $method, MethodContract $contract): bool
+    {
+        $nodes = $method->stmts ?? [];
+        foreach ([...$contract->requires, ...$contract->ensures] as $clause) {
+            $nodes[] = $clause->expression;
+        }
+
+        return (new NodeFinder())->findFirst(
+            $nodes,
+            static fn (Node $node): bool => $node instanceof Variable && $node->name === 'this',
+        ) !== null;
     }
 
     /**
