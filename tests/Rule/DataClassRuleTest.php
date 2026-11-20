@@ -6,6 +6,7 @@ namespace PhpstanContracts\Tests\Rule;
 
 use PhpstanContracts\Tests\Fixtures\DataClassFixture;
 use PhpstanContracts\Tests\Fixtures\Interval;
+use PhpstanContracts\Tests\Fixtures\PriceContext;
 use PhpstanContracts\Tests\Support\RuleFixtureTestCase;
 
 final class DataClassRuleTest extends RuleFixtureTestCase
@@ -41,6 +42,17 @@ final class DataClassRuleTest extends RuleFixtureTestCase
                 'methodCallOnAnObject' => ['contracts.unsupported: Method calls'],
                 'nullableObjectWithoutACheck' => ['contracts.unsupported: may be null here'],
                 'everyConstructorArgumentIsRequired' => ['contracts.unsupported: Every constructor argument of Point must be passed explicitly'],
+
+                'inheritedStateThatIsNeverRead' => [],
+                'buildsAnObjectWithInheritedState' => [],
+                'readsTheModelledPartOfAnObject' => [],
+                'readsAMutableProperty' => ['contracts.unsupported: Property PhpstanContracts\Tests\Fixtures\PartlyMutable::$count must be public and readonly'],
+                'readsAPropertyOfAnUnsupportedType' => ['contracts.unsupported: Property PhpstanContracts\Tests\Fixtures\PartlyMutable::$tags cannot be read in a verified method: Type list<string> is not supported'],
+                'buildsAnObjectWithAnUnmodelledProperty' => ['contracts.unsupported: Cannot instantiate PartlyMutable: its constructor sets $tags, which is not modelled'],
+            ],
+            PriceContext::class => [
+                'isBulk' => [],
+                'readsInheritedState' => ['contracts.unsupported: Property PhpstanContracts\Tests\Fixtures\PriceContext::$_additional must be public and readonly'],
             ],
         ]);
     }

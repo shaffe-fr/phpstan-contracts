@@ -174,4 +174,41 @@ final class DataClassFixture
     {
         return new Point(1);
     }
+
+    #[Ensures('$result === ($context->quantity > 0)')]
+    public static function inheritedStateThatIsNeverRead(PriceContext $context): bool
+    {
+        return $context->quantity > 0;
+    }
+
+    /** @param int<0, 1000> $quantity */
+    #[Ensures('$result->quantity === $quantity && $result->customerId === null')]
+    public static function buildsAnObjectWithInheritedState(int $quantity): PriceContext
+    {
+        return new PriceContext($quantity, null);
+    }
+
+    #[Ensures('$result === $object->limit')]
+    public static function readsTheModelledPartOfAnObject(PartlyMutable $object): int
+    {
+        return $object->limit;
+    }
+
+    #[Pure]
+    public static function readsAMutableProperty(PartlyMutable $object): int
+    {
+        return $object->count;
+    }
+
+    #[Pure]
+    public static function readsAPropertyOfAnUnsupportedType(PartlyMutable $object): bool
+    {
+        return $object->tags === [];
+    }
+
+    #[Pure]
+    public static function buildsAnObjectWithAnUnmodelledProperty(): PartlyMutable
+    {
+        return new PartlyMutable(1, []);
+    }
 }
