@@ -23,7 +23,7 @@ final class StatementRuleTest extends RuleFixtureTestCase
                 'doWhileLoop' => ['contracts.unsupported: Loops are not supported'],
                 'switchStatement' => ['contracts.unsupported: switch is not supported; use match'],
                 'tryCatch' => ['contracts.unsupported: try/catch is not supported'],
-                'throwStatement' => ['contracts.unsupported: throw is not supported yet'],
+                'throwStatement' => ['contracts.unexpectedThrow: `throw new \\InvalidArgumentException(\'negative\')` can be reached where no #[Throws] allows it. Counterexample: $n = -'],
                 'increment' => ['contracts.unsupported: Increment and decrement are not supported'],
                 'echoStatement' => ['contracts.unsupported: Side effects and global or static state are forbidden'],
                 'bareReturn' => ['contracts.unsupported: A bare return is not supported'],

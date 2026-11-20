@@ -40,6 +40,21 @@ final class ContractReaderTest extends TestCase
         self::assertSame('$result >= 0', $contract->ensures[0]->source);
     }
 
+    public function testThrowsIsReadWithItsClassAndOptionalCondition(): void
+    {
+        $contract = $this->read(<<<'PHP'
+            #[\PhpstanContracts\Attribute\Throws(\InvalidArgumentException::class, when: '$a < 0')]
+            #[\PhpstanContracts\Attribute\Throws(class: \LogicException::class)]
+            PHP);
+
+        self::assertFalse($contract->isEmpty());
+        self::assertCount(2, $contract->throws);
+        self::assertSame('InvalidArgumentException', $contract->throws[0]->class);
+        self::assertSame('$a < 0', $contract->throws[0]->when?->source);
+        self::assertSame('LogicException', $contract->throws[1]->class);
+        self::assertNull($contract->throws[1]->when);
+    }
+
     public function testEachClauseKeepsTheLineOfItsAttribute(): void
     {
         $contract = $this->read(<<<'PHP'
@@ -87,6 +102,8 @@ final class ContractReaderTest extends TestCase
         yield 'a syntax error' => ['#[\\PhpstanContracts\\Attribute\\Ensures(\'$result >=\')]', 'is not valid PHP'];
         yield 'two statements' => ['#[\\PhpstanContracts\\Attribute\\Ensures(\'$a; $b\')]', 'exactly one PHP expression'];
         yield 'a statement that is not an expression' => ['#[\\PhpstanContracts\\Attribute\\Ensures(\'if ($a) {}\')]', 'exactly one PHP expression'];
+        yield 'a class given as a string' => ['#[\\PhpstanContracts\\Attribute\\Throws(\'LogicException\')]', 'Name::class'];
+        yield 'a condition that is not valid PHP' => ['#[\\PhpstanContracts\\Attribute\\Throws(\\LogicException::class, when: \'$a <\')]', 'is not valid PHP'];
     }
 
     #[DataProvider('invalidContracts')]
