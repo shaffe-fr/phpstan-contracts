@@ -76,7 +76,7 @@ Because those laws single out one quotient and one remainder, the proof shows th
 
 ### Why not more
 
-Of all the methods of `src/`, one has only scalar parameters and a scalar result: a private helper that tests for a space in a string. The package is a compiler. Its code builds strings, arrays and objects, which is what the verified subset leaves out: no arrays, no calls between verified methods, a handful of string functions, no bitwise operators. So most of the tests stay, for a reason that depends on what they check:
+Of all the methods of `src/`, one has only scalar parameters and a scalar result: a private helper that tests for a space in a string. The package is a compiler. Its code builds strings, arrays and objects, which is what the verified subset leaves out: no arrays, no calls to methods of other files, a handful of string functions, no bitwise operators. So most of the tests stay, for a reason that depends on what they check:
 
 | Tests | Could a contract replace them? |
 |---|---|
@@ -88,7 +88,7 @@ Of all the methods of `src/`, one has only scalar parameters and a scalar result
 
 The semantics tests have to stay because verifying the translator with the translator is circular. A contract is proven relative to the model of PHP that the translator embeds. If that model of floats were wrong, the package would "prove" things about itself on a wrong foundation and report nothing. The only independent reference is PHP's actual behaviour, which is why the tests compare the model with PHP bit for bit. The integer division is the exception, and only because four laws leave a single answer, so that the comparison with PHP shrinks to checking the laws.
 
-Two things would let more tests be replaced. Modular verification, the first item of the [roadmap](limits-and-roadmap.md#roadmap), would let a method be proven in terms of the contracts of the methods it calls. Bitwise operators, which are not on the roadmap, would allow proving that `Smt::floatLiteral` takes a float apart and `ValueFormatter` puts it back together without loss. Neither is a commitment.
+Two things would let more tests be replaced. Modular verification, the first item of the [roadmap](limits-and-roadmap.md#roadmap), would let a method be proven in terms of the contracts of the methods it calls in other files. Bitwise operators, which are not on the roadmap, would allow proving that `Smt::floatLiteral` takes a float apart and `ValueFormatter` puts it back together without loss. Neither is a commitment.
 
 ## The semantics tests
 

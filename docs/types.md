@@ -382,7 +382,9 @@ Pure enums and backed enums, with `int` or `string` backing values.
 | `$this` in an instance method | One of the cases: `===`, `!==`, `match ($this)`, `$this->value`, `$this->name`, and in contracts. |
 | `in_array($this, [self::Paid, self::Shipped])` | With or without `strict: true`: enum cases compare by identity either way. The list can be a constant, `in_array($this, self::FINAL_STATES)`. |
 
-Not supported: `cases()`, and calling another method on `$this` (`$this->isFinal()`), which is a method call.
+`$this->isFinal()` and `$other->level()` work when the method is declared in the same file: the call is translated with the body of the method, see [Calls to other methods](writing-contracts.md#calls-to-other-methods).
+
+Not supported: `cases()`.
 
 Parsing an untrusted value is the usual place for a bug. `from()` throws on anything unknown, and the prover shows the input that does it. `tryFrom()` with a default is proven, and the contract can state each case:
 
@@ -682,7 +684,9 @@ final readonly class Receipt
 | `new Receipt(0, $total, false)` | Positional or named arguments, all of them. Only for classes whose constructor does nothing but promote every modelled property. The properties left out of the model keep their default value. |
 | `$this->onHand` in a method of the class, `new self(...)` | `$this` is an implicit parameter of the class, with the same domain as any other. |
 
-Not supported: calling a method (including getters, and `$this->available()`), reading a property that is left out of the model, `$a === $b` and `$a == $b` between objects (identity is not modelled, compare the fields), writing to a property, and `instanceof`.
+A method of the class declared in the same file, such as `$this->available()` or a getter, can be called if the class is `final`, or the method `final` or `private`: see [Calls to other methods](writing-contracts.md#calls-to-other-methods).
+
+Not supported: calling a method declared in another file, reading a property that is left out of the model, `$a === $b` and `$a == $b` between objects (identity is not modelled, compare the fields), writing to a property, and `instanceof`.
 
 A data class can carry its own rules. `$this` is a record of its properties, read like a parameter:
 

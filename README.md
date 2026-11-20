@@ -192,10 +192,10 @@ The verified subset is small on purpose, so that the answer is a real proof and 
 - `int`, `bool`, `string` (as bytes), enums (pure and backed), nullable versions of all of these, and readonly data classes
 - `float`, modelled exactly as IEEE 754: the prover knows that `0.1 + 0.2 !== 0.3`, and that regrouping a sum changes the result
 - `if` / `elseif` / `else`, `match`, early `return`, local variables, null checks that narrow the type
-- enum and value-object code as it is usually written: `self::Case`, class constants, and `$this` in the methods of enums (`match ($this)`) and readonly data classes
+- enum and value-object code as it is usually written: `self::Case`, class constants, `$this` in the methods of enums (`match ($this)`) and readonly data classes, and calls to other methods of the same file, such as `$this->level() <= $other->level()`
 - arithmetic, comparisons, `min`, `max`, `abs`, `intdiv`, `in_array` over a list of cases or scalars, and the common string checks (length, prefix, suffix, containment, concatenation)
 
-Not yet: loops, calls to other methods, arrays and lists, mutable objects. Anything outside the subset is reported as `contracts.unsupported` with the reason, never silently skipped. Floating-point multiplication of two variables can be too slow to decide, so money is better kept as integer cents and rates as basis points. See [Supported types](docs/types.md) for what each type can do, and [Limits and roadmap](docs/limits-and-roadmap.md) for what a green run guarantees and what comes next.
+Not yet: loops, calls to methods of other files, arrays and lists, mutable objects. Anything outside the subset is reported as `contracts.unsupported` with the reason, never silently skipped. Floating-point multiplication of two variables can be too slow to decide, so money is better kept as integer cents and rates as basis points. See [Supported types](docs/types.md) for what each type can do, and [Limits and roadmap](docs/limits-and-roadmap.md) for what a green run guarantees and what comes next.
 
 ## Learn more
 

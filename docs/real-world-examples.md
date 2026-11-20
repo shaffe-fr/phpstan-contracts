@@ -597,7 +597,7 @@ final class CheckoutService
 
 A readonly data class can cross the boundary as it is: `Checkout::receipt()` takes a `Cart` and returns a `Receipt`. The service is ordinary code that PHPStan analyses as usual. It also meets the verified method at its boundary: `shippingCents` declares `@param int<0, 100000> $weightGrams`, so PHPStan will ask you to establish that range at this call, for example with `@return int<0, 100000>` on `totalWeightGrams()` or by clamping the value. That request is the check that the proof's assumption is true in production.
 
-Two things are not checked yet: the extension does not verify that a call satisfies the callee's `#[Requires]` (only PHPDoc ranges, which PHPStan enforces), and a verified method cannot call another verified method. See [Limits and roadmap](limits-and-roadmap.md).
+Two things are not checked yet: the extension does not verify that a call from ordinary code satisfies the callee's `#[Requires]` (only PHPDoc ranges, which PHPStan enforces), and a verified method can only call methods declared in its own file. See [Limits and roadmap](limits-and-roadmap.md).
 
 ## When the solver gives up
 

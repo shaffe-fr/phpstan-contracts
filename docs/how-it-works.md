@@ -161,6 +161,12 @@ None of these adds a theory. `self::` and `static::` are resolved to the declari
 
 In an instance method of an enum or of a readonly data class, `$this` is declared as one more input, before the parameters, with the sort of the class and the domain of a parameter of that type. It is declared only when the method or its contracts use it, so other instance methods are encoded exactly as before. Its value cannot change during the call, which is why the contracts and the body read the same constant.
 
+## Calls
+
+A call to a method of the same file is inlined. The arguments are translated in the caller, the body of the callee is executed symbolically from the path condition of the call, with its parameters bound to the arguments and `$this` to the receiver, and the value of the call is the `ite` of its `return` statements. The callee's `#[Requires]` become obligations of the caller under that path condition, reported as `contracts.requiresViolated`, and every safety obligation inside the callee is stated for these arguments and reported at the line of the call. Nothing about the callee is assumed, not even its `#[Ensures]`, so a wrong contract on the callee cannot make the caller's proof wrong.
+
+The method has to be in the same file because the proof depends on its body, and PHPStan re-analyses the dependents of a file only when its signatures change.
+
 ## The return type is a goal
 
 After the body and the postconditions, one more check asks whether the returned value can leave the domain of the declared return type (a PHPDoc range, or the range of a property of a returned object). It runs after the `#[Ensures]` checks and is never assumed by them, so a bad value is first reported through the contract that states why it is bad, then as a violation of the type.

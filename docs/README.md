@@ -33,7 +33,7 @@ A unit test checks a handful of examples. A proof covers every input in the decl
 
 ## What it does not do (yet)
 
-The verified subset is deliberately small. There are no loops, no calls to other methods, no arrays and no mutable objects, and the extension does not yet check that callers respect a method's `#[Requires]`. Floating-point multiplication of two variables is often too slow to decide. See [Limits and roadmap](limits-and-roadmap.md) for the full list and for which limits come from mathematics and which are simply not built yet.
+The verified subset is deliberately small. There are no loops, no calls to methods of other files, no arrays and no mutable objects, and the extension only checks that callers respect a method's `#[Requires]` for calls within a file. Floating-point multiplication of two variables is often too slow to decide. See [Limits and roadmap](limits-and-roadmap.md) for the full list and for which limits come from mathematics and which are simply not built yet.
 
 ## Documentation
 

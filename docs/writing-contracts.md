@@ -129,10 +129,13 @@ Everything in the table in [the contract language](#the-contract-language) works
 | `(string)`, `(bool)`, `(array)` casts | `Only (int) and (float) casts are supported.` |
 | `min()` or `max()` on floats | `min() and max() are only supported on ints: PHP orders NaN and mixed int/float arguments in a way that is not modelled.` |
 | `round()` and any function other than those listed | `Call to round() is not part of the verified subset: purity cannot be established.` |
-| method calls | `Method calls and instantiations are not part of the verified subset yet: side effects cannot be ruled out.` |
+| a call to a method declared in another file | `Point::sum() is declared in another file. Only methods of the same file can be called: ...` (see [Calls to other methods](#calls-to-other-methods)) |
+| a call that PHP binds at runtime to a method a subclass can override | `OpenShape::sides() can be overridden: OpenShape is not final, so a subclass can replace the method. Make the class or the method final, or the method private.` |
+| a recursive call | `Recursive calls are not supported: Tree::depth() is already being translated.` |
+| a method call in a contract | `Method calls are not supported in contract expressions yet.` |
+| a method call on anything but an enum case or a data object | `Method calls are only supported on enums and data classes, not on a string.` |
 | `new` on a class that is not a plain data class | `Cannot instantiate Percentage: its constructor contains logic, which is not verified.` |
 | `$this` in a class that is not an enum or a readonly data class | `Object state ($this) is only part of the verified subset in enums and readonly data classes.`, followed by the reason, such as `Property Counter::$count must be public and readonly` |
-| a method call on `$this` | `Method calls and instantiations are not part of the verified subset yet: side effects cannot be ruled out.` |
 | reading a property that is not `public readonly`, or whose type is not supported | `Property Foo::$_additional must be public and readonly: only immutable data classes are supported.` |
 | `static::LIMIT` on a class that is not final, for a constant that is not final | `static::LIMIT is late bound: a subclass of CartLimits can override the constant. Use self::LIMIT, or make the class or the constant final.` |
 | `static::` for anything else on a class that is not final, such as `new static()` | `static:: is late bound and CartLimits is not final, so a subclass can change what it refers to; use self:: or make the class final.` |
@@ -201,7 +204,61 @@ CartLimits.php:22: static::MAX_ITEMS is late bound: a subclass of PhpstanContrac
 Use self::MAX_ITEMS, or make the class or the constant final.
 ```
 
-**`$this` in an enum** is one of the cases. An enum instance method is a function of an implicit parameter of the enum type, so `$this === self::InStock`, `match ($this)` with its exhaustiveness check, `$this->value` and `$this->name` all work. **`$this` in a readonly data class** is a record of its properties, read with `$this->onHand`, under the same conditions as a parameter of that class (see [Readonly data classes](types.md#readonly-data-classes)). In both cases `$this` is printed first in a counterexample, like a parameter. A call to another method on `$this`, such as `$this->isFinal()`, is still a method call and is rejected.
+**`$this` in an enum** is one of the cases. An enum instance method is a function of an implicit parameter of the enum type, so `$this === self::InStock`, `match ($this)` with its exhaustiveness check, `$this->value` and `$this->name` all work. **`$this` in a readonly data class** is a record of its properties, read with `$this->onHand`, under the same conditions as a parameter of that class (see [Readonly data classes](types.md#readonly-data-classes)). In both cases `$this` is printed first in a counterexample, like a parameter. A call to another method on `$this`, such as `$this->isFinal()`, works when that method is declared in the same file, see below.
+
+### Calls to other methods
+
+A method can call another method **declared in the same file**: a helper of the same class, `$this->level()` in an enum, or a getter of a data class. The call is translated by translating the body of the callee, with its parameters bound to the arguments and `$this` to the object the method is called on. The proof sees exactly what the callee computes, so the callee does not need a contract of its own, and its safety checks are made for the arguments of this call:
+
+```php
+#[Ensures('$result >= 1 && $result <= 4')]
+public function hierarchyLevel(): int
+{
+    return match ($this) {
+        self::Administrator => 1,
+        self::Validator => 2,
+        self::Prescriber => 3,
+        self::Viewer => 4,
+    };
+}
+
+#[Ensures('implies($this === self::Administrator, $result)')]
+#[Ensures('implies($this === $other, $result)')]
+#[Ensures('implies($other === self::Administrator, $result === ($this === self::Administrator))')]
+public function canManage(Role $other): bool
+{
+    return $this->hierarchyLevel() <= $other->hierarchyLevel();
+}
+```
+
+With `<` instead of `<=`, a role can no longer manage itself, and the counterexample says which one:
+
+```
+Role.php:41: Postcondition #[Ensures('implies($this === $other, $result)')] can be violated.
+Counterexample: $this = Role::Validator, $other = Role::Validator => $result = false (return at line 44).
+```
+
+**The `#[Requires]` of the callee are checked at the call.** A call that can break one is reported as `contracts.requiresViolated`, with the values of the caller's inputs:
+
+```
+CallFixture.php:45: The call to PhpstanContracts\Tests\Fixtures\CallFixture::halve() can violate its precondition #[Requires('$x >= 0')].
+Counterexample: $x = -1.
+```
+
+A safety check inside the callee is reported at the line of the call, and says which call it comes from: ``Possible integer overflow: `$x * 2` can leave the PHP int range, in the call to CallFixture::double().``
+
+What can be called:
+
+| Call | Condition |
+|---|---|
+| `self::helper($x)`, `ClassName::helper($x)` | A static method. The call is bound at compile time. |
+| `$this->level()`, `$other->level()`, `$cart->coupon->total()` | The object is an enum case or a data object. PHP picks the method from the runtime class, so the class must be `final` (an enum always is), or the method `final` or `private`. |
+| `static::helper($x)` | The same condition, for the same reason. |
+| arguments | Positional or named. A missing argument takes its default value. An `int` is converted for a `float` parameter, as PHP does. Any other mismatch of types is rejected. |
+
+The callee must itself be in the verified subset; when it is not, the reason is given: ``The call to CallFixture::loops() cannot be verified: Loops are not supported: ...``. Recursion, methods from a trait and calls inside a contract are rejected.
+
+**Why the same file.** PHPStan's result cache re-analyses a file when it changes, and the files that depend on it only when a signature they use changes. A proof that read the body of a method in another file would not be redone when that body changes, and could stay green for code that is now wrong. Calls to methods of other files need modular verification, where the caller relies on the callee's contract, which is on the [roadmap](limits-and-roadmap.md#roadmap).
 
 ## What is checked automatically
 
@@ -216,6 +273,7 @@ Besides your contracts, every checked method must satisfy a set of safety condit
 | Valid enum value | `Status::from($v)` can receive a value that is not a backing value | `contracts.invalidEnumValue` |
 | Representable cast | `(int) $float` can receive `NAN`, an infinity, or a value outside the `int` range | `contracts.invalidCast` |
 | Return type respected | the returned value can leave the domain of its declared type, such as a PHPDoc range or a field range of a data class | `contracts.returnType` |
+| Callee preconditions respected | a [call to a method of the same file](#calls-to-other-methods) can break one of its `#[Requires]` | `contracts.requiresViolated` |
 
 Each condition is checked **under the path that reaches it**. In `$parts > 0 && intdiv($total, $parts) > 3` the division is only checked where `$parts > 0`, so the guard is honoured. The same holds for the arms of `?:`, `??` and `match`.
 
@@ -233,6 +291,7 @@ Each condition is checked **under the path that reaches it**. In `$parts > 0 && 
 | `contracts.invalidEnumValue` | `from()` can throw `ValueError`. | Use `tryFrom()` for untrusted input. |
 | `contracts.invalidCast` | `(int)` of a float that can be `NAN`, infinite or out of range. | Bound the float, or exclude `NAN` and infinities with `#[Requires]`. |
 | `contracts.returnType` | The method can return a value that its declared type excludes. | Fix the computation, or widen the declared type. |
+| `contracts.requiresViolated` | A call to a method of the same file can break one of the callee's `#[Requires]`. | Guard the call, or establish the precondition first. |
 | `contracts.contradictoryRequires` | No input satisfies the parameter types and `#[Requires]`, so every proof would be empty. | Loosen the preconditions. |
 | `contracts.unknown` | Z3 answered `unknown` within `timeoutMs`. Nothing is proven or refuted. | See [when Z3 gives up](#when-z3-gives-up). |
 | `contracts.unsupported` | The method leaves the supported subset. | Rewrite it, or extract the pure rule into a smaller method. |
