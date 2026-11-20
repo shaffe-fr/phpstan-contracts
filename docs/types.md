@@ -647,7 +647,7 @@ The `public readonly` properties of a supported type are the model of an instanc
 
 ```
 Property App\Pricing\PriceContextData::$_additional must be public and readonly: only immutable data classes are supported.
-Property App\Pricing\PriceContextData::$lines cannot be read in a verified method: Type list<LineData> is not supported in verified methods (...).
+Property App\Pricing\PriceContextData::$lines cannot be read in a verified method: Type list<App\Pricing\LineData> is not supported in verified methods (...).
 ```
 
 A class whose properties are all left out is rejected as a type, with the reason of the first one.
@@ -699,7 +699,7 @@ final readonly class Receipt
 |---|---|
 | `$cart->subtotalCents`, `$cart->coupon->percent` | Nested reads. A nullable object needs a null check or `?->`. |
 | `$cart->coupon?->minimumCents` | |
-| `new Receipt(0, $total, false)` | Positional or named arguments, all of them. Only for classes whose constructor does nothing but promote every modelled property. The properties left out of the model keep their default value. |
+| `new Receipt(0, $total, false)` | Positional or named arguments, all of them. Only for classes whose constructor does nothing but promote every modelled property. The properties left out of the model keep their default value, or stay uninitialized, and cannot be read. |
 | `$this->onHand` in a method of the class, `new self(...)` | `$this` is an implicit parameter of the class, with the same domain as any other. |
 
 A method of the class declared in the same file, such as `$this->available()` or a getter, can be called if the class is `final`, or the method `final` or `private`: see [Calls to other methods](writing-contracts.md#calls-to-other-methods).
@@ -727,8 +727,8 @@ Counterexample: $this = StockLine(onHand: 0, reserved: 1000000) => $result = -10
 A constructor that validates its arguments cannot be modelled, so the class can be received as a parameter but not built with `new`. The prover would otherwise skip a possible exception.
 
 ```
-Rejected.php:120: Cannot instantiate Percentage: its constructor contains logic, which is not verified.
-Rejected.php:127: Property PhpstanContracts\Examples\Counter::$count must be public and readonly: only immutable data classes are supported.
+Rejected.php:121: Cannot instantiate Percentage: its constructor contains logic, which is not verified.
+Rejected.php:128: Property PhpstanContracts\Examples\Counter::$count must be public and readonly: only immutable data classes are supported.
 ```
 
 ### Data classes and the return type

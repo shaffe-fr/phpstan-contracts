@@ -126,7 +126,9 @@ The rule tests also cover the failure paths that the examples do not: an invalid
 1. PHP returns exactly the `$result` that the message announces.
 2. The contract is false in PHP for those values.
 
-This is the check that matters most to a user: a counterexample that does not reproduce would send them after a bug that does not exist. The replay covers integers, floats (including `NAN`), strings (including non-ASCII bytes), booleans, nullable values and enums, and calls an enum instance method on the case that the message gives as `$this`.
+The other diagnostics with a counterexample are replayed too. An overflow must make PHP throw a `TypeError`, since the result of an `int` method becomes a float. A `throw` that no `#[Throws]` allows must make PHP throw an exception that the declarations, evaluated in PHP, do not allow. A broken `#[Throws]` must see PHP return the announced value although its condition holds. A broken precondition of a called method is evaluated on the reported inputs, which the fixture passes to the callee under the same names.
+
+This is the check that matters most to a user: a counterexample that does not reproduce would send them after a bug that does not exist. The replay covers integers, floats (including `NAN`), strings (including non-ASCII bytes and strings built from ints), booleans, nullable values and enums, `in_array()`, calls to methods of the same file, and calls an enum instance method on the case that the message gives as `$this`.
 
 ## Does the suite catch bugs?
 

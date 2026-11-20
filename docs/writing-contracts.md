@@ -85,6 +85,8 @@ PHP has no implication operator, so `implies($a, $b)` is provided. It means `!$a
 
 The translator is a whitelist. A construct that is not listed is rejected with a message, never ignored. That is what keeps a verified method pure.
 
+The messages in the tables below are real, with one abbreviation: most messages print a class by its fully qualified name, and a row that shows a short name, such as `Foo` or `CartLimits`, stands for it. `Cannot instantiate Percentage` is printed as shown.
+
 ### Types
 
 `int`, `bool`, `float`, `string`, enums, readonly data classes, and a nullable version of each. See [Supported types](types.md) for what each can do.
@@ -132,11 +134,17 @@ Everything in the table in [the contract language](#the-contract-language) works
 | `$int === 1.0` | `int === float is always false in PHP; the operands have different types.` |
 | `$a === $b` on two objects | `Objects are compared by identity with ===; compare their fields instead.` |
 | `(bool)`, `(array)` casts | `Only (int), (float) and (string) casts are supported.` |
-| a float or a bool in `.`, in an interpolation or in `(string)` | `Converting a float to a string is not supported: only strings and ints can be concatenated or interpolated.` |
+| a float or a bool in `.` or in an interpolation | `Converting a float to a string is not supported: only strings and ints can be concatenated or interpolated.` |
+| `(string)` of a float, a bool or a nullable value | `(string) of a float is not supported: only ints and strings are converted.` |
 | `min()` or `max()` on floats | `min() and max() are only supported on ints: PHP orders NaN and mixed int/float arguments in a way that is not modelled.` |
 | `round()` and any function other than those listed | `Call to round() is not part of the verified subset: purity cannot be established.` |
-| a call to a method declared in another file | `Point::sum() is declared in another file. Only methods of the same file can be called: ...` (see [Calls to other methods](#calls-to-other-methods)) |
-| a call that PHP binds at runtime to a method a subclass can override | `OpenShape::sides() can be overridden: OpenShape is not final, so a subclass can replace the method. Make the class or the method final, or the method private.` |
+| an unqualified `in_array()` in a namespace that declares its own `in_array()` | `Call to PhpstanContracts\Tests\Fixtures\Shadowing\in_array() is not part of the verified subset: purity cannot be established.` |
+| a call to a method declared in another file | `PhpstanContracts\Tests\Fixtures\Point::sum() is declared in another file. Only methods of the same file can be called: ...` (see [Calls to other methods](#calls-to-other-methods)) |
+| a call that PHP binds at runtime to a method a subclass can override | `PhpstanContracts\Tests\Fixtures\OpenShape::sides() can be overridden: PhpstanContracts\Tests\Fixtures\OpenShape is not final, so a subclass can replace the method. Make the class or the method final, or the method private.` |
+| `static::k()` on a class that is not final, for a method that is not final, private or not | `PhpstanContracts\Tests\Fixtures\ShadowParent::k() can be overridden: PhpstanContracts\Tests\Fixtures\ShadowParent is not final, so a subclass can declare its own k(), which static:: calls instead, even though this one is private. Use self::, or make the class or the method final.` |
+| a called method whose parameter has no native type | `Parameter $value of PhpstanContracts\Tests\Fixtures\CallFixture::isOne() has no native type, so PHP passes its argument as it is; declare the type in the signature.` |
+| a called method whose parameter has a native type that does not match its PHPDoc type | `Parameter $value of PhpstanContracts\Tests\Fixtures\CallFixture::isOneOfMixed() has the native type mixed, which is what PHP converts its argument to, but the PHPDoc type float; make them agree.` |
+| a called method marked `#[\Deprecated]` | `PhpstanContracts\Tests\Fixtures\CallFixture::deprecated() is #[\Deprecated]: calling it triggers E_USER_DEPRECATED, which runs the error handler.` |
 | a recursive call | `Recursive calls are not supported: Tree::depth() is already being translated.` |
 | a method call in a contract | `Method calls are not supported in contract expressions yet.` |
 | a method call on anything but an enum case or a data object | `Method calls are only supported on enums and data classes, not on a string.` |
@@ -158,7 +166,7 @@ Everything in the table in [the contract language](#the-contract-language) works
 
 `min()` and `max()` take exactly two `int` arguments. `match` needs at least one arm, and without a `default` arm it must be exhaustive (see below).
 
-`in_array($x, [a, b, c], true)` is translated as `$x === a || $x === b || $x === c`, which is what PHP computes. Without `true`, PHP compares with `==`, so the needle must be an `int`, a `float`, a `bool` or an enum case, where `==` is exact: `1 == 1.0` is true, as in PHP, and enum cases compare by identity. A string or a nullable needle needs `strict: true`, because `"1e1" == "10"` and `null == 0` are true. The haystack is a list literal, whose elements can be any supported expression, or a class constant such as `self::VALIDATORS` whose value PHPStan folds to a list of scalars or enum cases.
+`in_array($x, [a, b, c], true)` is translated as `$x === a || $x === b || $x === c`, which is what PHP computes. Without `true`, PHP compares with `==`, so the needle must be an `int`, a `float`, a `bool` or an enum case, where `==` is exact: `1 == 1.0` is true, as in PHP, and enum cases compare by identity. A string or a nullable needle needs `strict: true`, because `"1e1" == "10"` and `null == 0` are true. As in PHP, an unqualified `in_array()` in a namespace that declares its own `in_array()` function calls that function, so it is rejected; `\in_array()` is always the built-in one. The haystack is a list literal, whose elements can be any supported expression, or a class constant such as `self::VALIDATORS` whose value PHPStan folds to a list of scalars or enum cases.
 
 Instance methods of any class are fine as long as they never touch `$this`. In an enum or a readonly data class, `$this` is supported, see below. A method that reads `$this->state` on a class with mutable state is rejected.
 
@@ -190,8 +198,8 @@ public static function tryFrom(int $webId): ?int
 The off-by-one version is refuted at the last id:
 
 ```
-ErpCode.php:34: Postcondition #[Ensures('implies($result !== null, $result < self::RANGE_END)')] can be violated.
-Counterexample: $webId = 1000000 => $result = 99000000 (return at line 37).
+ErpCode.php:35: Postcondition #[Ensures('implies($result !== null, $result < self::RANGE_END)')] can be violated.
+Counterexample: $webId = 1000000 => $result = 99000000 (return at line 38).
 ```
 
 `self::X` and `ClassName::X` are statically bound, so they are always accepted. `static::X` is accepted when the class is final or the constant is declared `final`. Otherwise a subclass can override the constant, and the access is rejected:
@@ -251,20 +259,20 @@ CallFixture.php:45: The call to PhpstanContracts\Tests\Fixtures\CallFixture::hal
 Counterexample: $x = -1.
 ```
 
-A safety check inside the callee is reported at the line of the call, and says which call it comes from: ``Possible integer overflow: `$x * 2` can leave the PHP int range, in the call to CallFixture::double().``
+A safety check inside the callee is reported at the line of the call, and says which call it comes from: ``Possible integer overflow: `$x * 2` can leave the PHP int range, in the call to PhpstanContracts\Tests\Fixtures\CallFixture::double().`` When the callee calls another method, the message names the whole chain, from the call on the reported line to the method that holds the check: ``..., in the call to PhpstanContracts\Tests\Fixtures\CallFixture::quadruple(), through PhpstanContracts\Tests\Fixtures\CallFixture::double().``
 
 What can be called:
 
 | Call | Condition |
 |---|---|
 | `self::helper($x)`, `ClassName::helper($x)` | A static method. The call is bound at compile time. |
-| `$this->level()`, `$other->level()`, `$cart->coupon->total()` | The object is an enum case or a data object. PHP picks the method from the runtime class, so the class must be `final` (an enum always is), or the method `final` or `private`. |
-| `static::helper($x)` | The same condition, for the same reason. |
-| arguments | Positional or named. A missing argument takes its default value. An `int` is converted for a `float` parameter, as PHP does. Any other mismatch of types is rejected. |
+| `$this->level()`, `$other->level()`, `$cart->coupon->total()` | The object is an enum case or a data object. PHP picks the method from the runtime class, so the class must be `final` (an enum always is), or the method `final` or `private`. A `private` method is the one of the class whose code makes the call: from a class that declares a private `m()`, `$object->m()` runs that `m()` even when the object is a subclass with a public `m()` of its own, and so does the proof. |
+| `static::helper($x)` | `static::` looks the method up in the called class, where a subclass's own `helper()` wins even over a private one. So the class must be `final`, or the method `final` and not `private`. |
+| arguments | Positional or named. A missing argument takes its default value. An `int` is converted for a parameter whose native type is `float` or `?float`, as PHP does. PHP converts by the native type only, so a parameter without a native type, or whose native type does not match its PHPDoc type, is rejected. Any other mismatch of types is rejected. |
 
-The callee must itself be in the verified subset; when it is not, the reason is given: ``The call to CallFixture::loops() cannot be verified: Loops are not supported: ...``. Recursion, methods from a trait and calls inside a contract are rejected.
+The callee must itself be in the verified subset; when it is not, the reason is given: ``The call to PhpstanContracts\Tests\Fixtures\CallFixture::loops() cannot be verified: Loops are not supported: ...``. Recursion, methods from a trait, methods marked `#[\Deprecated]` (calling one triggers `E_USER_DEPRECATED`, which runs the error handler) and calls inside a contract are rejected.
 
-A called method cannot throw yet: ``The call to Foo::guarded() cannot be verified: throw is not supported in a called method yet: ...``.
+A called method cannot throw yet: ``The call to PhpstanContracts\Tests\Fixtures\ThrowsFixture::guarded() cannot be verified: throw is not supported in a called method yet: ...``.
 
 **Why the same file.** PHPStan's result cache re-analyses a file when it changes, and the files that depend on it only when a signature they use changes. A proof that read the body of a method in another file would not be redone when that body changes, and could stay green for code that is now wrong. Calls to methods of other files need modular verification, where the caller relies on the callee's contract, which is on the [roadmap](limits-and-roadmap.md#roadmap).
 
@@ -288,16 +296,28 @@ public static function fromWebId(int $webId): int
 
 The declaration means **"throws `E` if and only if the condition holds on entry"**, and both directions are proven:
 
-- every `throw` is reachable only where a `#[Throws]` of its class, or of a parent class, has its condition true. Otherwise it is reported as `contracts.unexpectedThrow`, with an input that reaches it;
+- a `throw new T(...)` is reachable only where the condition of every `#[Throws]` that covers `T` (its class, a parent class or an interface) holds, and where the condition of every `#[Throws]` that does not cover `T` is false, since there that other exception must be thrown. A `throw` that no `#[Throws]` covers must be unreachable. Otherwise it is reported as `contracts.unexpectedThrow`, with an input that reaches it;
 - when the condition holds, the method does not return. Otherwise it is reported as `contracts.throwsViolated`, with an input and the value returned.
+
+So several declarations keep their meaning side by side. With `#[Throws(\LogicException::class)]` and `#[Throws(\InvalidArgumentException::class, when: '$x < 0')]`, an `InvalidArgumentException` is thrown exactly when `$x < 0`, and another `LogicException`, such as a `DomainException`, only when `$x >= 0`.
+
+The report of `contracts.unexpectedThrow` spells out where the declarations allow the `throw`. Below, a `RangeException` thrown for every `$x < 10` breaks the other declaration, since an `InvalidArgumentException` must be thrown when `$x < 0`:
+
+```
+ThrowsFixture.php:252: `throw new \RangeException('Small.')` can be reached where the #[Throws] declarations do not allow it:
+they allow it only where #[Throws(RangeException::class, when: '$x < 10')] holds and #[Throws(InvalidArgumentException::class, when: '$x < 0')] does not hold.
+Counterexample: $x = -1.
+```
+
+A `throw` of a class that no `#[Throws]` covers is reported as "can be reached where no #[Throws] allows it".
 
 The `#[Ensures]` are proven for the paths that return, which is what they describe. The guard with `>` instead of `>=` lets the first id past the range through, and both checks say so:
 
 ```
-ThrowsFixture.php:33: #[Throws(InvalidArgumentException::class, when: '$webId < 0 || $webId >= self::SIZE')] is violated:
-the method can return although the condition holds. Counterexample: $webId = 1000000 => $result = 99000000 (return at line 41).
-ThrowsFixture.php:34: Postcondition #[Ensures('$result < self::OFFSET + self::SIZE')] can be violated.
-Counterexample: $webId = 1000000 => $result = 99000000 (return at line 41).
+ThrowsFixture.php:34: #[Throws(InvalidArgumentException::class, when: '$webId < 0 || $webId >= self::SIZE')] is violated:
+the method can return although the condition holds. Counterexample: $webId = 1000000 => $result = 99000000 (return at line 42).
+ThrowsFixture.php:35: Postcondition #[Ensures('$result < self::OFFSET + self::SIZE')] can be violated.
+Counterexample: $webId = 1000000 => $result = 99000000 (return at line 42).
 ```
 
 **A `throw` that no `#[Throws]` declares must be unreachable.** This is how a consistency check, such as a `default` arm of a `match` that cannot happen, is proven dead:
@@ -315,7 +335,7 @@ public static function anUndeclaredThrowThatIsUnreachable(Suit $suit): int
 }
 ```
 
-Without `when`, `#[Throws(E::class)]` allows `E` on any path and proves nothing about when it happens: only the paths that return are checked.
+Without `when`, `#[Throws(E::class)]` allows `E` on any path where no other declaration forbids it, and proves nothing about when it happens: only the paths that return are checked.
 
 What a `throw` can be:
 
@@ -339,7 +359,7 @@ Besides your contracts, every checked method must satisfy a set of safety condit
 | Valid enum value | `Status::from($v)` can receive a value that is not a backing value | `contracts.invalidEnumValue` |
 | Representable cast | `(int) $float` can receive `NAN`, an infinity, or a value outside the `int` range | `contracts.invalidCast` |
 | Return type respected | the returned value can leave the domain of its declared type, such as a PHPDoc range or a field range of a data class | `contracts.returnType` |
-| No undeclared exception | a `throw` can be reached where no [`#[Throws]`](#exceptions) allows it | `contracts.unexpectedThrow` |
+| No undeclared exception | a `throw` can be reached where the [`#[Throws]`](#exceptions) declarations do not allow it | `contracts.unexpectedThrow` |
 | Callee preconditions respected | a [call to a method of the same file](#calls-to-other-methods) can break one of its `#[Requires]` | `contracts.requiresViolated` |
 
 Each condition is checked **under the path that reaches it**. In `$parts > 0 && intdiv($total, $parts) > 3` the division is only checked where `$parts > 0`, so the guard is honoured. The same holds for the arms of `?:`, `??` and `match`.
@@ -358,7 +378,7 @@ Each condition is checked **under the path that reaches it**. In `$parts > 0 && 
 | `contracts.invalidEnumValue` | `from()` can throw `ValueError`. | Use `tryFrom()` for untrusted input. |
 | `contracts.invalidCast` | `(int)` of a float that can be `NAN`, infinite or out of range. | Bound the float, or exclude `NAN` and infinities with `#[Requires]`. |
 | `contracts.returnType` | The method can return a value that its declared type excludes. | Fix the computation, or widen the declared type. |
-| `contracts.unexpectedThrow` | A `throw` can be reached where no `#[Throws]` allows it. | Declare it with its condition, or fix the guard. |
+| `contracts.unexpectedThrow` | A `throw` can be reached where no `#[Throws]` allows it, or where the `#[Throws]` declarations do not allow it; the message then lists the conditions that allow it. | Declare it with its condition, or fix the guard. |
 | `contracts.throwsViolated` | The method can return although the condition of a `#[Throws]` holds. | Fix the guard, or the condition. |
 | `contracts.requiresViolated` | A call to a method of the same file can break one of the callee's `#[Requires]`. | Guard the call, or establish the precondition first. |
 | `contracts.contradictoryRequires` | No input satisfies the parameter types and `#[Requires]`, so every proof would be empty. | Loosen the preconditions. |

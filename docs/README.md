@@ -42,7 +42,7 @@ The verified subset is deliberately small. There are no loops, no calls to metho
 | [Getting started](getting-started.md) | install Z3 and the extension, run your first proof, configure the timeout |
 | [Writing contracts](writing-contracts.md) | learn the attributes, the contract language, the supported PHP subset and every diagnostic |
 | [Supported types](types.md) | see what each type can do (`float`, `string`, nullables, enums, data classes), with real bugs |
-| [Real-world examples](real-world-examples.md) | see thirteen business rules proved or refuted, with the bugs the prover found |
+| [Real-world examples](real-world-examples.md) | see twenty-one business rules proved or refuted, with the bugs the prover found |
 | [How it works](how-it-works.md) | understand the SSA translation, the safety obligations and the Z3 protocol |
 | [Limits and roadmap](limits-and-roadmap.md) | know what a green run guarantees, and what is next |
 | [Testing](testing.md) | run the test suite, add a case, and see what each suite guarantees |
@@ -58,7 +58,7 @@ vendor/bin/phpstan analyse
 
 The repository's `phpstan.neon.dist` sets `contracts.timeoutMs` to 30000 so that the float examples have a wide margin on a slow machine. The run takes about a minute and a half with a cold cache, because the two methods of `SolverLimits.php` wait for the full 30 seconds and the float methods take several seconds each. It reports the diagnostics of the methods that are meant to fail: the `*Broken`, `*Naive` and `*Unbounded` methods and `SolverLimits` in [`examples/RealWorld`](../examples/RealWorld), the cases in `examples/Rejected.php` that show each kind of rejection, the late-bound `static::` constant in `examples/CartLimits.php`, and one method in `examples/Pricing.php`. Every other annotated method in those files is proven. A few diagnostics come from PHPStan's own rules and not from this extension (`argument.type`, `return.missing` and `match.unhandled`), on the deliberately broken methods.
 
-Of the 53 methods of `examples/RealWorld` that reach the solver, 31 are proven, 20 are refuted with a counterexample and 2 are not decided.
+Of the 65 methods of `examples/RealWorld` that reach the solver, 38 are proven, 25 are refuted with a counterexample and 2 are not decided.
 
 ## Status
 
