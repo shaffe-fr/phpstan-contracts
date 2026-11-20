@@ -53,7 +53,7 @@ final class ConstantRuleTest extends RuleFixtureTestCase
 
                 'overridableConstantThroughStatic' => ['contracts.unsupported: static::LIMIT is late bound: a subclass of PhpstanContracts\Tests\Fixtures\LateBinding can override the constant'],
                 'lateBindingInAContract' => ['contracts.unsupported: static::LIMIT is late bound'],
-                'lateBoundCall' => ['contracts.unsupported: static:: is late bound and PhpstanContracts\Tests\Fixtures\LateBinding is not final'],
+                'lateBoundCall' => ['contracts.unsupported: PhpstanContracts\Tests\Fixtures\LateBinding::from() can be overridden: PhpstanContracts\Tests\Fixtures\LateBinding is not final'],
                 'from' => [],
             ],
             AnnotatedFinal::class => [

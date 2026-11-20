@@ -39,7 +39,7 @@ final class DataClassRuleTest extends RuleFixtureTestCase
                 'classWithoutProperties' => ['contracts.unsupported: has no properties to model'],
                 'constructorThatDoesNotPromote' => ['contracts.unsupported: its constructor takes parameters that are not promoted properties'],
                 'identityOfObjects' => ['contracts.unsupported: compared by identity'],
-                'methodCallOnAnObject' => ['contracts.unsupported: Method calls'],
+                'methodCallOnAnObject' => ['contracts.unsupported: PhpstanContracts\Tests\Fixtures\Point::sum() is declared in another file'],
                 'nullableObjectWithoutACheck' => ['contracts.unsupported: may be null here'],
                 'everyConstructorArgumentIsRequired' => ['contracts.unsupported: Every constructor argument of Point must be passed explicitly'],
 
@@ -68,7 +68,7 @@ final class DataClassRuleTest extends RuleFixtureTestCase
 
                 'lengthBroken' => ['contracts.ensuresViolated: Counterexample: $this = Interval(start: '],
 
-                'methodCallOnThis' => ['contracts.unsupported: Method calls'],
+                'methodCallOnThis' => ['contracts.requiresViolated: The call to PhpstanContracts\Tests\Fixtures\Interval::length() can violate its precondition #[Requires(\'$this->start <= $this->end\')]. Counterexample: $this = Interval('],
             ],
         ]);
     }

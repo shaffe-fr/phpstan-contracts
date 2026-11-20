@@ -53,7 +53,7 @@ final class EnumRuleTest extends RuleFixtureTestCase
                 'isPurchasableBroken' => ['contracts.ensuresViolated: Counterexample: $this = Stock::TemporarilyUnavailable => $result = true'],
                 'partialMatchOnThis' => ['contracts.unhandledMatch: Counterexample: $this = Stock::TemporarilyUnavailable.'],
 
-                'methodCallOnThis' => ['contracts.unsupported: Method calls'],
+                'methodCallOnThis' => [],
                 'noThisInAStaticMethod' => ['contracts.unsupported: There is no $this in a static method.'],
             ],
         ]);

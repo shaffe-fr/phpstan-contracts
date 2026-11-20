@@ -16,6 +16,7 @@ final class StatementRuleTest extends RuleFixtureTestCase
             StatementFixture::class => [
                 'matchWithOnlyADefault' => [],
                 'helper' => [],
+                'callsAnotherMethod' => [],
 
                 'whileLoop' => ['contracts.unsupported: Loops are not supported'],
                 'forLoop' => ['contracts.unsupported: Loops are not supported'],
@@ -29,7 +30,6 @@ final class StatementRuleTest extends RuleFixtureTestCase
                 'variableChangesType' => ['contracts.unsupported: Variable $x changes type from int to bool'],
                 'variableDefinedInOneBranchOnly' => ['contracts.unsupported: Variable $x is not defined at this point'],
                 'writesAProperty' => ['contracts.unsupported: Only assignments to local variables are allowed'],
-                'callsAnotherMethod' => ['contracts.unsupported: Method calls and instantiations are not part of the verified subset'],
                 'callsAnUnknownFunction' => ['contracts.unsupported: Call to strtoupper() is not part of the verified subset'],
                 'closure' => ['contracts.unsupported: Closures are not supported'],
                 'arrayLiteral' => ['contracts.unsupported: Arrays are not supported yet'],
