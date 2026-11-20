@@ -13,6 +13,8 @@ final class InArrayFixture
 
     private const LIMITS = [10, 20.5];
 
+    private const NOT_A_LIST = 3;
+
     #[Ensures('$result === ($n === 1 || $n === 2 || $n === 3)')]
     public static function intsCompareAsWithEquals(int $n): bool
     {
@@ -105,5 +107,49 @@ final class InArrayFixture
     public static function strictFlagThatIsNotALiteral(int $n, bool $strict): bool
     {
         return in_array($n, [1], $strict);
+    }
+
+    #[Ensures('$result === $flag')]
+    public static function aBoolNeedleWithoutStrict(bool $flag): bool
+    {
+        return in_array($flag, [true]);
+    }
+
+    /** NAN is equal to nothing, itself included, and -0.0 == 0.0. */
+    #[Ensures('$result === ($x == 0.0)')]
+    #[Ensures('implies($x === -0.0, $result)')]
+    public static function aFloatNeedleWithoutStrict(float $x): bool
+    {
+        return in_array($x, [NAN, 0.0]);
+    }
+
+    #[Pure]
+    public static function aBoolNeedleAgainstIntsWithoutStrict(bool $flag): bool
+    {
+        return in_array($flag, [1, 0]);
+    }
+
+    #[Pure]
+    public static function aHaystackThatIsAVariable(int $n, int $haystack): bool
+    {
+        return in_array($n, $haystack, true);
+    }
+
+    #[Pure]
+    public static function aConstantThatIsNotAList(int $n): bool
+    {
+        return in_array($n, self::NOT_A_LIST, true);
+    }
+
+    #[Pure]
+    public static function aMissingHaystack(int $n): bool
+    {
+        return in_array($n);
+    }
+
+    #[Pure]
+    public static function anUnknownNamedArgument(int $n): bool
+    {
+        return in_array($n, [1], flag: true);
     }
 }

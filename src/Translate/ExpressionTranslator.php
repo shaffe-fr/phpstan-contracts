@@ -777,6 +777,14 @@ final class ExpressionTranslator
 
         $name = strtolower(ltrim($call->name->toString(), '\\'));
         if ($name === 'in_array') {
+            if (!$this->isGlobalFunction($call->name, $name)) {
+                throw $this->reject($call, sprintf(
+                    'Call to %s\\%s() is not part of the verified subset: purity cannot be established.',
+                    $this->classes->namespace(),
+                    $call->name->toString(),
+                ));
+            }
+
             return $this->inArray($call, $env, $pc);
         }
 
@@ -820,6 +828,20 @@ final class ExpressionTranslator
             'ceil' => $this->encoding->define('f', Smt::fpRound('RTP', $this->toFloat($call, $terms[0]))),
             'sqrt' => $this->encoding->define('f', Smt::fpSqrt($this->toFloat($call, $terms[0]))),
         };
+    }
+
+    /**
+     * Whether a call resolves to the global function: an unqualified name in a namespace
+     * calls the function of that namespace when there is one, as PHP does at runtime.
+     */
+    private function isGlobalFunction(Name $name, string $function): bool
+    {
+        $namespace = $this->classes->namespace();
+        if ($name->isFullyQualified() || $namespace === null || $namespace === '') {
+            return true;
+        }
+
+        return !$this->reflection->hasFunction(new Name\FullyQualified($namespace . '\\' . $function), null);
     }
 
     /**

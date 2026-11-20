@@ -93,6 +93,14 @@ final class ClassNameResolver
         );
     }
 
+    /**
+     * The namespace of the code, which an unqualified function name is looked up in first.
+     */
+    public function namespace(): ?string
+    {
+        return $this->namespace;
+    }
+
     public function isLateStatic(Name $name): bool
     {
         return $name->toLowerString() === 'static';
