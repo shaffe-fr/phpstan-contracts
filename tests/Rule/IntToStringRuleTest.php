@@ -29,7 +29,8 @@ final class IntToStringRuleTest extends RuleFixtureTestCase
                 'aFloatInAConcatenation' => ['contracts.unsupported: Converting a float to a string is not supported: only strings and ints can be concatenated or interpolated.'],
                 'aBoolInAConcatenation' => ['contracts.unsupported: Converting a bool to a string is not supported'],
                 'aNullableIntWithoutACheck' => ['contracts.unsupported: Converting a ?int to a string is not supported'],
-                'aFloatCastToString' => ['contracts.unsupported: Converting a float to a string is not supported'],
+                'aFloatCastToString' => ['contracts.unsupported: (string) of a float is not supported: only ints and strings are converted.'],
+                'aNullableIntCastToString' => ['contracts.unsupported: (string) of a ?int is not supported: only ints and strings are converted.'],
                 'aBoolCast' => ['contracts.unsupported: Only (int), (float) and (string) casts are supported.'],
             ],
         ]);

@@ -125,7 +125,7 @@ final class ExpressionTranslator
             $expr instanceof Isset_ => $this->issetExpression($expr, $env, $pc),
             $expr instanceof Cast\Int_ => $this->castToInt($expr, $env, $pc),
             $expr instanceof Cast\Double => $this->castToFloat($expr, $env, $pc),
-            $expr instanceof Cast\String_ => $this->toPhpString($expr, $this->translate($expr->expr, $env, $pc)),
+            $expr instanceof Cast\String_ => $this->toPhpString($expr, $this->translate($expr->expr, $env, $pc), true),
             $expr instanceof Node\Scalar\InterpolatedString => $this->interpolate($expr, $env, $pc),
             default => throw $this->reject($expr, $this->explainUnsupported($expr)),
         };
@@ -509,8 +509,10 @@ final class ExpressionTranslator
      * What `.`, interpolation and `(string)` do to a value: a string is itself, an int
      * becomes its decimal digits with a leading `-` when negative, as `php_int_to_string`
      * defines. A float depends on the `precision` setting, so it is not modelled.
+     *
+     * @param bool $cast whether the conversion is a `(string)` cast, rather than `.` or an interpolation
      */
-    private function toPhpString(Node $at, Term $term): Term
+    private function toPhpString(Node $at, Term $term, bool $cast = false): Term
     {
         if ($term->sort->isString()) {
             return $term;
@@ -519,10 +521,9 @@ final class ExpressionTranslator
             return Smt::call('php_int_to_string', Sort::string(), $term);
         }
 
-        throw $this->reject($at, sprintf(
-            'Converting a %s to a string is not supported: only strings and ints can be concatenated or interpolated.',
-            $term->sort->describe(),
-        ));
+        throw $this->reject($at, $cast
+            ? sprintf('(string) of a %s is not supported: only ints and strings are converted.', $term->sort->describe())
+            : sprintf('Converting a %s to a string is not supported: only strings and ints can be concatenated or interpolated.', $term->sort->describe()));
     }
 
     /**

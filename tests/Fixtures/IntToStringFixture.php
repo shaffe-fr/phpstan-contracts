@@ -113,6 +113,12 @@ final class IntToStringFixture
     }
 
     #[Pure]
+    public static function aNullableIntCastToString(?int $n): string
+    {
+        return (string) $n;
+    }
+
+    #[Pure]
     public static function aBoolCast(int $n): bool
     {
         return (bool) $n;
