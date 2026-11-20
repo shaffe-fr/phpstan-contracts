@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace PhpstanContracts\Examples\RealWorld;
 
 use PhpstanContracts\Attribute\Ensures;
+use PhpstanContracts\Attribute\Throws;
 
 /**
  * The ERP reserves a range of customer codes for the web shop. A code outside that
@@ -37,5 +38,33 @@ final class ErpCode
         return $webId >= 0 && $webId <= self::RANGE_END - self::OFFSET
             ? self::OFFSET + $webId
             : null;
+    }
+
+    /**
+     * The same rule as a guard that throws: the method defends itself, and #[Throws]
+     * states when it does.
+     */
+    #[Throws(\InvalidArgumentException::class, when: '$webId < 0 || $webId >= self::RANGE_END - self::OFFSET')]
+    #[Ensures('$result >= self::OFFSET && $result < self::RANGE_END')]
+    public static function from(int $webId): int
+    {
+        if ($webId < 0 || $webId >= self::RANGE_END - self::OFFSET) {
+            throw new \InvalidArgumentException('The web id is outside the range reserved for the web shop.');
+        }
+
+        return self::OFFSET + $webId;
+    }
+
+    /**
+     * Off by one in the guard: the last id is let through.
+     */
+    #[Throws(\InvalidArgumentException::class, when: '$webId < 0 || $webId >= self::RANGE_END - self::OFFSET')]
+    public static function fromBroken(int $webId): int
+    {
+        if ($webId < 0 || $webId > self::RANGE_END - self::OFFSET) {
+            throw new \InvalidArgumentException('The web id is outside the range reserved for the web shop.');
+        }
+
+        return self::OFFSET + $webId;
     }
 }

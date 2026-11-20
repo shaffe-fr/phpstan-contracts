@@ -7,6 +7,7 @@ namespace PhpstanContracts\Examples;
 use PhpstanContracts\Attribute\Ensures;
 use PhpstanContracts\Attribute\Pure;
 use PhpstanContracts\Attribute\Requires;
+use PhpstanContracts\Examples\RealWorld\PriceContext;
 
 /**
  * Each method here is expected to be reported by the extension.
@@ -127,6 +128,20 @@ final class Rejected
     public static function mutableObject(Counter $counter): int
     {
         return 1;
+    }
+
+    /** A data class is modelled by its public readonly properties: the mutable state of its base class cannot be read. */
+    #[Pure]
+    public static function frameworkState(PriceContext $context): bool
+    {
+        return $context->additional === [];
+    }
+
+    /** A method of another file is not translated: the result cache would not redo the proof when its body changes. */
+    #[Ensures('$result >= 0')]
+    public static function callToAnotherFile(PriceContext $context): int
+    {
+        return $context->discountPercent();
     }
 
     /** Dynamic access is rejected. */
