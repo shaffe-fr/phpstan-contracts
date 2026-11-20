@@ -955,7 +955,8 @@ final class ExpressionTranslator
 
         if ($object->sort->kind === SortKind::Record && $object->sort->record !== null) {
             if (!isset($object->sort->record->fields[$property])) {
-                throw $this->reject($expr, sprintf('%s has no property $%s.', $object->sort->record->shortName(), $property));
+                throw $this->reject($expr, $object->sort->record->unmodelled[$property]
+                    ?? sprintf('%s has no property $%s.', $object->sort->record->shortName(), $property));
             }
 
             return Smt::field($object, $property);
@@ -1012,6 +1013,10 @@ final class ExpressionTranslator
 
         $nullable = $object->sort->isNullable();
         $record = $nullable ? $object->sort->inner : $object->sort;
+        $unmodelled = $record?->record?->unmodelled[$property] ?? null;
+        if ($unmodelled !== null) {
+            throw $this->reject($expr, $unmodelled);
+        }
         if ($record === null || $record->kind !== SortKind::Record || $record->record === null || !isset($record->record->fields[$property])) {
             throw $this->reject($expr, sprintf('Property access ?->%s is not supported on a %s.', $property, $object->sort->describe()));
         }

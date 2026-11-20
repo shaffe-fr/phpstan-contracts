@@ -13,6 +13,7 @@ final readonly class RecordSort
     /**
      * @param array<string, Sort> $fields field name => sort
      * @param list<string>|null $constructorOrder constructor parameter names, or null when `new` is not supported
+     * @param array<string, string> $unmodelled properties left out of the model => why reading them is rejected
      */
     public function __construct(
         public string $className,
@@ -20,6 +21,7 @@ final readonly class RecordSort
         public array $fields,
         public ?array $constructorOrder,
         public ?string $constructionRefusal,
+        public array $unmodelled = [],
     ) {
     }
 
