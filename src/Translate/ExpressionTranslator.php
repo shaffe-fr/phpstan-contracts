@@ -757,7 +757,7 @@ final class ExpressionTranslator
             }
         }
 
-        $this->obligate(ObligationKind::UnexpectedThrow, $expr, $pc, $this->throws->allowed($class));
+        $this->obligate(ObligationKind::UnexpectedThrow, $expr, $pc, $this->throws->allowed($class), $this->throws->describeAllowed($class));
         $this->throws->record($pc);
 
         return Smt::never();

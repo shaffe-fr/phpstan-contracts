@@ -128,7 +128,11 @@ final class MethodEncoder
                 : $this->translator($encoding, $classes, true, $throws->line, $thisRefusal)->translateBoolean($throws->when->expression, $view, Smt::bool(true));
             $declaredThrows[] = [$thrown->getName(), $encoding->define('throws', $when), $throws];
         }
-        $policy = new ThrowPolicy(array_map(static fn (array $declared): array => [$declared[0], $declared[1]], $declaredThrows));
+        $policy = new ThrowPolicy(array_map(fn (array $declared): array => [
+            $declared[0],
+            $declared[2]->when === null ? null : $declared[1],
+            $this->describeThrows($declared[0], $declared[2]->when?->source),
+        ], $declaredThrows));
 
         $methodReflection = $node->getMethodReflection();
         $inliner = new MethodInliner(
@@ -183,7 +187,7 @@ final class MethodEncoder
         foreach ($declaredThrows as [$class, $when, $throws]) {
             if ($throws->when !== null && !$returnCondition->isFalse()) {
                 $encoding->throwsChecks[] = new ThrowsCheck(
-                    $this->reflectionProvider->getClass($class)->getDisplayName(),
+                    $this->displayName($class),
                     $throws->when->source,
                     $throws->line,
                     Smt::all($returnCondition, $when),
@@ -192,6 +196,18 @@ final class MethodEncoder
         }
 
         return $encoding;
+    }
+
+    private function describeThrows(string $class, ?string $when): string
+    {
+        return $when === null
+            ? sprintf('#[Throws(%s::class)]', $this->displayName($class))
+            : sprintf('#[Throws(%s::class, when: \'%s\')]', $this->displayName($class), $when);
+    }
+
+    private function displayName(string $class): string
+    {
+        return $this->reflectionProvider->getClass($class)->getDisplayName();
     }
 
     private function translator(Encoding $encoding, ClassNameResolver $classes, bool $isContract, ?int $line, string $thisRefusal): ExpressionTranslator

@@ -6,6 +6,7 @@ namespace PhpstanContracts\Tests\Fixtures;
 
 use PhpstanContracts\Attribute\Ensures;
 use PhpstanContracts\Attribute\Pure;
+use PhpstanContracts\Attribute\Requires;
 use PhpstanContracts\Attribute\Throws;
 
 /**
@@ -193,6 +194,144 @@ final class ThrowsFixture
     public static function callsAMethodThatThrows(int $n): int
     {
         return self::guarded($n);
+    }
+
+    /** Two declarations of unrelated classes, whose conditions do not overlap. */
+    #[Throws(\InvalidArgumentException::class, when: '$x < 0')]
+    #[Throws(\RangeException::class, when: '$x > 100')]
+    #[Ensures('$result === $x')]
+    public static function twoDisjointDeclarations(int $x): int
+    {
+        if ($x < 0) {
+            throw new \InvalidArgumentException('Negative.');
+        }
+        if ($x > 100) {
+            throw new \RangeException('Too large.');
+        }
+
+        return $x;
+    }
+
+    /** A DomainException is a LogicException that is not an InvalidArgumentException, so it needs `$x >= 0`. */
+    #[Throws(\LogicException::class)]
+    #[Throws(\InvalidArgumentException::class, when: '$x < 0')]
+    #[Ensures('$result === $x')]
+    public static function aGeneralAndASpecificDeclaration(int $x): int
+    {
+        if ($x < 0) {
+            throw new \InvalidArgumentException('Negative.');
+        }
+        if ($x > 100) {
+            throw new \DomainException('Too large.');
+        }
+
+        return $x;
+    }
+
+    /** The general declaration does not let the specific exception be thrown outside its condition. */
+    #[Throws(\Exception::class)]
+    #[Throws(\InvalidArgumentException::class, when: '$x < 0')]
+    public static function aGeneralDeclarationDoesNotWidenASpecificOne(int $x): int
+    {
+        if ($x > 5) {
+            throw new \InvalidArgumentException('Too large.');
+        }
+        if ($x < 0) {
+            throw new \InvalidArgumentException('Negative.');
+        }
+
+        return $x;
+    }
+
+    /** At $x = -1 the condition of the first declaration holds, so an InvalidArgumentException must be thrown. */
+    #[Throws(\InvalidArgumentException::class, when: '$x < 0')]
+    #[Throws(\RangeException::class, when: '$x < 10')]
+    public static function anotherClassThrownUnderACondition(int $x): int
+    {
+        if ($x < 10) {
+            throw new \RangeException('Small.');
+        }
+
+        return $x;
+    }
+
+    #[Throws(\InvalidArgumentException::class, when: '$n < 0')]
+    public static function aNullPreviousException(int $n): int
+    {
+        if ($n < 0) {
+            throw new \InvalidArgumentException('Negative.', 0, null);
+        }
+
+        return $n;
+    }
+
+    #[Throws(\ArithmeticError::class, when: '$divisor === 0')]
+    #[Ensures('$result === intdiv(100, $divisor)')]
+    public static function anError(int $divisor): int
+    {
+        if ($divisor === 0) {
+            throw new \DivisionByZeroError('Division by zero.');
+        }
+
+        return intdiv(100, $divisor);
+    }
+
+    #[Throws(\InvalidArgumentException::class, when: '$value === null')]
+    #[Ensures('$result === $value')]
+    public static function throwInACoalesceAssignment(?int $value): int
+    {
+        $value ??= throw new \InvalidArgumentException('Missing value.');
+
+        return $value;
+    }
+
+    /** The condition is read after the precondition, which tells it that $limit is not null. */
+    #[Requires('$limit !== null')]
+    #[Throws(\InvalidArgumentException::class, when: '$limit < 0')]
+    #[Ensures('$result === $limit')]
+    public static function aConditionThatReliesOnAPrecondition(?int $limit): int
+    {
+        if ($limit < 0) {
+            throw new \InvalidArgumentException('Negative.');
+        }
+
+        return $limit;
+    }
+
+    #[Throws(UnknownException::class)]
+    public static function declaresAClassThatDoesNotExist(int $n): int
+    {
+        return $n;
+    }
+
+    #[Throws(\LogicException::class)]
+    public static function anUnknownNamedArgument(int $n): int
+    {
+        if ($n < 0) {
+            throw new \LogicException(text: 'Negative.');
+        }
+
+        return $n;
+    }
+
+    #[Throws(\LogicException::class)]
+    public static function aDuplicateArgument(int $n): int
+    {
+        if ($n < 0) {
+            throw new \LogicException('Negative.', message: 'Again.');
+        }
+
+        return $n;
+    }
+
+    #[Throws(\LogicException::class)]
+    public static function aPreviousExceptionThatIsNotNull(int $n): int
+    {
+        if ($n < 0) {
+            throw new \LogicException('Negative.', 0, 1);
+        }
+
+        return $n;
     }
 
     private static function guarded(int $n): int
