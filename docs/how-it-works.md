@@ -161,6 +161,12 @@ None of these adds a theory. `self::` and `static::` are resolved to the declari
 
 In an instance method of an enum or of a readonly data class, `$this` is declared as one more input, before the parameters, with the sort of the class and the domain of a parameter of that type. It is declared only when the method or its contracts use it, so other instance methods are encoded exactly as before. Its value cannot change during the call, which is why the contracts and the body read the same constant.
 
+## Exceptions
+
+A `throw` ends its path like a `return`, without a value. Its obligation is that its path condition implies the condition of a `#[Throws]` of its class or of a parent class, `false` when there is none. In a branch of `match`, `?:` or `??`, the value of the branch is a fresh constant that nothing constrains, and the statement that holds the expression removes the paths that threw from the path condition before going on. That is why a `throw` is only accepted where the expression is the whole value of the statement: nothing else is computed from the fresh constant.
+
+When the method can throw, every `#[Ensures]` is checked as `returns => contract`, and each `#[Throws]` with a condition adds one check after them: that no path returns while the condition holds.
+
 ## Calls
 
 A call to a method of the same file is inlined. The arguments are translated in the caller, the body of the callee is executed symbolically from the path condition of the call, with its parameters bound to the arguments and `$this` to the receiver, and the value of the call is the `ite` of its `return` statements. The callee's `#[Requires]` become obligations of the caller under that path condition, reported as `contracts.requiresViolated`, and every safety obligation inside the callee is stated for these arguments and reported at the line of the call. Nothing about the callee is assumed, not even its `#[Ensures]`, so a wrong contract on the callee cannot make the caller's proof wrong.

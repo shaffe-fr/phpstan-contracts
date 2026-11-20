@@ -5,8 +5,9 @@
 For every input that satisfies the native parameter types, the PHPDoc ranges and every `#[Requires]`, a method that passes (in an enum or a readonly data class, `$this` is one of the inputs):
 
 1. runs without integer overflow, division by zero, unhandled `match`, invalid `Enum::from()` value, unrepresentable `(int)` cast or missing `return`,
-2. returns a value that its declared return type allows, and
-3. satisfies every `#[Ensures]` when it returns.
+2. throws an exception only where a `#[Throws]` declares it, and, for a `#[Throws]` with a condition, always throws when the condition holds,
+3. returns a value that its declared return type allows, and
+4. satisfies every `#[Ensures]` when it returns.
 
 The guarantee is **fail-closed**. A construct the translator does not know is reported as `contracts.unsupported`, a question the solver cannot settle is reported as `contracts.unknown`, and neither is ever treated as a pass.
 

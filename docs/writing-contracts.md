@@ -6,6 +6,7 @@
 use PhpstanContracts\Attribute\Ensures;
 use PhpstanContracts\Attribute\Pure;
 use PhpstanContracts\Attribute\Requires;
+use PhpstanContracts\Attribute\Throws;
 ```
 
 | Attribute | Repeatable | Meaning |
@@ -13,6 +14,7 @@ use PhpstanContracts\Attribute\Requires;
 | `#[Requires('expr')]` | yes | A precondition: the proof assumes it holds on entry. |
 | `#[Ensures('expr')]` | yes | A postcondition: the proof shows it holds whenever the method returns. |
 | `#[Pure]` | no | Opt the method in with no contract. Only the automatic safety checks run. |
+| `#[Throws(E::class, when: 'expr')]` | yes | The method throws `E` exactly when `expr` holds on entry. Without `when`, it may throw `E` on any path. See [Exceptions](#exceptions). |
 
 The argument must be a plain string literal holding exactly one PHP expression. The string is parsed, never executed. A syntax error is reported as `contracts.invalidContract` on the attribute's line.
 
@@ -98,13 +100,16 @@ Variadic and by-reference parameters are rejected. A parameter named `$result` i
 | `$x = expr;` `$x += expr;` `$x -= expr;` `$x *= expr;` `$x .= expr;` `$x ??= expr;` | Local variables only. A variable keeps its type, except that a nullable variable can receive a value or `null`. |
 | `if` / `elseif` / `else` | A variable assigned in only one branch is not usable after the `if`. Null checks narrow the types inside the branches. |
 | `return expr;` | Early returns are fine. |
+| `throw new E(...);`, and `throw` as a whole branch of `match`, `?:` or `??` whose value is returned or assigned | See [Exceptions](#exceptions). |
 
 | Rejected | Message |
 |---|---|
 | `while`, `for`, `foreach`, `do` | `Loops are not supported: termination and loop invariants cannot be established.` |
 | `switch` | `switch is not supported; use match.` |
 | `try` / `catch` | `try/catch is not supported: verified methods must not rely on exceptions.` |
-| `throw` | `throw is not supported yet: express the valid input domain with #[Requires] instead.` |
+| `throw` inside an operation or a condition | `throw is only supported as a statement, or as a whole branch of match, ?: or ?? whose value is returned or assigned.` |
+| `throw $exception`, `throw self::error()` | ``Only `throw new Exception(...)` is supported: the exception must be built where it is thrown.`` |
+| an exception class with its own constructor | `Cannot throw InvalidWebId: its constructor is not the one of Exception or Error, so it can run code that is not verified.` |
 | `$x++`, `--$x` | ``Increment and decrement are not supported; write `$x += 1` or `$x -= 1`.`` |
 | `echo`, `global`, `static`, `unset` | `Side effects and global or static state are forbidden in verified methods.` |
 | assignment to a property, array item or variable variable | `Only assignments to local variables are allowed (no property, array or dynamic writes).` |
@@ -258,7 +263,67 @@ What can be called:
 
 The callee must itself be in the verified subset; when it is not, the reason is given: ``The call to CallFixture::loops() cannot be verified: Loops are not supported: ...``. Recursion, methods from a trait and calls inside a contract are rejected.
 
+A called method cannot throw yet: ``The call to Foo::guarded() cannot be verified: throw is not supported in a called method yet: ...``.
+
 **Why the same file.** PHPStan's result cache re-analyses a file when it changes, and the files that depend on it only when a signature they use changes. A proof that read the body of a method in another file would not be redone when that body changes, and could stay green for code that is now wrong. Calls to methods of other files need modular verification, where the caller relies on the callee's contract, which is on the [roadmap](limits-and-roadmap.md#roadmap).
+
+## Exceptions
+
+A guard that throws is the usual way to protect a method from an input it cannot handle. Moving the guard into a `#[Requires]` would change the method: it would no longer defend itself. `#[Throws]` keeps the guard and states when it fires:
+
+```php
+#[Throws(\InvalidArgumentException::class, when: '$webId < 0 || $webId >= self::SIZE')]
+#[Ensures('$result >= self::OFFSET && $result < self::OFFSET + self::SIZE')]
+#[Ensures('$result === self::OFFSET + $webId')]
+public static function fromWebId(int $webId): int
+{
+    if ($webId < 0 || $webId >= self::SIZE) {
+        throw new \InvalidArgumentException('The web id is outside the reserved range.');
+    }
+
+    return self::OFFSET + $webId;
+}
+```
+
+The declaration means **"throws `E` if and only if the condition holds on entry"**, and both directions are proven:
+
+- every `throw` is reachable only where a `#[Throws]` of its class, or of a parent class, has its condition true. Otherwise it is reported as `contracts.unexpectedThrow`, with an input that reaches it;
+- when the condition holds, the method does not return. Otherwise it is reported as `contracts.throwsViolated`, with an input and the value returned.
+
+The `#[Ensures]` are proven for the paths that return, which is what they describe. The guard with `>` instead of `>=` lets the first id past the range through, and both checks say so:
+
+```
+ThrowsFixture.php:33: #[Throws(InvalidArgumentException::class, when: '$webId < 0 || $webId >= self::SIZE')] is violated:
+the method can return although the condition holds. Counterexample: $webId = 1000000 => $result = 99000000 (return at line 41).
+ThrowsFixture.php:34: Postcondition #[Ensures('$result < self::OFFSET + self::SIZE')] can be violated.
+Counterexample: $webId = 1000000 => $result = 99000000 (return at line 41).
+```
+
+**A `throw` that no `#[Throws]` declares must be unreachable.** This is how a consistency check, such as a `default` arm of a `match` that cannot happen, is proven dead:
+
+```php
+#[Ensures('$result >= 0 && $result <= 2')]
+public static function anUndeclaredThrowThatIsUnreachable(Suit $suit): int
+{
+    return match ($suit) {
+        Suit::Hearts => 0,
+        Suit::Spades => 1,
+        Suit::Clubs => 2,
+        default => throw new \LogicException('Unknown suit.'),
+    };
+}
+```
+
+Without `when`, `#[Throws(E::class)]` allows `E` on any path and proves nothing about when it happens: only the paths that return are checked.
+
+What a `throw` can be:
+
+| Form | Condition |
+|---|---|
+| `throw new E('message', 3);` | A statement. `E` is a concrete `Throwable` whose constructor is the one of `Exception` or `Error`, which only stores its arguments: the built-in exceptions and the classes that extend them without a constructor of their own. The message must be a string, the code an int, the previous exception `null`. The arguments are translated like any expression. |
+| `$value ?? throw new E()`, `$ok ? $x : throw new E()`, `default => throw new E()` | A whole branch of `??`, `?:` or `match`, whose value is returned or assigned to a variable. The path that throws stops there, so nothing is computed with the missing value. |
+
+A `throw` inside an operation, such as `($n ?? throw new E()) + 1`, or in a condition, is rejected: the rest of the expression would be computed on a path that has already ended. `try`/`catch` is still rejected, so an exception always leaves the method.
 
 ## What is checked automatically
 
@@ -273,6 +338,7 @@ Besides your contracts, every checked method must satisfy a set of safety condit
 | Valid enum value | `Status::from($v)` can receive a value that is not a backing value | `contracts.invalidEnumValue` |
 | Representable cast | `(int) $float` can receive `NAN`, an infinity, or a value outside the `int` range | `contracts.invalidCast` |
 | Return type respected | the returned value can leave the domain of its declared type, such as a PHPDoc range or a field range of a data class | `contracts.returnType` |
+| No undeclared exception | a `throw` can be reached where no [`#[Throws]`](#exceptions) allows it | `contracts.unexpectedThrow` |
 | Callee preconditions respected | a [call to a method of the same file](#calls-to-other-methods) can break one of its `#[Requires]` | `contracts.requiresViolated` |
 
 Each condition is checked **under the path that reaches it**. In `$parts > 0 && intdiv($total, $parts) > 3` the division is only checked where `$parts > 0`, so the guard is honoured. The same holds for the arms of `?:`, `??` and `match`.
@@ -291,6 +357,8 @@ Each condition is checked **under the path that reaches it**. In `$parts > 0 && 
 | `contracts.invalidEnumValue` | `from()` can throw `ValueError`. | Use `tryFrom()` for untrusted input. |
 | `contracts.invalidCast` | `(int)` of a float that can be `NAN`, infinite or out of range. | Bound the float, or exclude `NAN` and infinities with `#[Requires]`. |
 | `contracts.returnType` | The method can return a value that its declared type excludes. | Fix the computation, or widen the declared type. |
+| `contracts.unexpectedThrow` | A `throw` can be reached where no `#[Throws]` allows it. | Declare it with its condition, or fix the guard. |
+| `contracts.throwsViolated` | The method can return although the condition of a `#[Throws]` holds. | Fix the guard, or the condition. |
 | `contracts.requiresViolated` | A call to a method of the same file can break one of the callee's `#[Requires]`. | Guard the call, or establish the precondition first. |
 | `contracts.contradictoryRequires` | No input satisfies the parameter types and `#[Requires]`, so every proof would be empty. | Loosen the preconditions. |
 | `contracts.unknown` | Z3 answered `unknown` within `timeoutMs`. Nothing is proven or refuted. | See [when Z3 gives up](#when-z3-gives-up). |

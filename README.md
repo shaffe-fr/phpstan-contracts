@@ -191,7 +191,7 @@ The verified subset is small on purpose, so that the answer is a real proof and 
 
 - `int`, `bool`, `string` (as bytes), enums (pure and backed), nullable versions of all of these, and readonly data classes
 - `float`, modelled exactly as IEEE 754: the prover knows that `0.1 + 0.2 !== 0.3`, and that regrouping a sum changes the result
-- `if` / `elseif` / `else`, `match`, early `return`, local variables, null checks that narrow the type
+- `if` / `elseif` / `else`, `match`, early `return`, local variables, null checks that narrow the type, and guards that throw, declared with `#[Throws(E::class, when: '...')]`
 - enum and value-object code as it is usually written: `self::Case`, class constants, `$this` in the methods of enums (`match ($this)`) and readonly data classes, and calls to other methods of the same file, such as `$this->level() <= $other->level()`
 - arithmetic, comparisons, `min`, `max`, `abs`, `intdiv`, `in_array` over a list of cases or scalars, and the common string checks (length, prefix, suffix, containment, concatenation)
 
