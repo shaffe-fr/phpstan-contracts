@@ -67,6 +67,13 @@ final class ExpressionTranslator
     private readonly Standard $printer;
 
     /**
+     * Whether the expression about to be translated is in tail position: its value is
+     * the value of the whole statement, so a `throw` there ends the path and nothing
+     * else is computed with the missing value.
+     */
+    private bool $tail = false;
+
+    /**
      * @param bool $isContract contract expressions use unbounded integer semantics, so overflow is not checked
      * @param int|null $fixedLine line reported for contract expressions, whose own line numbers are meaningless
      */
@@ -82,6 +89,7 @@ final class ExpressionTranslator
         private readonly string $thisRefusal = 'Object state ($this) is not part of the verified subset yet.',
         private readonly ?MethodInliner $inliner = null,
         private readonly ?string $inlinedFrom = null,
+        private readonly ?ThrowPolicy $throws = null,
     ) {
         $this->printer = new Standard();
     }
@@ -91,6 +99,9 @@ final class ExpressionTranslator
      */
     public function translate(Expr $expr, array $env, Term $pc): Term
     {
+        $tail = $this->tail;
+        $this->tail = false;
+
         return match (true) {
             $expr instanceof Int_ => Smt::int($expr->value),
             $expr instanceof Float_ => Smt::floatLiteral($expr->value),
@@ -99,9 +110,10 @@ final class ExpressionTranslator
             $expr instanceof Variable => $this->variable($expr, $env),
             $expr instanceof UnaryMinus => $this->unaryMinus($expr, $env, $pc),
             $expr instanceof BooleanNot => Smt::not($this->translateBoolean($expr->expr, $env, $pc)),
-            $expr instanceof BinaryOp => $this->binary($expr, $env, $pc),
-            $expr instanceof Ternary => $this->ternary($expr, $env, $pc),
-            $expr instanceof Match_ => $this->match($expr, $env, $pc),
+            $expr instanceof BinaryOp => $this->binary($expr, $env, $pc, $tail),
+            $expr instanceof Ternary => $this->ternary($expr, $env, $pc, $tail),
+            $expr instanceof Match_ => $this->match($expr, $env, $pc, $tail),
+            $expr instanceof Expr\Throw_ => $this->throwExpression($expr, $env, $pc, $tail),
             $expr instanceof FuncCall => $this->functionCall($expr, $env, $pc),
             $expr instanceof ClassConstFetch => $this->classConstant($expr),
             $expr instanceof StaticCall => $this->staticCall($expr, $env, $pc),
@@ -114,6 +126,38 @@ final class ExpressionTranslator
             $expr instanceof Cast\Double => $this->castToFloat($expr, $env, $pc),
             default => throw $this->reject($expr, $this->explainUnsupported($expr)),
         };
+    }
+
+    /**
+     * Translates the value of a statement: the right side of an assignment, a returned
+     * value, or a `throw` statement. A `throw` is allowed there, and in the branches of
+     * `match`, `?:` and `??` that form that value.
+     *
+     * @param array<string, Term> $env
+     */
+    public function translateTail(Expr $expr, array $env, Term $pc): Term
+    {
+        return $this->translateBranch($expr, $env, $pc, true);
+    }
+
+    /**
+     * The paths that reached a `throw` since the last call.
+     *
+     * @return list<Term>
+     */
+    public function takeThrows(): array
+    {
+        return $this->throws?->take() ?? [];
+    }
+
+    /**
+     * @param array<string, Term> $env
+     */
+    private function translateBranch(Expr $expr, array $env, Term $pc, bool $tail): Term
+    {
+        $this->tail = $tail;
+
+        return $this->translate($expr, $env, $pc);
     }
 
     /**
@@ -258,7 +302,7 @@ final class ExpressionTranslator
     /**
      * @param array<string, Term> $env
      */
-    private function binary(BinaryOp $expr, array $env, Term $pc): Term
+    private function binary(BinaryOp $expr, array $env, Term $pc, bool $tail): Term
     {
         if ($expr instanceof BinaryOp\BooleanAnd || $expr instanceof BinaryOp\LogicalAnd) {
             $left = $this->translateBoolean($expr->left, $env, $pc);
@@ -283,7 +327,7 @@ final class ExpressionTranslator
         }
 
         if ($expr instanceof BinaryOp\Coalesce) {
-            return $this->coalesce($expr, $env, $pc);
+            return $this->coalesce($expr, $env, $pc, $tail);
         }
 
         $left = $this->translate($expr->left, $env, $pc);
@@ -447,12 +491,12 @@ final class ExpressionTranslator
     /**
      * @param array<string, Term> $env
      */
-    private function coalesce(BinaryOp\Coalesce $expr, array $env, Term $pc): Term
+    private function coalesce(BinaryOp\Coalesce $expr, array $env, Term $pc, bool $tail): Term
     {
         $left = $this->translate($expr->left, $env, $pc);
 
         if ($left->sort->isNull()) {
-            return $this->translate($expr->right, $env, $pc);
+            return $this->translateBranch($expr->right, $env, $pc, $tail);
         }
         $inner = $left->sort->inner;
         if (!$left->sort->isNullable() || $inner === null) {
@@ -460,7 +504,10 @@ final class ExpressionTranslator
         }
 
         $left = $this->encoding->define('c', $left);
-        $right = $this->translate($expr->right, $env, Smt::all($pc, Smt::isNone($left)));
+        $right = $this->translateBranch($expr->right, $env, Smt::all($pc, Smt::isNone($left)), $tail);
+        if ($right->sort->isNever()) {
+            $right = $this->encoding->fresh('unreached', $inner);
+        }
 
         if ($right->sort->isNull()) {
             return $left;
@@ -482,15 +529,15 @@ final class ExpressionTranslator
     /**
      * @param array<string, Term> $env
      */
-    private function ternary(Ternary $expr, array $env, Term $pc): Term
+    private function ternary(Ternary $expr, array $env, Term $pc, bool $tail): Term
     {
         if ($expr->if === null) {
             throw $this->reject($expr, 'The short ternary "?:" relies on truthiness; write the condition explicitly.');
         }
 
         $condition = $this->translateBoolean($expr->cond, $env, $pc);
-        $then = $this->translate($expr->if, $this->narrow($expr->cond, true, $env), Smt::all($pc, $condition));
-        $else = $this->translate($expr->else, $this->narrow($expr->cond, false, $env), Smt::all($pc, Smt::not($condition)));
+        $then = $this->translateBranch($expr->if, $this->narrow($expr->cond, true, $env), Smt::all($pc, $condition), $tail);
+        $else = $this->translateBranch($expr->else, $this->narrow($expr->cond, false, $env), Smt::all($pc, Smt::not($condition)), $tail);
         [$then, $else] = $this->unify($expr, $then, $else);
 
         return Smt::ite($condition, $then, $else);
@@ -499,7 +546,7 @@ final class ExpressionTranslator
     /**
      * @param array<string, Term> $env
      */
-    private function match(Match_ $expr, array $env, Term $pc): Term
+    private function match(Match_ $expr, array $env, Term $pc, bool $tail): Term
     {
         $subject = $this->translate($expr->cond, $env, $pc);
         $matchesTrue = $expr->cond instanceof ConstFetch && strtolower($expr->cond->name->toString()) === 'true';
@@ -527,7 +574,7 @@ final class ExpressionTranslator
             }
             $armCondition = $this->encoding->define('arm', Smt::any(...$matches));
 
-            $value = $this->translate($arm->body, $armEnv, Smt::all($remaining, $armCondition));
+            $value = $this->translateBranch($arm->body, $armEnv, Smt::all($remaining, $armCondition), $tail);
             $arms[] = [$armCondition, $value];
             $remaining = Smt::all($remaining, Smt::not($armCondition));
             if ($matchesTrue) {
@@ -538,7 +585,7 @@ final class ExpressionTranslator
         }
 
         if ($default !== null) {
-            $fallback = $this->translate($default->body, $remainingEnv, $remaining);
+            $fallback = $this->translateBranch($default->body, $remainingEnv, $remaining, $tail);
         } else {
             if ($arms === []) {
                 throw $this->reject($expr, 'A match expression without arms is not supported.');
@@ -568,6 +615,15 @@ final class ExpressionTranslator
             return [$first, $second];
         }
 
+        // A branch that throws has no value: any value of the other branch's type stands
+        // for it, and the statement that holds the expression stops that path.
+        if ($first->sort->isNever()) {
+            return [$this->unreached($second), $second];
+        }
+        if ($second->sort->isNever()) {
+            return [$first, $this->unreached($first)];
+        }
+
         if ($first->sort->isNull() && !$second->sort->isNull()) {
             $target = $second->sort->isNullable() ? $second->sort : Sort::nullable($second->sort);
 
@@ -590,6 +646,84 @@ final class ExpressionTranslator
             $first->sort->describe(),
             $second->sort->describe(),
         ));
+    }
+
+    private function unreached(Term $like): Term
+    {
+        return $like->sort->isNull() ? $like : $this->encoding->fresh('unreached', $like->sort);
+    }
+
+    /**
+     * `throw new E(...)`. The path ends here, which the statement translator applies,
+     * and the throw must be allowed by a `#[Throws]` on that path.
+     *
+     * @param array<string, Term> $env
+     */
+    private function throwExpression(Expr\Throw_ $expr, array $env, Term $pc, bool $tail): Term
+    {
+        if ($this->throws === null) {
+            throw $this->reject($expr, match (true) {
+                $this->isContract => 'throw cannot appear in a contract.',
+                $this->inlinedFrom !== null => 'throw is not supported in a called method yet: the exception would leave the caller from inside an expression.',
+                default => 'throw is not supported here.',
+            });
+        }
+        if (!$tail) {
+            throw $this->reject($expr, 'throw is only supported as a statement, or as a whole branch of match, ?: or ?? whose value is returned or assigned.');
+        }
+
+        $new = $expr->expr;
+        if (!$new instanceof New_ || !$new->class instanceof Name) {
+            throw $this->reject($expr, 'Only `throw new Exception(...)` is supported: the exception must be built where it is thrown.');
+        }
+
+        $className = $this->classes->resolve($new->class, $this->lineOf($expr));
+        if (!$this->reflection->hasClass($className)) {
+            throw $this->reject($expr, sprintf('Class %s cannot be resolved.', $className));
+        }
+        $class = $this->reflection->getClass($className);
+        if (!$class->implementsInterface(\Throwable::class) || $class->isAbstract() || $class->isInterface()) {
+            throw $this->reject($expr, sprintf('%s is not a concrete Throwable class.', $class->getDisplayName()));
+        }
+
+        // The constructors of Exception and Error only store their arguments. Any other
+        // constructor runs code that the proof would not see.
+        $constructor = $class->getNativeReflection()->getConstructor();
+        if ($constructor === null || !in_array($constructor->getDeclaringClass()->getName(), [\Exception::class, \Error::class], true)) {
+            throw $this->reject($expr, sprintf(
+                'Cannot throw %s: its constructor is not the one of Exception or Error, so it can run code that is not verified.',
+                $class->getDisplayName(),
+            ));
+        }
+
+        $expected = ['message' => [Sort::string(), 'a string'], 'code' => [Sort::int(), 'an int'], 'previous' => null];
+        $seen = [];
+        foreach ($new->args as $position => $argument) {
+            if (!$argument instanceof Arg || $argument->unpack) {
+                throw $this->reject($expr, 'Argument unpacking is not supported.');
+            }
+            $name = $argument->name?->toString() ?? array_keys($expected)[$position] ?? null;
+            if ($name === null || !array_key_exists($name, $expected) || isset($seen[$name])) {
+                throw $this->reject($expr, sprintf('Invalid arguments for the constructor of %s.', $class->getDisplayName()));
+            }
+            $seen[$name] = true;
+
+            $value = $this->translate($argument->value, $env, $pc);
+            if ($expected[$name] === null) {
+                if (!$value->sort->isNull()) {
+                    throw $this->reject($expr, 'The previous exception can only be null here.');
+                }
+                continue;
+            }
+            if (!$value->sort->equals($expected[$name][0])) {
+                throw $this->reject($expr, sprintf('The %s of an exception must be %s, not %s.', $name, $expected[$name][1], $value->sort->describe()));
+            }
+        }
+
+        $this->obligate(ObligationKind::UnexpectedThrow, $expr, $pc, $this->throws->allowed($class));
+        $this->throws->record($pc);
+
+        return Smt::never();
     }
 
     /**

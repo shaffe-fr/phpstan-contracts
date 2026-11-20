@@ -36,6 +36,14 @@ final class Smt
         return new Term($name, $sort, true);
     }
 
+    /**
+     * The value of a `throw` expression: there is none, the path ends.
+     */
+    public static function never(): Term
+    {
+        return new Term('never', Sort::never(), true);
+    }
+
     public static function nullLiteral(): Term
     {
         return new Term('null', Sort::null(), true);
@@ -138,7 +146,7 @@ final class Smt
         return match ($left->sort->kind) {
             SortKind::Float => new Term('(fp.eq ' . $left->smt . ' ' . $right->smt . ')', Sort::bool()),
             SortKind::Nullable => self::nullableEquals($left, $right),
-            SortKind::Record, SortKind::Null => throw new LogicException('Records and null have no PHP equality here.'),
+            SortKind::Record, SortKind::Null, SortKind::Never => throw new LogicException('Records, null and never have no PHP equality here.'),
             default => self::eq($left, $right),
         };
     }

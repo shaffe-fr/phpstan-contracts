@@ -40,6 +40,11 @@ final readonly class Sort
         return new self(SortKind::Null, 'Null');
     }
 
+    public static function never(): self
+    {
+        return new self(SortKind::Never, 'Never');
+    }
+
     public static function enum(EnumSort $enum): self
     {
         return new self(SortKind::Enum, $enum->smtName, enum: $enum);
@@ -85,6 +90,11 @@ final readonly class Sort
         return $this->kind === SortKind::Null;
     }
 
+    public function isNever(): bool
+    {
+        return $this->kind === SortKind::Never;
+    }
+
     public function isNumeric(): bool
     {
         return $this->kind === SortKind::Int || $this->kind === SortKind::Float;
@@ -103,6 +113,7 @@ final readonly class Sort
             SortKind::Float => 'float',
             SortKind::String => 'string',
             SortKind::Null => 'null',
+            SortKind::Never => 'never',
             SortKind::Enum => $this->enum?->shortName() ?? $this->smt,
             SortKind::Record => $this->record?->shortName() ?? $this->smt,
             SortKind::Nullable => '?' . ($this->inner?->describe() ?? ''),

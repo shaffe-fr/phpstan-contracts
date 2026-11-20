@@ -88,7 +88,10 @@ final class StatementTranslator
             throw $this->expressions->reject($expr, 'Increment and decrement are not supported; write `$x += 1` or `$x -= 1`.');
         }
         if ($expr instanceof Expr\Throw_) {
-            throw $this->expressions->reject($expr, 'throw is not supported yet: express the valid input domain with #[Requires] instead.');
+            $this->expressions->translateTail($expr, $state->view(), $state->reached);
+            $this->expressions->takeThrows();
+
+            return $state->withReached(Smt::bool(false));
         }
 
         throw $this->expressions->reject(
@@ -104,7 +107,7 @@ final class StatementTranslator
         }
 
         $name = $target->name;
-        $term = $this->expressions->translate($value, $state->view(), $state->reached);
+        $term = $this->valueOf($value, $state, $at);
         $previous = $state->variables[$name] ?? null;
 
         if ($previous === null && $term->sort->isNull()) {
@@ -128,7 +131,35 @@ final class StatementTranslator
             ? $this->encoding->define($name . '_value', $term)
             : null;
 
-        return $state->withVariable($name, $this->encoding->define($name, $stored), $narrowedValue);
+        return $this->stopThrownPaths($state->withVariable($name, $this->encoding->define($name, $stored), $narrowedValue));
+    }
+
+    /**
+     * The value of an assignment or a `return`, where a `throw` may end some paths.
+     */
+    private function valueOf(Expr $value, State $state, Node $at): Term
+    {
+        $term = $this->expressions->translateTail($value, $state->view(), $state->reached);
+        if ($term->sort->isNever()) {
+            $this->expressions->takeThrows();
+
+            throw $this->expressions->reject($at, 'This expression always throws; write a throw statement.');
+        }
+
+        return $term;
+    }
+
+    /**
+     * Only the paths that did not throw go on to the next statement.
+     */
+    private function stopThrownPaths(State $state): State
+    {
+        $thrown = $this->expressions->takeThrows();
+        if ($thrown === []) {
+            return $state;
+        }
+
+        return $state->withReached($this->encoding->define('pc', Smt::all($state->reached, Smt::not(Smt::any(...$thrown)))));
     }
 
     private function executeReturn(Stmt\Return_ $statement, State $state): State
@@ -137,7 +168,8 @@ final class StatementTranslator
             throw $this->expressions->reject($statement, 'A bare return is not supported: verified methods must return a value.');
         }
 
-        $value = $this->expressions->translate($statement->expr, $state->view(), $state->reached);
+        $value = $this->valueOf($statement->expr, $state, $statement);
+        $state = $this->stopThrownPaths($state);
         if (!$value->sort->equals($this->resultSort)) {
             if (!$this->canCoerce($value->sort)) {
                 throw $this->expressions->reject($statement, sprintf(

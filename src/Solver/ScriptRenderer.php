@@ -15,7 +15,8 @@ use PhpstanContracts\Translate\Encoding;
  * Renders an {@see Encoding} as one SMT-LIB script containing every check.
  *
  * Checks come out in a fixed order, each introduced by an `@@<index>` marker:
- * satisfiability of the assumptions, then each obligation, then each postcondition.
+ * satisfiability of the assumptions, then each obligation, then each postcondition,
+ * then each `#[Throws]` condition, then the return type.
  * An obligation that has been checked is assumed for the checks after it, so one
  * mistake is reported once instead of cascading.
  */
@@ -33,7 +34,7 @@ final class ScriptRenderer
 
     public function checkCount(Encoding $encoding): int
     {
-        return 1 + count($encoding->obligations) + count($encoding->ensures) + ($encoding->returnTypeCheck === null ? 0 : 1);
+        return 1 + count($encoding->obligations) + count($encoding->ensures) + count($encoding->throwsChecks) + ($encoding->returnTypeCheck === null ? 0 : 1);
     }
 
     public function render(Encoding $encoding): string
@@ -70,6 +71,10 @@ final class ScriptRenderer
 
         foreach ($encoding->ensures as $ensures) {
             array_push($lines, ...$this->check($index++, Smt::not($ensures->term), $observed));
+        }
+
+        foreach ($encoding->throwsChecks as $throws) {
+            array_push($lines, ...$this->check($index++, $throws->violation, $observed));
         }
 
         if ($encoding->returnTypeCheck !== null) {

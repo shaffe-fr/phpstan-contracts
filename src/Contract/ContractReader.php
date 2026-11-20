@@ -7,9 +7,13 @@ namespace PhpstanContracts\Contract;
 use PhpstanContracts\Attribute\Ensures;
 use PhpstanContracts\Attribute\Pure;
 use PhpstanContracts\Attribute\Requires;
+use PhpstanContracts\Attribute\Throws;
 use PhpstanContracts\Exception\VerificationRejected;
 use PhpParser\Error;
 use PhpParser\Node\Attribute;
+use PhpParser\Node\Expr\ClassConstFetch;
+use PhpParser\Node\Identifier;
+use PhpParser\Node\Name;
 use PhpParser\Node\Scalar\String_;
 use PhpParser\Node\Stmt\ClassMethod;
 use PhpParser\Node\Stmt\Expression;
@@ -30,6 +34,7 @@ final class ContractReader
         $requires = [];
         $ensures = [];
         $pure = false;
+        $throws = [];
 
         foreach ($method->attrGroups as $group) {
             foreach ($group->attrs as $attribute) {
@@ -37,12 +42,46 @@ final class ContractReader
                     Requires::class => $requires[] = $this->clause($attribute),
                     Ensures::class => $ensures[] = $this->clause($attribute),
                     Pure::class => $pure = true,
+                    Throws::class => $throws[] = $this->throwsClause($attribute),
                     default => null,
                 };
             }
         }
 
-        return new MethodContract($requires, $ensures, $pure);
+        return new MethodContract($requires, $ensures, $pure, $throws);
+    }
+
+    private function throwsClause(Attribute $attribute): ThrowsClause
+    {
+        $line = $attribute->getStartLine();
+        $class = null;
+        $when = null;
+
+        foreach ($attribute->args as $position => $argument) {
+            $name = $argument->name?->toString() ?? ($position === 0 ? 'class' : ($position === 1 ? 'when' : null));
+            if ($name === 'class') {
+                $class = $argument->value;
+            } elseif ($name === 'when') {
+                $when = $argument->value;
+            } else {
+                throw new VerificationRejected('#[Throws] takes a class and an optional `when` condition.', $line, 'contracts.invalidContract');
+            }
+        }
+
+        if (
+            !$class instanceof ClassConstFetch
+            || !$class->class instanceof Name
+            || !$class->name instanceof Identifier
+            || $class->name->toLowerString() !== 'class'
+        ) {
+            throw new VerificationRejected('#[Throws] needs the exception class as `Name::class`.', $line, 'contracts.invalidContract');
+        }
+
+        return new ThrowsClause(
+            ltrim($class->class->toString(), '\\'),
+            $when === null ? null : $this->parseClause($when, $line),
+            $line,
+        );
     }
 
     private function clause(Attribute $attribute): ContractClause
@@ -50,7 +89,7 @@ final class ContractReader
         $line = $attribute->getStartLine();
         $argument = $attribute->args[0] ?? null;
 
-        if ($argument === null || !$argument->value instanceof String_) {
+        if ($argument === null) {
             throw new VerificationRejected(
                 'A contract expression must be a plain string literal.',
                 $line,
@@ -58,7 +97,20 @@ final class ContractReader
             );
         }
 
-        $source = $argument->value->value;
+        return $this->parseClause($argument->value, $line);
+    }
+
+    private function parseClause(\PhpParser\Node\Expr $value, int $line): ContractClause
+    {
+        if (!$value instanceof String_) {
+            throw new VerificationRejected(
+                'A contract expression must be a plain string literal.',
+                $line,
+                'contracts.invalidContract',
+            );
+        }
+
+        $source = $value->value;
 
         try {
             $statements = $this->parser->parse('<?php ' . $source . ';');

@@ -30,6 +30,7 @@ final class ValueFormatter
             SortKind::Nullable => $this->nullable($sort, $raw),
             SortKind::Record => $this->record($sort, $raw),
             SortKind::Null => 'null',
+            SortKind::Never => 'never',
         };
     }
 

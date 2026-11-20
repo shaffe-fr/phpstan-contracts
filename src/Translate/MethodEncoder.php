@@ -113,6 +113,23 @@ final class MethodEncoder
 
         $encoding->endAssumptions();
 
+        // The conditions of `#[Throws]` are about the inputs on entry, like a precondition.
+        $declaredThrows = [];
+        foreach ($contract->throws as $throws) {
+            if (!$this->reflectionProvider->hasClass($throws->class)) {
+                throw new VerificationRejected(sprintf('Cannot resolve class %s in #[Throws]; write its fully qualified name.', $throws->class), $throws->line, 'contracts.invalidContract');
+            }
+            $thrown = $this->reflectionProvider->getClass($throws->class);
+            if (!$thrown->implementsInterface(\Throwable::class) && $thrown->getName() !== \Throwable::class) {
+                throw new VerificationRejected(sprintf('%s is not a Throwable class.', $thrown->getDisplayName()), $throws->line, 'contracts.invalidContract');
+            }
+            $when = $throws->when === null
+                ? Smt::bool(true)
+                : $this->translator($encoding, $classes, true, $throws->line, $thisRefusal)->translateBoolean($throws->when->expression, $view, Smt::bool(true));
+            $declaredThrows[] = [$thrown->getName(), $encoding->define('throws', $when), $throws];
+        }
+        $policy = new ThrowPolicy(array_map(static fn (array $declared): array => [$declared[0], $declared[1]], $declaredThrows));
+
         $methodReflection = $node->getMethodReflection();
         $inliner = new MethodInliner(
             $encoding,
@@ -124,7 +141,7 @@ final class MethodEncoder
             $scope->getFile(),
             [sprintf('%s::%s()', $methodReflection->getDeclaringClass()->getDisplayName(), $methodReflection->getName())],
         );
-        $body = new ExpressionTranslator($encoding, $this->types, $this->enums, $classes, $this->reflectionProvider, $this->initializers, false, null, $thisRefusal, $inliner);
+        $body = new ExpressionTranslator($encoding, $this->types, $this->enums, $classes, $this->reflectionProvider, $this->initializers, false, null, $thisRefusal, $inliner, null, $policy);
         $statements = new StatementTranslator($body, $encoding, $resultSpec->sort);
         $final = $statements->execute($method->stmts ?? [], (new State($entry, Smt::bool(true)))->withView($view));
 
@@ -150,14 +167,28 @@ final class MethodEncoder
             );
         }
 
+        // A postcondition is about the paths that return. Without a throw, every path does.
         $postconditionEnv = [...$view, 'result' => $result];
         foreach ($contract->ensures as $clause) {
             $contractExpressions = $this->translator($encoding, $classes, true, $clause->line, $thisRefusal);
+            $term = $contractExpressions->translateBoolean($clause->expression, $postconditionEnv, $policy->anyThrow() ? $returnCondition : Smt::bool(true));
             $encoding->ensures[] = new EnsuresCheck(
                 $clause->source,
                 $clause->line,
-                $contractExpressions->translateBoolean($clause->expression, $postconditionEnv, Smt::bool(true)),
+                $policy->anyThrow() ? Smt::implies($returnCondition, $term) : $term,
             );
+        }
+
+        // `when` holds, so the method must throw: a return there breaks the declaration.
+        foreach ($declaredThrows as [$class, $when, $throws]) {
+            if ($throws->when !== null && !$returnCondition->isFalse()) {
+                $encoding->throwsChecks[] = new ThrowsCheck(
+                    $this->reflectionProvider->getClass($class)->getDisplayName(),
+                    $throws->when->source,
+                    $throws->line,
+                    Smt::all($returnCondition, $when),
+                );
+            }
         }
 
         return $encoding;
@@ -171,7 +202,7 @@ final class MethodEncoder
     private function usesThis(ClassMethod $method, MethodContract $contract): bool
     {
         $nodes = $method->stmts ?? [];
-        foreach ([...$contract->requires, ...$contract->ensures] as $clause) {
+        foreach ([...$contract->requires, ...$contract->ensures, ...array_filter(array_map(static fn ($throws) => $throws->when, $contract->throws))] as $clause) {
             $nodes[] = $clause->expression;
         }
 

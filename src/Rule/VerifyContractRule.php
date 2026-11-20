@@ -124,6 +124,25 @@ final class VerifyContractRule implements Rule
             }
         }
 
+        foreach ($encoding->throwsChecks as $throws) {
+            $result = $results[$cursor++];
+            $declaration = sprintf('#[Throws(%s::class, when: \'%s\')]', $throws->class, $throws->when);
+
+            if ($result->verdict === Verdict::Sat) {
+                $errors[] = $this->error(
+                    sprintf(
+                        '%s is violated: the method can return although the condition holds. Counterexample: %s.',
+                        $declaration,
+                        $this->formatter->format($encoding, $result->values, true),
+                    ),
+                    'contracts.throwsViolated',
+                    $throws->line,
+                );
+            } elseif ($result->verdict === Verdict::Unknown) {
+                $errors[] = $this->undecided($declaration, $throws->line);
+            }
+        }
+
         $returnTypeCheck = $encoding->returnTypeCheck;
         if ($returnTypeCheck !== null) {
             $result = $results[$cursor++];
@@ -157,6 +176,7 @@ final class VerifyContractRule implements Rule
             ObligationKind::InvalidCast => sprintf('`%s` is undefined for NaN, infinities and values outside the int range.', $obligation->expression),
             ObligationKind::ReturnType => sprintf('The returned value can violate the declared return type `%s`.', $obligation->expression),
             ObligationKind::RequiresViolated => sprintf('The call to %s can violate its precondition #[Requires(\'%s\')].', $obligation->context ?? 'the method', $obligation->expression),
+            ObligationKind::UnexpectedThrow => sprintf('`%s` can be reached where no #[Throws] allows it.', $obligation->expression),
         };
 
         if ($obligation->context === null || $obligation->kind === ObligationKind::RequiresViolated) {
@@ -179,6 +199,7 @@ final class VerifyContractRule implements Rule
     {
         return match ($obligation->kind) {
             ObligationKind::RequiresViolated => sprintf('the precondition #[Requires(\'%s\')] of %s', $obligation->expression, $obligation->context ?? 'the method'),
+            ObligationKind::UnexpectedThrow => sprintf('no unexpected `%s`', $obligation->expression),
             ObligationKind::Overflow => sprintf('no integer overflow in `%s`', $obligation->expression),
             ObligationKind::DivisionByZero => sprintf('no division by zero in `%s`', $obligation->expression),
             ObligationKind::UnhandledMatch => 'match exhaustiveness',

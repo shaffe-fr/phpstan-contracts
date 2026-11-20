@@ -29,6 +29,9 @@ final class Encoding
      */
     public ?Obligation $returnTypeCheck = null;
 
+    /** @var list<ThrowsCheck> */
+    public array $throwsChecks = [];
+
     /** @var list<NamedSymbol> */
     public array $inputs = [];
 
