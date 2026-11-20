@@ -124,6 +124,8 @@ final class ExpressionTranslator
             $expr instanceof Isset_ => $this->issetExpression($expr, $env, $pc),
             $expr instanceof Cast\Int_ => $this->castToInt($expr, $env, $pc),
             $expr instanceof Cast\Double => $this->castToFloat($expr, $env, $pc),
+            $expr instanceof Cast\String_ => $this->toPhpString($expr, $this->translate($expr->expr, $env, $pc)),
+            $expr instanceof Node\Scalar\InterpolatedString => $this->interpolate($expr, $env, $pc),
             default => throw $this->reject($expr, $this->explainUnsupported($expr)),
         };
     }
@@ -481,11 +483,45 @@ final class ExpressionTranslator
 
     private function concat(BinaryOp $expr, Term $left, Term $right): Term
     {
-        if (!$left->sort->isString() || !$right->sort->isString()) {
-            throw $this->reject($expr, 'Concatenation is only supported between two strings.');
+        return $this->encoding->define('s', Smt::concat($this->toPhpString($expr->left, $left), $this->toPhpString($expr->right, $right)));
+    }
+
+    /**
+     * `"$days jours"`: the parts, each converted to a string, concatenated.
+     *
+     * @param array<string, Term> $env
+     */
+    private function interpolate(Node\Scalar\InterpolatedString $expr, array $env, Term $pc): Term
+    {
+        $result = Smt::stringLiteral('');
+        foreach ($expr->parts as $part) {
+            $piece = $part instanceof Node\InterpolatedStringPart
+                ? Smt::stringLiteral($part->value)
+                : $this->toPhpString($part, $this->translate($part, $env, $pc));
+            $result = $result->smt === '""' ? $piece : Smt::concat($result, $piece);
         }
 
-        return $this->encoding->define('s', Smt::concat($left, $right));
+        return $this->encoding->define('s', $result);
+    }
+
+    /**
+     * What `.`, interpolation and `(string)` do to a value: a string is itself, an int
+     * becomes its decimal digits with a leading `-` when negative, as `php_int_to_string`
+     * defines. A float depends on the `precision` setting, so it is not modelled.
+     */
+    private function toPhpString(Node $at, Term $term): Term
+    {
+        if ($term->sort->isString()) {
+            return $term;
+        }
+        if ($term->sort->isInt()) {
+            return Smt::call('php_int_to_string', Sort::string(), $term);
+        }
+
+        throw $this->reject($at, sprintf(
+            'Converting a %s to a string is not supported: only strings and ints can be concatenated or interpolated.',
+            $term->sort->describe(),
+        ));
     }
 
     /**
@@ -1608,12 +1644,10 @@ final class ExpressionTranslator
                 => 'Assignments are only allowed as standalone statements on local variables.',
             $expr instanceof Expr\MethodCall, $expr instanceof Expr\NullsafeMethodCall
                 => 'Method calls and instantiations are not part of the verified subset yet: side effects cannot be ruled out.',
-            $expr instanceof Node\Scalar\InterpolatedString
-                => 'String interpolation is not supported; concatenate strings with ".".',
             $expr instanceof Expr\Array_, $expr instanceof Expr\ArrayDimFetch
                 => 'Arrays are not supported yet.',
             $expr instanceof Cast
-                => 'Only (int) and (float) casts are supported.',
+                => 'Only (int), (float) and (string) casts are supported.',
             $expr instanceof Expr\Closure, $expr instanceof Expr\ArrowFunction
                 => 'Closures are not supported in verified methods.',
             $expr instanceof Expr\Include_, $expr instanceof Expr\Eval_, $expr instanceof Expr\Exit_, $expr instanceof Expr\Print_, $expr instanceof Expr\ShellExec

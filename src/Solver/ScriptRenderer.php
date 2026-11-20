@@ -30,6 +30,8 @@ final class ScriptRenderer
                (ite (>= b 0) (- (div (- a) b)) (div (- a) (- b)))))
         (define-fun php_mod ((a Int) (b Int)) Int
           (ite (>= a 0) (mod a (php_abs b)) (- (mod (- a) (php_abs b)))))
+        (define-fun php_int_to_string ((n Int)) String
+          (ite (>= n 0) (str.from_int n) (str.++ "-" (str.from_int (- n)))))
         SMT;
 
     public function checkCount(Encoding $encoding): int
