@@ -52,7 +52,7 @@ Available in contracts:
 | int, float, string, bool and `null` literals; `PHP_INT_MAX`, `PHP_INT_MIN`, `NAN`, `INF`, `PHP_FLOAT_*` | `$result <= PHP_INT_MAX`, `$result === "EUR"` |
 | arithmetic `+ - * %`, unary `-` | `$result * 10000 - $net * $rate` |
 | `/` on floats | `$total / 2.0` |
-| `.` between strings | `$result === $a . "/" . $b` |
+| `.` between strings and ints, interpolation, `(string)` of an int | `$result === $a . "/" . $b`, `$result === "$days jours"` |
 | `intdiv($a, $b)`, `min($a, $b)`, `max($a, $b)`, `abs($a)` | `abs($result - $x) <= 5000` |
 | `strlen()`, `str_starts_with()`, `str_ends_with()`, `str_contains()` | `strlen($result) <= 20` |
 | `floor()`, `ceil()`, `sqrt()`, `is_nan()`, `is_infinite()`, `is_finite()`, `(int)`, `(float)` | `is_finite($result)` |
@@ -131,7 +131,8 @@ Everything in the table in [the contract language](#the-contract-language) works
 | `$x == null`, `$a == 'x'` on strings | `Comparing with null using == is true for 0, "" and false; use === null.` and `Strings compared with == are compared numerically when both look like numbers; use ===.` |
 | `$int === 1.0` | `int === float is always false in PHP; the operands have different types.` |
 | `$a === $b` on two objects | `Objects are compared by identity with ===; compare their fields instead.` |
-| `(string)`, `(bool)`, `(array)` casts | `Only (int) and (float) casts are supported.` |
+| `(bool)`, `(array)` casts | `Only (int), (float) and (string) casts are supported.` |
+| a float or a bool in `.`, in an interpolation or in `(string)` | `Converting a float to a string is not supported: only strings and ints can be concatenated or interpolated.` |
 | `min()` or `max()` on floats | `min() and max() are only supported on ints: PHP orders NaN and mixed int/float arguments in a way that is not modelled.` |
 | `round()` and any function other than those listed | `Call to round() is not part of the verified subset: purity cannot be established.` |
 | a call to a method declared in another file | `Point::sum() is declared in another file. Only methods of the same file can be called: ...` (see [Calls to other methods](#calls-to-other-methods)) |

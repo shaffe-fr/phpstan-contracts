@@ -99,6 +99,7 @@ Two things would let more tests be replaced. Modular verification, the first ite
 - `NAN === NAN` and `0.0 === -0.0`, which differ from SMT's structural equality, and are the reason the translator never uses `=` for `===`.
 - `int` to `float` conversion, which rounds for integers beyond 2^53, and `(int)` of a float, which truncates.
 - Every one of the 256 byte values as a one-character string, and `strlen`, prefix, suffix, containment and concatenation on strings with NUL bytes and non-ASCII bytes.
+- `int` to `string` conversion, on both ends of the `int` range and on random values.
 
 The random values come from a fixed seed, so a failure is reproducible.
 

@@ -190,6 +190,7 @@ After the body and the postconditions, one more check asks whether the returned 
 | `string` | `String`, with the assumption that every character of an input is in `0..255`, so that a character is a byte |
 | string literal | the same bytes, written with `\u{..}` escapes for anything that is not printable ASCII |
 | `strlen`, `.`, `str_starts_with`, `str_ends_with`, `str_contains` | `str.len`, `str.++`, `str.prefixof`, `str.suffixof`, `str.contains` |
+| an int in `.`, in an interpolation, or in `(string)` | `php_int_to_string`: `str.from_int`, with a `-` in front for a negative value |
 | enum | an algebraic datatype with one constructor per case |
 | `$enum->value`, `$enum->name` | functions defined by `ite` over the constructors |
 | `Enum::from($v)`, `Enum::tryFrom($v)` | an `ite` over the backing values, with a `contracts.invalidEnumValue` check for `from()`, and a nullable result for `tryFrom()` |

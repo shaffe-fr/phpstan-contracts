@@ -200,13 +200,31 @@ A PHP string is a sequence of bytes, and the prover models it as exactly that: e
 |---|---|
 | string literals | Including non-ASCII ones, which become their UTF-8 bytes. |
 | `===`, `!==` | |
-| `$a . $b`, `.=` | Between two strings only. |
+| `$a . $b`, `.=` | Between strings and ints. An int becomes its decimal digits, with a `-` when it is negative, which is what PHP prints. |
+| `"$days jours"`, `"Order #{$id}"`, `"($point->x, $point->y)"` | Interpolation of strings and ints, with the same conversion. |
+| `(string) $n` | On an int or a string. |
 | `strlen()` | |
 | `str_starts_with()`, `str_ends_with()`, `str_contains()` | The needle may be empty. |
 | `in_array($code, ['EUR', 'USD'], true)` | Only with `strict: true`, which compares with `===`. |
 | `non-empty-string` | Adds `strlen($s) > 0` as an assumption. |
 
-Not supported: `==` and `!=` on strings (PHP compares two numeric strings as numbers, so `"1e1" == "10"`), `<` and `>`, string interpolation, converting an `int` to a string, `substr()`, `strpos()`, `trim()`, case functions, `sprintf()`, `explode()`, and regular expressions.
+Not supported: `==` and `!=` on strings (PHP compares two numeric strings as numbers, so `"1e1" == "10"`), `<` and `>`, converting a `float` or a `bool` to a string (a float is printed according to the `precision` setting), `substr()`, `strpos()`, `trim()`, case functions, `sprintf()`, `explode()`, and regular expressions.
+
+A label built from a count is the usual place for the conversion. The version that forgets the singular is refuted:
+
+```php
+/** @param int<1, 30> $days */
+#[Ensures('implies($days === 1, $result === "1 jour")')]
+public static function inStockDelayBroken(int $days): string
+{
+    return $days . ' jours';
+}
+```
+
+```
+IntToStringFixture.php:25: Postcondition #[Ensures('implies($days === 1, $result === "1 jour")')] can be violated.
+Counterexample: $days = 1 => $result = '1 jours' (return at line 28).
+```
 
 In a contract, the attribute argument is a single-quoted PHP string, so write string literals with double quotes: `#[Ensures('$result === "EUR"')]`.
 
