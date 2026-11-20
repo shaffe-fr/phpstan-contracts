@@ -141,7 +141,7 @@ final class MethodEncoder
             $scope->getFile(),
             [sprintf('%s::%s()', $methodReflection->getDeclaringClass()->getDisplayName(), $methodReflection->getName())],
         );
-        $body = new ExpressionTranslator($encoding, $this->types, $this->enums, $classes, $this->reflectionProvider, $this->initializers, false, null, $thisRefusal, $inliner, null, $policy);
+        $body = new ExpressionTranslator($encoding, $this->types, $this->enums, $classes, $this->reflectionProvider, $this->initializers, false, null, $thisRefusal, $inliner, [], $policy);
         $statements = new StatementTranslator($body, $encoding, $resultSpec->sort);
         $final = $statements->execute($method->stmts ?? [], (new State($entry, Smt::bool(true)))->withView($view));
 

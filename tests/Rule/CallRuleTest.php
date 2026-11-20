@@ -6,6 +6,7 @@ namespace PhpstanContracts\Tests\Rule;
 
 use PhpstanContracts\Tests\Fixtures\CallFixture;
 use PhpstanContracts\Tests\Fixtures\Role;
+use PhpstanContracts\Tests\Fixtures\ShadowParent;
 use PhpstanContracts\Tests\Support\RuleFixtureTestCase;
 
 final class CallRuleTest extends RuleFixtureTestCase
@@ -23,9 +24,17 @@ final class CallRuleTest extends RuleFixtureTestCase
                 'aHelperWithSeveralReturns' => [],
                 'callsAHelperWithAnObject' => [],
                 'contractOfTheCalleeIsNotNeeded' => [],
+                'callsALateStaticHelperOfAFinalClass' => [],
+                'callsAMethodOnANestedObject' => [],
+                'callsAFinalMethodOfAClassThatIsNotFinal' => [],
 
                 'theHelperOverflowsForThisArgument' => ['contracts.overflow: `$x * 2` can leave the PHP int range, in the call to PhpstanContracts\Tests\Fixtures\CallFixture::double().'],
                 'violatesAPrecondition' => ['contracts.requiresViolated: The call to PhpstanContracts\Tests\Fixtures\CallFixture::halve() can violate its precondition #[Requires(\'$x >= 0\')]. Counterexample: $x = -'],
+                'anOverflowTwoCallsDeep' => [
+                    'contracts.overflow: `$x * 2` can leave the PHP int range, in the call to PhpstanContracts\Tests\Fixtures\CallFixture::quadruple(), through PhpstanContracts\Tests\Fixtures\CallFixture::double().',
+                    'contracts.overflow: `self::double($x) * 2` can leave the PHP int range, in the call to PhpstanContracts\Tests\Fixtures\CallFixture::quadruple().',
+                ],
+                'aPreconditionTwoCallsDeep' => ['contracts.requiresViolated: The call to PhpstanContracts\Tests\Fixtures\CallFixture::halve() can violate its precondition #[Requires(\'$x >= 0\')], in the call to PhpstanContracts\Tests\Fixtures\CallFixture::halveOf(). Counterexample: $x = -'],
 
                 'recursion' => ['contracts.unsupported: Recursive calls are not supported: PhpstanContracts\Tests\Fixtures\CallFixture::recursion() is already being translated.'],
                 'callsAMethodInAnotherFile' => ['contracts.unsupported: PhpstanContracts\Tests\Fixtures\Point::sum() is declared in another file.'],
@@ -33,6 +42,10 @@ final class CallRuleTest extends RuleFixtureTestCase
                 'callsAMethodThatIsNotVerifiable' => ['contracts.unsupported: The call to PhpstanContracts\Tests\Fixtures\CallFixture::loops() cannot be verified: Loops are not supported'],
                 'callsWithATypeThatDoesNotFit' => ['contracts.unsupported: Argument $x of PhpstanContracts\Tests\Fixtures\CallFixture::double() is bool, but the parameter is int.'],
                 'callInAContract' => ['contracts.unsupported: Method calls are not supported in contract expressions yet'],
+                'aPhpDocFloatParameterWithoutANativeType' => ['contracts.unsupported: Parameter $value of PhpstanContracts\Tests\Fixtures\CallFixture::isOne() has no native type, so PHP passes its argument as it is; declare the type in the signature.'],
+                'aNativeUnionParameter' => ['contracts.unsupported: Type float|int is not supported in verified methods'],
+                'aNativeTypeThatDiffersFromThePhpDoc' => ['contracts.unsupported: Parameter $value of PhpstanContracts\Tests\Fixtures\CallFixture::isOneOfMixed() has the native type mixed, which is what PHP converts its argument to, but the PHPDoc type float; make them agree.'],
+                'callsADeprecatedMethod' => ['contracts.unsupported: PhpstanContracts\Tests\Fixtures\CallFixture::deprecated() is #[\\Deprecated]: calling it triggers E_USER_DEPRECATED, which runs the error handler.'],
 
                 'double' => [],
                 'halve' => [],
@@ -43,6 +56,25 @@ final class CallRuleTest extends RuleFixtureTestCase
                 'isRight' => [],
                 'wrongContract' => ['contracts.ensuresViolated'],
                 'loops' => [],
+                'isOne' => [],
+                'isOneOfUnion' => [],
+                'isOneOfMixed' => [],
+                'deprecated' => [],
+                'quadruple' => [],
+                'halveOf' => [],
+            ],
+        ]);
+    }
+
+    public function testAPrivateMethodIsTheOneOfTheCallingScopeExceptForStatic(): void
+    {
+        $this->assertOutcomes([
+            ShadowParent::class => [
+                'privateMethodOfTheCallingScope' => [],
+                'privateMethodOfTheCallingScopeBroken' => ['contracts.ensuresViolated: => $result = 1'],
+                'lateStaticCallOfAPrivateMethod' => ['contracts.unsupported: PhpstanContracts\Tests\Fixtures\ShadowParent::k() can be overridden: PhpstanContracts\Tests\Fixtures\ShadowParent is not final, so a subclass can declare its own k(), which static:: calls instead, even though this one is private. Use self::, or make the class or the method final.'],
+                'm' => [],
+                'k' => [],
             ],
         ]);
     }

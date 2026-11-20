@@ -119,6 +119,61 @@ final class CallFixture
         return 2;
     }
 
+    /** @param int<0, 100> $x */
+    #[Ensures('$result === 2 * $x')]
+    public static function callsALateStaticHelperOfAFinalClass(int $x): int
+    {
+        return static::double($x);
+    }
+
+    #[Ensures('$result === intdiv($cart->subtotalCents * $cart->coupon->percent, 100)')]
+    public static function callsAMethodOnANestedObject(CallCart $cart): int
+    {
+        return $cart->coupon->discountOf($cart->subtotalCents);
+    }
+
+    #[Ensures('$result === 2 * $shape->corners')]
+    public static function callsAFinalMethodOfAClassThatIsNotFinal(OpenShape $shape): int
+    {
+        return $shape->doubledCorners();
+    }
+
+    #[Pure]
+    public static function aPhpDocFloatParameterWithoutANativeType(): bool
+    {
+        return self::isOne(1);
+    }
+
+    #[Pure]
+    public static function aNativeUnionParameter(): bool
+    {
+        return self::isOneOfUnion(1);
+    }
+
+    #[Pure]
+    public static function aNativeTypeThatDiffersFromThePhpDoc(): bool
+    {
+        return self::isOneOfMixed(1);
+    }
+
+    #[Pure]
+    public static function callsADeprecatedMethod(): int
+    {
+        return self::deprecated();
+    }
+
+    #[Pure]
+    public static function anOverflowTwoCallsDeep(int $x): int
+    {
+        return self::quadruple($x);
+    }
+
+    #[Pure]
+    public static function aPreconditionTwoCallsDeep(int $x): int
+    {
+        return self::halveOf($x);
+    }
+
     private static function double(int $x): int
     {
         return $x * 2;
@@ -178,10 +233,49 @@ final class CallFixture
 
         return $n;
     }
+
+    /**
+     * Without a native type, PHP passes the int 1 as it is, and `1 === 1.0` is false.
+     *
+     * @param float $value
+     */
+    private static function isOne($value): bool
+    {
+        return $value === 1.0;
+    }
+
+    /** @param float $value */
+    private static function isOneOfUnion(int|float $value): bool
+    {
+        return $value === 1.0;
+    }
+
+    /** @param float $value */
+    private static function isOneOfMixed(mixed $value): bool
+    {
+        return $value === 1.0;
+    }
+
+    #[\Deprecated]
+    private static function deprecated(): int
+    {
+        return 1;
+    }
+
+    private static function quadruple(int $x): int
+    {
+        return self::double($x) * 2;
+    }
+
+    private static function halveOf(int $x): int
+    {
+        return self::halve($x);
+    }
 }
 
 readonly class OpenShape
 {
+    /** @param int<0, 100> $corners */
     public function __construct(public int $corners)
     {
     }
@@ -189,5 +283,32 @@ readonly class OpenShape
     public function sides(): int
     {
         return $this->corners;
+    }
+
+    final public function doubledCorners(): int
+    {
+        return $this->corners * 2;
+    }
+}
+
+final readonly class CallCoupon
+{
+    /** @param int<0, 100> $percent */
+    public function __construct(public int $percent)
+    {
+    }
+
+    /** @param int<0, 100000> $subtotalCents */
+    public function discountOf(int $subtotalCents): int
+    {
+        return intdiv($subtotalCents * $this->percent, 100);
+    }
+}
+
+final readonly class CallCart
+{
+    /** @param int<0, 100000> $subtotalCents */
+    public function __construct(public int $subtotalCents, public CallCoupon $coupon)
+    {
     }
 }

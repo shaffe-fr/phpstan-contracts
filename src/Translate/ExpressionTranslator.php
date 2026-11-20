@@ -76,6 +76,7 @@ final class ExpressionTranslator
     /**
      * @param bool $isContract contract expressions use unbounded integer semantics, so overflow is not checked
      * @param int|null $fixedLine line reported for contract expressions, whose own line numbers are meaningless
+     * @param list<string> $calls in an inlined method, the calls that lead to it from the verified method
      */
     public function __construct(
         private readonly Encoding $encoding,
@@ -88,7 +89,7 @@ final class ExpressionTranslator
         private readonly ?int $fixedLine = null,
         private readonly string $thisRefusal = 'Object state ($this) is not part of the verified subset yet.',
         private readonly ?MethodInliner $inliner = null,
-        private readonly ?string $inlinedFrom = null,
+        private readonly array $calls = [],
         private readonly ?ThrowPolicy $throws = null,
     ) {
         $this->printer = new Standard();
@@ -700,7 +701,7 @@ final class ExpressionTranslator
         if ($this->throws === null) {
             throw $this->reject($expr, match (true) {
                 $this->isContract => 'throw cannot appear in a contract.',
-                $this->inlinedFrom !== null => 'throw is not supported in a called method yet: the exception would leave the caller from inside an expression.',
+                $this->calls !== [] => 'throw is not supported in a called method yet: the exception would leave the caller from inside an expression.',
                 default => 'throw is not supported here.',
             });
         }
@@ -1250,13 +1251,13 @@ final class ExpressionTranslator
             default => throw $this->reject($expr, sprintf('Method calls are only supported on enums and data classes, not on a %s.', $receiver->sort->describe())),
         };
 
-        return $this->inline($expr, $className, $expr->name->toString(), $this->encoding->define('recv', $receiver), true, $env, $pc);
+        return $this->inline($expr, $className, $expr->name->toString(), $this->encoding->define('recv', $receiver), false, $env, $pc);
     }
 
     /**
      * @param array<string, Term> $env
      */
-    private function inline(Expr\MethodCall|StaticCall $call, string $className, string $method, ?Term $receiver, bool $lateBound, array $env, Term $pc): Term
+    private function inline(Expr\MethodCall|StaticCall $call, string $className, string $method, ?Term $receiver, bool $lateStatic, array $env, Term $pc): Term
     {
         $inliner = $this->requireInliner($call);
         if ($call->isFirstClassCallable()) {
@@ -1271,7 +1272,7 @@ final class ExpressionTranslator
             $className,
             $method,
             $receiver,
-            $lateBound,
+            $lateStatic,
             $call->args,
             $env,
             $pc,
@@ -1562,7 +1563,7 @@ final class ExpressionTranslator
         $this->obligate(ObligationKind::DivisionByZero, $at, $pc, Smt::not(Smt::eq($divisor, Smt::int(0))));
     }
 
-    private function obligate(ObligationKind $kind, Expr $at, Term $pc, Term $goal): void
+    private function obligate(ObligationKind $kind, Expr $at, Term $pc, Term $goal, ?string $allowedWhere = null): void
     {
         $this->encoding->addObligation(new Obligation(
             $kind,
@@ -1570,7 +1571,8 @@ final class ExpressionTranslator
             $this->printer->prettyPrintExpr($at),
             $pc,
             $goal,
-            $this->inlinedFrom,
+            $this->calls,
+            $allowedWhere,
         ));
     }
 

@@ -17,8 +17,19 @@ final readonly class Obligation
         public string $expression,
         public Term $pathCondition,
         public Term $goal,
-        /** the inlined method the obligation comes from, such as `Role::level()` */
-        public ?string $context = null,
+        /**
+         * The inlined calls the obligation comes from, outermost first, such as
+         * `['Role::canManage()', 'Role::level()']`. For a precondition, the last one is
+         * the method whose `#[Requires]` it is.
+         *
+         * @var list<string>
+         */
+        public array $calls = [],
+        /**
+         * For an unexpected throw, the condition under which the `#[Throws]` declarations
+         * allow it, in words, or null when none of them declares its class.
+         */
+        public ?string $allowedWhere = null,
     ) {
     }
 }

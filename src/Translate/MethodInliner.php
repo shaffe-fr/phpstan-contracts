@@ -23,6 +23,7 @@ use PHPStan\Reflection\ClassReflection;
 use PHPStan\Reflection\ExtendedMethodReflection;
 use PHPStan\Reflection\InitializerExprTypeResolver;
 use PHPStan\Reflection\ReflectionProvider;
+use PHPStan\Type\VerbosityLevel;
 
 /**
  * A call to a method declared in the same file is translated by translating the
@@ -37,7 +38,10 @@ use PHPStan\Reflection\ReflectionProvider;
  */
 final class MethodInliner
 {
-    /** @var array<string, array<Node>> */
+    /** The file parsed last, by path and modification time: the calls of a file are translated together. */
+    private static ?string $parsedKey = null;
+
+    /** @var array<Node> */
     private static array $parsed = [];
 
     /**
@@ -59,7 +63,7 @@ final class MethodInliner
      * @param array<Node> $arguments
      * @param array<string, Term> $env the caller's environment, for the arguments
      * @param Term|null $receiver the object of an instance call, null for a static call
-     * @param bool $lateBound whether PHP picks the method from the runtime class (`$x->m()`, `static::m()`)
+     * @param bool $lateStatic whether the call is `static::m()`, which PHP looks up in the called class
      */
     public function inline(
         ExpressionTranslator $caller,
@@ -69,7 +73,7 @@ final class MethodInliner
         string $className,
         string $methodName,
         ?Term $receiver,
-        bool $lateBound,
+        bool $lateStatic,
         array $arguments,
         array $env,
         Term $pc,
@@ -83,10 +87,29 @@ final class MethodInliner
         }
 
         $method = $class->getNativeMethod($methodName);
+
+        // `$x->m()` from a class S runs the private S::m() when $x is an instance of a
+        // subclass of S, even if the subclass declares a public m(): PHP flags a method
+        // that redeclares a private one, and then picks the private method of the
+        // calling scope (zend_get_parent_private_method). Static calls do not do this.
+        if (
+            $receiver !== null
+            && $callerScope !== null
+            && $class->getName() !== $callerScope->getName()
+            && $class->isSubclassOfClass($callerScope)
+            && $callerScope->hasNativeMethod($methodName)
+        ) {
+            $scoped = $callerScope->getNativeMethod($methodName);
+            if ($scoped->isPrivate() && $scoped->getDeclaringClass()->getName() === $callerScope->getName()) {
+                $class = $callerScope;
+                $method = $scoped;
+            }
+        }
+
         $owner = $method->getDeclaringClass();
         $label = sprintf('%s::%s()', $owner->getDisplayName(), $method->getName());
 
-        $this->checkCallable($class, $method, $owner, $callerScope, $label, $receiver !== null, $lateBound, $line);
+        $this->checkCallable($class, $method, $owner, $callerScope, $label, $receiver !== null, $lateStatic, $line);
         $node = $this->findBody($owner, $method, $label, $line);
 
         if (in_array($label, $this->stack, true)) {
@@ -117,7 +140,7 @@ final class MethodInliner
         ?ClassReflection $callerScope,
         string $label,
         bool $onAnObject,
-        bool $lateBound,
+        bool $lateStatic,
         int $line,
     ): void {
         if (!$onAnObject && !$method->isStatic()) {
@@ -125,15 +148,26 @@ final class MethodInliner
         }
 
         // `$x->m()` and `static::m()` run the method of the runtime class, which can be a subclass.
-        $cannotBeOverridden = $class->isEnum()
-            || $class->isFinalByKeyword()
-            || $method->isFinalByKeyword()->yes()
-            || $method->isPrivate();
-        if ($lateBound && !$cannotBeOverridden) {
+        // A private method cannot be final: a subclass can always declare one of the same name.
+        $finalClass = $class->isEnum() || $class->isFinalByKeyword();
+        $finalMethod = $method->isFinalByKeyword()->yes() && !$method->isPrivate();
+
+        if ($onAnObject && !$finalClass && !$finalMethod && !$method->isPrivate()) {
+            // A private method is the one of the calling scope, see inline().
             throw new VerificationRejected(sprintf(
                 '%s can be overridden: %s is not final, so a subclass can replace the method. Make the class or the method final, or the method private.',
                 $label,
                 $class->getDisplayName(),
+            ), $line);
+        }
+        if ($lateStatic && !$finalClass && !$finalMethod) {
+            // `static::m()` looks the name up in the called class, whose own m() wins even over a private one.
+            throw new VerificationRejected(sprintf(
+                '%s can be overridden: %s is not final, so a subclass can declare its own %s(), which static:: calls instead%s. Use self::, or make the class or the method final.',
+                $label,
+                $class->getDisplayName(),
+                $method->getName(),
+                $method->isPrivate() ? ', even though this one is private' : '',
             ), $line);
         }
 
@@ -171,6 +205,16 @@ final class MethodInliner
         if ($methodNode->stmts === null) {
             throw new VerificationRejected(sprintf('%s has no body.', $label), $line);
         }
+        foreach ($methodNode->attrGroups as $group) {
+            foreach ($group->attrs as $attribute) {
+                if (strcasecmp($attribute->name->toString(), 'Deprecated') === 0) {
+                    throw new VerificationRejected(sprintf(
+                        '%s is #[\Deprecated]: calling it triggers E_USER_DEPRECATED, which runs the error handler.',
+                        $label,
+                    ), $line);
+                }
+            }
+        }
 
         return $methodNode;
     }
@@ -186,7 +230,32 @@ final class MethodInliner
             if ($declared === null || $declared->variadic || $declared->byRef) {
                 throw new VerificationRejected(sprintf('%s has a variadic or by-reference parameter, which is not supported.', $label), $line);
             }
-            $sorts[$parameter->getName()] = $this->types->map($parameter->getType(), $line)->sort;
+
+            // PHP converts an argument by the native type only: an int stays an int for a
+            // parameter typed `float` in PHPDoc alone, or natively `int|float`.
+            if ($declared->type === null) {
+                throw new VerificationRejected(sprintf(
+                    'Parameter $%s of %s has no native type, so PHP passes its argument as it is; declare the type in the signature.',
+                    $parameter->getName(),
+                    $label,
+                ), $line);
+            }
+            $sort = $this->types->map($parameter->getType(), $line)->sort;
+            try {
+                $native = $this->types->map($parameter->getNativeType(), $line)->sort;
+            } catch (VerificationRejected) {
+                $native = null;
+            }
+            if ($native === null || !$native->equals($sort)) {
+                throw new VerificationRejected(sprintf(
+                    'Parameter $%s of %s has the native type %s, which is what PHP converts its argument to, but the PHPDoc type %s; make them agree.',
+                    $parameter->getName(),
+                    $label,
+                    $parameter->getNativeType()->describe(VerbosityLevel::typeOnly()),
+                    $parameter->getType()->describe(VerbosityLevel::typeOnly()),
+                ), $line);
+            }
+            $sorts[$parameter->getName()] = $sort;
         }
 
         return $sorts;
@@ -229,7 +298,8 @@ final class MethodInliner
 
     /**
      * What PHP does to an argument before the callee sees it, in both typing modes:
-     * nothing, wrapping into a nullable, or converting an int to a float.
+     * nothing, wrapping into a nullable, or converting an int to a float for a
+     * parameter whose native type is `float` or `?float`, which parameterSorts() ensures.
      */
     private function coerce(Term $value, Sort $target, string $subject, int $line): Term
     {
@@ -274,7 +344,9 @@ final class MethodInliner
         $classes = new ClassNameResolver($this->reflection, $namespace, ClassNameResolver::classesOf($signature), $owner);
 
         $thisRefusal = $method->isStatic() ? 'There is no $this in a static method.' : 'Object state ($this) is not available here.';
-        $body = new ExpressionTranslator($this->encoding, $this->types, $this->enums, $classes, $this->reflection, $this->initializers, false, $line, $thisRefusal, $this, $label);
+        // The calls that lead here from the verified method, outermost first, this one last.
+        $calls = array_slice($this->stack, 1);
+        $body = new ExpressionTranslator($this->encoding, $this->types, $this->enums, $classes, $this->reflection, $this->initializers, false, $line, $thisRefusal, $this, $calls);
 
         $entry = [];
         if ($receiver !== null && !$method->isStatic()) {
@@ -295,14 +367,14 @@ final class MethodInliner
         // The callee was proven assuming its preconditions; here they are checked.
         $view = $entry;
         foreach ($this->contracts->read($node)->requires as $clause) {
-            $contract = new ExpressionTranslator($this->encoding, $this->types, $this->enums, $classes, $this->reflection, $this->initializers, true, $line, $thisRefusal, null, $label);
+            $contract = new ExpressionTranslator($this->encoding, $this->types, $this->enums, $classes, $this->reflection, $this->initializers, true, $line, $thisRefusal, null, $calls);
             $this->encoding->addObligation(new Obligation(
                 ObligationKind::RequiresViolated,
                 $line,
                 $clause->source,
                 $pc,
                 $contract->translateBoolean($clause->expression, $view, $pc),
-                $label,
+                $calls,
             ));
             $view = $contract->narrow($clause->expression, true, $view);
         }
@@ -312,7 +384,7 @@ final class MethodInliner
         $final = $statements->execute($node->stmts ?? [], (new State($entry, $pc))->withView($view));
 
         if (!$final->reached->isFalse()) {
-            $this->encoding->addObligation(new Obligation(ObligationKind::MissingReturn, $line, '', $final->reached, Smt::bool(false), $label));
+            $this->encoding->addObligation(new Obligation(ObligationKind::MissingReturn, $line, '', $final->reached, Smt::bool(false), $calls));
         }
         if ($returns->isEmpty()) {
             throw new VerificationRejected(sprintf('%s never returns.', $label), $line);
@@ -327,8 +399,8 @@ final class MethodInliner
     private function parse(string $file, int $line): array
     {
         $key = $file . ':' . (string) @filemtime($file);
-        if (isset(self::$parsed[$key])) {
-            return self::$parsed[$key];
+        if (self::$parsedKey === $key) {
+            return self::$parsed;
         }
 
         $code = @file_get_contents($file);
@@ -343,7 +415,9 @@ final class MethodInliner
         }
 
         $traverser = new NodeTraverser(new NameResolver());
+        self::$parsed = $traverser->traverse($statements);
+        self::$parsedKey = $key;
 
-        return self::$parsed[$key] = $traverser->traverse($statements);
+        return self::$parsed;
     }
 }
