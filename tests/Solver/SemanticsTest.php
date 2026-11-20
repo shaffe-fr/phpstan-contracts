@@ -140,6 +140,24 @@ final class SemanticsTest extends TestCase
         $this->assertSameResults($terms, $expected, $actual);
     }
 
+    public function testIntToStringIsTheDecimalFormLikePhp(): void
+    {
+        $values = [0, 1, -1, 9, 10, -10, 99, 100, 1000000, -1000000, PHP_INT_MAX, PHP_INT_MIN, PHP_INT_MAX - 1, PHP_INT_MIN + 1];
+        mt_srand(17);
+        for ($i = 0; $i < 200; ++$i) {
+            $values[] = mt_rand(0, 3) === 0 ? mt_rand(PHP_INT_MIN, PHP_INT_MAX) : mt_rand(-100000, 100000);
+        }
+
+        $terms = array_map(
+            static fn (int $v): string => sprintf('(= (php_int_to_string %s) %s)', Smt::int($v)->smt, Smt::stringLiteral((string) $v)->smt),
+            $values,
+        );
+        $expected = array_fill(0, count($values), 'true');
+        $actual = array_map(static fn (string|array $value): string => Z3Evaluator::integer($value), $this->z3->evaluate($terms));
+
+        $this->assertSameResults($terms, $expected, $actual);
+    }
+
     public function testIntPlusFloatConvertsTheIntFirstLikePhp(): void
     {
         $terms = [];

@@ -100,13 +100,13 @@ final class StringFixture
     }
 
     #[Pure]
-    public static function interpolationIsRejected(string $a): string
+    public static function interpolationOfAString(string $a): string
     {
         return "value: {$a}";
     }
 
     #[Pure]
-    public static function concatenatingAnIntegerIsRejected(string $a, int $n): string
+    public static function concatenatingAnInteger(string $a, int $n): string
     {
         return $a . $n;
     }

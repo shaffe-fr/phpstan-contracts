@@ -17,6 +17,7 @@ final class StatementRuleTest extends RuleFixtureTestCase
                 'matchWithOnlyADefault' => [],
                 'helper' => [],
                 'callsAnotherMethod' => [],
+                'castToString' => [],
 
                 'whileLoop' => ['contracts.unsupported: Loops are not supported'],
                 'forLoop' => ['contracts.unsupported: Loops are not supported'],
@@ -33,7 +34,6 @@ final class StatementRuleTest extends RuleFixtureTestCase
                 'callsAnUnknownFunction' => ['contracts.unsupported: Call to strtoupper() is not part of the verified subset'],
                 'closure' => ['contracts.unsupported: Closures are not supported'],
                 'arrayLiteral' => ['contracts.unsupported: Arrays are not supported yet'],
-                'castToString' => ['contracts.unsupported: Only (int) and (float) casts are supported'],
                 'shortTernary' => ['contracts.unsupported: The short ternary'],
                 'power' => ['contracts.unsupported: Operator "**" is not part of the verified subset'],
                 'spaceship' => ['contracts.unsupported: Operator "<=>" is not part of the verified subset'],

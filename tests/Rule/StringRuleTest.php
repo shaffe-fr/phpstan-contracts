@@ -23,14 +23,14 @@ final class StringRuleTest extends RuleFixtureTestCase
                 'identicalStringsHaveTheSameLength' => [],
                 'compoundConcatenation' => [],
                 'literalsConcatenate' => [],
+                'interpolationOfAString' => [],
+                'concatenatingAnInteger' => [],
 
                 'containsIsNotEndsWith' => ['contracts.ensuresViolated: Counterexample: $file = '],
                 'oneCharacterIsNotOneByte' => ['contracts.ensuresViolated: $result = "\xE2\x82\xAC"'],
 
                 'looseEqualityOfStringsIsRejected' => ['contracts.unsupported: Strings compared with =='],
                 'substrIsNotSupported' => ['contracts.unsupported: Call to substr()'],
-                'interpolationIsRejected' => ['contracts.unsupported: String interpolation is not supported'],
-                'concatenatingAnIntegerIsRejected' => ['contracts.unsupported: Concatenation is only supported between two strings'],
                 'orderingStringsIsRejected' => ['contracts.unsupported: Expected a number'],
             ],
         ]);
