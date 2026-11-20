@@ -4,11 +4,11 @@ declare(strict_types=1);
 
 namespace PhpstanContracts\Translate;
 
+use PhpstanContracts\Contract\ContractReader;
 use PhpstanContracts\Contract\MethodContract;
 use PhpstanContracts\Exception\VerificationRejected;
 use PhpstanContracts\Smt\Smt;
 use PhpstanContracts\Smt\Sort;
-use PhpstanContracts\Smt\SortKind;
 use PhpstanContracts\Smt\Term;
 use PhpParser\Node;
 use PhpParser\Node\Expr\Variable;
@@ -32,6 +32,7 @@ final class MethodEncoder
         private readonly DomainBuilder $domains,
         private readonly ReflectionProvider $reflectionProvider,
         private readonly InitializerExprTypeResolver $initializers,
+        private readonly ContractReader $contracts,
     ) {
     }
 
@@ -42,8 +43,8 @@ final class MethodEncoder
 
         /** @var array<string, Term> $entry */
         $entry = [];
-        /** @var array<string, string> $signatureClasses */
-        $signatureClasses = [];
+        /** @var list<Sort> $signature */
+        $signature = [];
 
         $declaringClass = $scope->getClassReflection();
         $thisRefusal = $method->isStatic()
@@ -67,7 +68,7 @@ final class MethodEncoder
             if ($thisSpec !== null) {
                 $term = $encoding->declareInput('this', $thisSpec->sort);
                 $encoding->assert($this->domains->constraint($thisSpec, $term, true));
-                $this->collectClasses($thisSpec->sort, $signatureClasses);
+                $signature[] = $thisSpec->sort;
                 $entry['this'] = $term;
             }
         }
@@ -88,7 +89,7 @@ final class MethodEncoder
             $spec = $this->types->map($scope->getVariableType($name), $param->getStartLine());
             $term = $encoding->declareInput($name, $spec->sort);
             $encoding->assert($this->domains->constraint($spec, $term, true));
-            $this->collectClasses($spec->sort, $signatureClasses);
+            $signature[] = $spec->sort;
 
             $entry[$name] = $term;
         }
@@ -96,10 +97,10 @@ final class MethodEncoder
         $returnLine = ($method->returnType ?? $method)->getStartLine();
         $returnType = $node->getMethodReflection()->getOnlyVariant()->getReturnType();
         $resultSpec = $this->types->map($returnType, $returnLine);
-        $this->collectClasses($resultSpec->sort, $signatureClasses);
+        $signature[] = $resultSpec->sort;
         $result = $encoding->declareResult($resultSpec->sort);
 
-        $classes = new ClassNameResolver($this->reflectionProvider, $scope->getNamespace(), $signatureClasses, $declaringClass);
+        $classes = new ClassNameResolver($this->reflectionProvider, $scope->getNamespace(), ClassNameResolver::classesOf($signature), $declaringClass);
 
         // A precondition that checks for null tells the clauses after it, the body and the
         // postconditions that the value is not null, just like an `if` would.
@@ -112,7 +113,19 @@ final class MethodEncoder
 
         $encoding->endAssumptions();
 
-        $statements = new StatementTranslator($this->translator($encoding, $classes, false, null, $thisRefusal), $encoding, $resultSpec->sort);
+        $methodReflection = $node->getMethodReflection();
+        $inliner = new MethodInliner(
+            $encoding,
+            $this->types,
+            $this->enums,
+            $this->reflectionProvider,
+            $this->initializers,
+            $this->contracts,
+            $scope->getFile(),
+            [sprintf('%s::%s()', $methodReflection->getDeclaringClass()->getDisplayName(), $methodReflection->getName())],
+        );
+        $body = new ExpressionTranslator($encoding, $this->types, $this->enums, $classes, $this->reflectionProvider, $this->initializers, false, null, $thisRefusal, $inliner);
+        $statements = new StatementTranslator($body, $encoding, $resultSpec->sort);
         $final = $statements->execute($method->stmts ?? [], (new State($entry, Smt::bool(true)))->withView($view));
 
         if (!$final->reached->isFalse()) {
@@ -166,37 +179,5 @@ final class MethodEncoder
             $nodes,
             static fn (Node $node): bool => $node instanceof Variable && $node->name === 'this',
         ) !== null;
-    }
-
-    /**
-     * Short names of the enums and data classes in the signature, so that
-     * contract strings can refer to them without a `use` statement.
-     *
-     * @param array<string, string> $classes
-     */
-    private function collectClasses(Sort $sort, array &$classes): void
-    {
-        switch ($sort->kind) {
-            case SortKind::Enum:
-                if ($sort->enum !== null) {
-                    $classes[$sort->enum->shortName()] = $sort->enum->className;
-                }
-                break;
-            case SortKind::Record:
-                if ($sort->record !== null) {
-                    $classes[$sort->record->shortName()] = $sort->record->className;
-                    foreach ($sort->record->fields as $field) {
-                        $this->collectClasses($field, $classes);
-                    }
-                }
-                break;
-            case SortKind::Nullable:
-                if ($sort->inner !== null) {
-                    $this->collectClasses($sort->inner, $classes);
-                }
-                break;
-            default:
-                break;
-        }
     }
 }

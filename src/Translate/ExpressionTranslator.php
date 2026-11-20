@@ -80,6 +80,8 @@ final class ExpressionTranslator
         private readonly bool $isContract,
         private readonly ?int $fixedLine = null,
         private readonly string $thisRefusal = 'Object state ($this) is not part of the verified subset yet.',
+        private readonly ?MethodInliner $inliner = null,
+        private readonly ?string $inlinedFrom = null,
     ) {
         $this->printer = new Standard();
     }
@@ -103,6 +105,7 @@ final class ExpressionTranslator
             $expr instanceof FuncCall => $this->functionCall($expr, $env, $pc),
             $expr instanceof ClassConstFetch => $this->classConstant($expr),
             $expr instanceof StaticCall => $this->staticCall($expr, $env, $pc),
+            $expr instanceof Expr\MethodCall => $this->methodCall($expr, $env, $pc),
             $expr instanceof PropertyFetch => $this->propertyFetch($expr, $env, $pc),
             $expr instanceof NullsafePropertyFetch => $this->nullsafePropertyFetch($expr, $env, $pc),
             $expr instanceof New_ => $this->construct($expr, $env, $pc),
@@ -998,11 +1001,22 @@ final class ExpressionTranslator
 
         $method = strtolower($expr->name->toString());
         $enum = $method === 'from' || $method === 'tryfrom'
-            ? $this->enums->find($this->classes->resolve($expr->class, $this->lineOf($expr)))
+            ? $this->enums->find($this->classes->resolveStatically($expr->class, $this->lineOf($expr)))
             : null;
 
-        if ($enum === null || $enum->backingType === null) {
-            throw $this->reject($expr, 'Method calls and instantiations are not part of the verified subset yet: side effects cannot be ruled out.');
+        if ($enum === null) {
+            return $this->inline(
+                $expr,
+                $this->classes->resolveStatically($expr->class, $this->lineOf($expr)),
+                $expr->name->toString(),
+                null,
+                $this->classes->isLateStatic($expr->class),
+                $env,
+                $pc,
+            );
+        }
+        if ($enum->backingType === null) {
+            throw $this->reject($expr, sprintf('%s is not a backed enum, so it has no %s().', $enum->shortName(), $expr->name->toString()));
         }
 
         $argument = $expr->args[0] ?? null;
@@ -1044,6 +1058,61 @@ final class ExpressionTranslator
         }
 
         return $result;
+    }
+
+    /**
+     * `$object->method(...)` on an enum case or a data object.
+     *
+     * @param array<string, Term> $env
+     */
+    private function methodCall(Expr\MethodCall $expr, array $env, Term $pc): Term
+    {
+        if (!$expr->name instanceof Identifier) {
+            throw $this->reject($expr, 'Dynamic method calls are forbidden in verified methods.');
+        }
+        $this->requireInliner($expr);
+
+        $receiver = $this->translate($expr->var, $env, $pc);
+        $className = match (true) {
+            $receiver->sort->enum !== null => $receiver->sort->enum->className,
+            $receiver->sort->record !== null => $receiver->sort->record->className,
+            $receiver->sort->isNullable() => throw $this->reject($expr, sprintf('$%s may be null here; check it first.', $this->describeSubject($expr->var))),
+            default => throw $this->reject($expr, sprintf('Method calls are only supported on enums and data classes, not on a %s.', $receiver->sort->describe())),
+        };
+
+        return $this->inline($expr, $className, $expr->name->toString(), $this->encoding->define('recv', $receiver), true, $env, $pc);
+    }
+
+    /**
+     * @param array<string, Term> $env
+     */
+    private function inline(Expr\MethodCall|StaticCall $call, string $className, string $method, ?Term $receiver, bool $lateBound, array $env, Term $pc): Term
+    {
+        $inliner = $this->requireInliner($call);
+        if ($call->isFirstClassCallable()) {
+            throw $this->reject($call, 'First-class callable syntax is not supported.');
+        }
+
+        return $inliner->inline(
+            $this,
+            $this->classes->declaringClass(),
+            $call,
+            $this->lineOf($call),
+            $className,
+            $method,
+            $receiver,
+            $lateBound,
+            $call->args,
+            $env,
+            $pc,
+        );
+    }
+
+    private function requireInliner(Expr $call): MethodInliner
+    {
+        return $this->inliner ?? throw $this->reject($call, $this->isContract
+            ? 'Method calls are not supported in contract expressions yet.'
+            : 'Method calls and instantiations are not part of the verified subset yet: side effects cannot be ruled out.');
     }
 
     /**
@@ -1331,6 +1400,7 @@ final class ExpressionTranslator
             $this->printer->prettyPrintExpr($at),
             $pc,
             $goal,
+            $this->inlinedFrom,
         ));
     }
 

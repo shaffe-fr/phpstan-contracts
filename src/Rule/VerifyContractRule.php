@@ -148,7 +148,7 @@ final class VerifyContractRule implements Rule
 
     private function describeObligation(Obligation $obligation): string
     {
-        return match ($obligation->kind) {
+        $description = match ($obligation->kind) {
             ObligationKind::Overflow => sprintf('Possible integer overflow: `%s` can leave the PHP int range.', $obligation->expression),
             ObligationKind::DivisionByZero => sprintf('Possible division by zero in `%s`.', $obligation->expression),
             ObligationKind::UnhandledMatch => 'This match expression can throw UnhandledMatchError.',
@@ -156,12 +156,29 @@ final class VerifyContractRule implements Rule
             ObligationKind::InvalidEnumValue => sprintf('`%s` can throw ValueError: the value may not be a backing value of the enum. Use tryFrom() for untrusted input.', $obligation->expression),
             ObligationKind::InvalidCast => sprintf('`%s` is undefined for NaN, infinities and values outside the int range.', $obligation->expression),
             ObligationKind::ReturnType => sprintf('The returned value can violate the declared return type `%s`.', $obligation->expression),
+            ObligationKind::RequiresViolated => sprintf('The call to %s can violate its precondition #[Requires(\'%s\')].', $obligation->context ?? 'the method', $obligation->expression),
         };
+
+        if ($obligation->context === null || $obligation->kind === ObligationKind::RequiresViolated) {
+            return $description;
+        }
+
+        return sprintf('%s, in the call to %s.', substr($description, 0, -1), $obligation->context);
     }
 
     private function claimOf(Obligation $obligation): string
     {
+        $claim = $this->plainClaimOf($obligation);
+
+        return $obligation->context === null || $obligation->kind === ObligationKind::RequiresViolated
+            ? $claim
+            : sprintf('%s, in the call to %s', $claim, $obligation->context);
+    }
+
+    private function plainClaimOf(Obligation $obligation): string
+    {
         return match ($obligation->kind) {
+            ObligationKind::RequiresViolated => sprintf('the precondition #[Requires(\'%s\')] of %s', $obligation->expression, $obligation->context ?? 'the method'),
             ObligationKind::Overflow => sprintf('no integer overflow in `%s`', $obligation->expression),
             ObligationKind::DivisionByZero => sprintf('no division by zero in `%s`', $obligation->expression),
             ObligationKind::UnhandledMatch => 'match exhaustiveness',

@@ -17,6 +17,8 @@ final readonly class Obligation
         public string $expression,
         public Term $pathCondition,
         public Term $goal,
+        /** the inlined method the obligation comes from, such as `Role::level()` */
+        public ?string $context = null,
     ) {
     }
 }

@@ -27,6 +27,7 @@ final class StatementTranslator
         private readonly ExpressionTranslator $expressions,
         private readonly Encoding $encoding,
         private readonly Sort $resultSort,
+        private readonly ?InlinedReturns $inlinedReturns = null,
     ) {
     }
 
@@ -148,7 +149,11 @@ final class StatementTranslator
             $value = $this->expressions->coerce($statement, $value, $this->resultSort);
         }
 
-        $this->encoding->recordReturn($state->reached, $value, $statement->getStartLine());
+        if ($this->inlinedReturns !== null) {
+            $this->inlinedReturns->add($state->reached, $value);
+        } else {
+            $this->encoding->recordReturn($state->reached, $value, $statement->getStartLine());
+        }
 
         return $state->withReached(Smt::bool(false));
     }

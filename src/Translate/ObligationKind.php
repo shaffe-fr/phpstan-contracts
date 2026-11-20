@@ -13,4 +13,5 @@ enum ObligationKind: string
     case InvalidEnumValue = 'invalidEnumValue';
     case InvalidCast = 'invalidCast';
     case ReturnType = 'returnType';
+    case RequiresViolated = 'requiresViolated';
 }

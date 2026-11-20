@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace PhpstanContracts\Translate;
 
 use PhpstanContracts\Exception\VerificationRejected;
+use PhpstanContracts\Smt\Sort;
+use PhpstanContracts\Smt\SortKind;
 use PhpParser\Node\Name;
 use PHPStan\Reflection\ClassReflection;
 use PHPStan\Reflection\ReflectionProvider;
@@ -99,6 +101,52 @@ final class ClassNameResolver
     public function declaringClass(): ?ClassReflection
     {
         return $this->declaringClass;
+    }
+
+    /**
+     * Short names of the enums and data classes in a signature, so that contract
+     * strings can refer to them without a `use` statement.
+     *
+     * @param list<Sort> $sorts
+     * @return array<string, string> short name => fully qualified name
+     */
+    public static function classesOf(array $sorts): array
+    {
+        $classes = [];
+        foreach ($sorts as $sort) {
+            self::collect($sort, $classes);
+        }
+
+        return $classes;
+    }
+
+    /**
+     * @param array<string, string> $classes
+     */
+    private static function collect(Sort $sort, array &$classes): void
+    {
+        switch ($sort->kind) {
+            case SortKind::Enum:
+                if ($sort->enum !== null) {
+                    $classes[$sort->enum->shortName()] = $sort->enum->className;
+                }
+                break;
+            case SortKind::Record:
+                if ($sort->record !== null) {
+                    $classes[$sort->record->shortName()] = $sort->record->className;
+                    foreach ($sort->record->fields as $field) {
+                        self::collect($field, $classes);
+                    }
+                }
+                break;
+            case SortKind::Nullable:
+                if ($sort->inner !== null) {
+                    self::collect($sort->inner, $classes);
+                }
+                break;
+            default:
+                break;
+        }
     }
 
     /**
