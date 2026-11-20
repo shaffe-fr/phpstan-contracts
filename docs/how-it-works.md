@@ -151,7 +151,7 @@ The same narrowing runs inside a single expression, for `&&`, `||`, `?:`, `??` a
 
 ## Data classes
 
-A readonly data class is a datatype with one constructor whose arguments are the properties, in order, and one accessor per property. `$cart->coupon->percent` is a chain of accessors, `new Receipt(a, b, c)` is the constructor, and the ranges that PHPDoc declares on properties become assumptions on every input of that class and goals on every returned one.
+A readonly data class is a datatype with one constructor whose arguments are its `public readonly` properties, in order, and one accessor per property. Other properties, such as the mutable state of a framework base class, are not part of the datatype, and a read of one is rejected before anything is sent to the solver. `$cart->coupon->percent` is a chain of accessors, `new Receipt(a, b, c)` is the constructor, and the ranges that PHPDoc declares on properties become assumptions on every input of that class and goals on every returned one.
 
 A class whose constructor contains logic cannot be built in a verified method, because the logic could throw and the translation would not see it. The class can still be received as a parameter: an instance only exists if its constructor accepted it, so nothing more than the property types is assumed.
 

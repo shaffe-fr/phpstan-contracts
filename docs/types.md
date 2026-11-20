@@ -10,9 +10,9 @@ A verified method can take and return the types below. Anything else is rejected
 | [`string`](#string) | `string`, `non-empty-string` | strings of bytes |
 | [enums](#enums) | pure and backed | one constructor per case |
 | [nullable](#nullable-values) | `?T`, `T\|null` for any type in this table | a value that is either none or some |
-| [data classes](#readonly-data-classes) | concrete classes with public readonly properties | a record of the properties |
+| [data classes](#readonly-data-classes) | concrete classes with public readonly properties, including DTOs of `spatie/laravel-data` | a record of the public readonly properties |
 
-Not supported: `array` and `list<T>`, `mixed`, `object`, `callable`, closures, unions of different types (`int|string`, `int|float`), `iterable`, `void`, `never`, interfaces and abstract classes, and classes with mutable properties.
+Not supported: `array` and `list<T>`, `mixed`, `object`, `callable`, closures, unions of different types (`int|string`, `int|float`), `iterable`, `void`, `never`, interfaces and abstract classes, and classes without any `public readonly` property. A class can have mutable properties as long as the proof does not read them.
 
 A class constant whose value is a single `int`, `float`, `string`, `bool` or enum case, such as `self::OFFSET` or `ErpCode::RANGE_END`, is inlined as that value, in the body and in contracts. `static::` needs a final class or a final constant. See [Class constants, `self` and `$this`](writing-contracts.md#class-constants-self-and-this).
 
@@ -618,9 +618,17 @@ public static function daysLeft(?int $deadlineDay, int $today): ?int
 A class can be a parameter, a return type, or a field of another class when all of these hold:
 
 - it is concrete (not an interface, an abstract class or an enum),
-- every instance property is `public` and `readonly` (a `readonly class` qualifies), and there is at least one,
-- every property has a supported type, which can itself be nullable or another data class, and
+- it has at least one `public readonly` property of a supported type, which can itself be nullable or another data class (a `readonly class` qualifies), and
 - it does not refer to itself.
+
+The `public readonly` properties of a supported type are the model of an instance. A readonly property cannot change once it is set, whatever the rest of the object does, so the class may hold other properties too: the proof leaves them out, and **reading one of them is rejected** with the reason. This is what lets a DTO that extends `Spatie\LaravelData\Data` be verified: its own properties are promoted `public readonly`, and the `protected` state that the base class brings in through its traits, such as `$_additional`, is never read.
+
+```
+Property App\Pricing\PriceContextData::$_additional must be public and readonly: only immutable data classes are supported.
+Property App\Pricing\PriceContextData::$lines cannot be read in a verified method: Type list<LineData> is not supported in verified methods (...).
+```
+
+A class whose properties are all left out is rejected as a type, with the reason of the first one.
 
 The classes of the examples:
 
@@ -669,10 +677,10 @@ final readonly class Receipt
 |---|---|
 | `$cart->subtotalCents`, `$cart->coupon->percent` | Nested reads. A nullable object needs a null check or `?->`. |
 | `$cart->coupon?->minimumCents` | |
-| `new Receipt(0, $total, false)` | Positional or named arguments, all of them. Only for classes whose constructor does nothing but promote every property. |
+| `new Receipt(0, $total, false)` | Positional or named arguments, all of them. Only for classes whose constructor does nothing but promote every modelled property. The properties left out of the model keep their default value. |
 | `$this->onHand` in a method of the class, `new self(...)` | `$this` is an implicit parameter of the class, with the same domain as any other. |
 
-Not supported: calling a method (including getters, and `$this->available()`), `$a === $b` and `$a == $b` between objects (identity is not modelled, compare the fields), writing to a property, and `instanceof`.
+Not supported: calling a method (including getters, and `$this->available()`), reading a property that is left out of the model, `$a === $b` and `$a == $b` between objects (identity is not modelled, compare the fields), writing to a property, and `instanceof`.
 
 A data class can carry its own rules. `$this` is a record of its properties, read like a parameter:
 

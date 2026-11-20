@@ -55,7 +55,7 @@ Even when the mathematics is fine, PHP semantics must be reproduced exactly:
 
 - Integers overflow into floats. The extension turns this into a proof obligation instead of modelling it.
 - `==` juggles types, strings convert to numbers, and `if ($x)` has a truthiness rule. The extension rejects them.
-- Objects can alias each other, and arrays are copied lazily and can hold references. Mutable state needs a heap model, which is a different and heavier technique. Immutable values avoid the problem, which is why only readonly data classes are supported.
+- Objects can alias each other, and arrays are copied lazily and can hold references. Mutable state needs a heap model, which is a different and heavier technique. Immutable values avoid the problem, which is why only the `public readonly` properties of an object are modelled, and reading any other property is rejected.
 - Exceptions, destructors, `__get` and `__call` run code that is invisible at the call site.
 
 The whitelist exists for this reason. Each item that is added is a deliberate decision to reproduce one PHP semantics exactly.

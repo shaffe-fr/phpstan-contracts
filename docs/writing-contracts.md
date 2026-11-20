@@ -132,6 +132,7 @@ Everything in the table in [the contract language](#the-contract-language) works
 | `new` on a class that is not a plain data class | `Cannot instantiate Percentage: its constructor contains logic, which is not verified.` |
 | `$this` in a class that is not an enum or a readonly data class | `Object state ($this) is only part of the verified subset in enums and readonly data classes.`, followed by the reason, such as `Property Counter::$count must be public and readonly` |
 | a method call on `$this` | `Method calls and instantiations are not part of the verified subset yet: side effects cannot be ruled out.` |
+| reading a property that is not `public readonly`, or whose type is not supported | `Property Foo::$_additional must be public and readonly: only immutable data classes are supported.` |
 | `static::LIMIT` on a class that is not final, for a constant that is not final | `static::LIMIT is late bound: a subclass of CartLimits can override the constant. Use self::LIMIT, or make the class or the constant final.` |
 | `static::` for anything else on a class that is not final, such as `new static()` | `static:: is late bound and CartLimits is not final, so a subclass can change what it refers to; use self:: or make the class final.` |
 | `parent::` | `parent:: is not supported; write the name of the parent class.` |
