@@ -64,6 +64,7 @@ Available in contracts:
 | class constants holding an int, float, string, bool or enum case | `$result < ErpCode::RANGE_END`, `self::OFFSET + $webId` |
 | `$this` in a method of an enum or a readonly data class | `implies($this === StockStatus::InStock, $result)`, `$this->onHand` |
 | property reads on a data class, `new` | `$result->totalCents`, `$cart->coupon->percent` |
+| `in_array($x, [a, b, c])`, `in_array($x, [a, b, c], true)` over a list literal or a class constant holding one | `in_array($this, [self::Administrator, self::Validator])` |
 | `implies($premise, $conclusion)`, contracts only | `implies($year % 400 === 0, $result)` |
 
 PHP has no implication operator, so `implies($a, $b)` is provided. It means `!$a || $b`, and the conclusion is read under the premise: `implies($x !== null, $x > 0)` is accepted even when `$x` is nullable.
@@ -141,10 +142,14 @@ Everything in the table in [the contract language](#the-contract-language) works
 | `Foo::class` | `Class name constants (::class) are not part of the verified subset.` |
 | `$$name`, `$f()` | `Variable variables ($$name) are forbidden in verified methods.` and `Dynamic function calls are forbidden in verified methods.` |
 | `$obj->$prop` | `Dynamic property access ($obj->$prop) is forbidden in verified methods.` |
-| arrays | `Arrays are not supported yet.` |
+| arrays, other than the list of `in_array()` | `Arrays are not supported yet.` |
+| `in_array()` without `strict: true` on a string or a nullable value | `in_array() without strict: true compares with ==, which juggles a string; pass true as the third argument.` |
+| `in_array()` on anything but a list literal or a constant holding one | `in_array() is only supported on a list literal, such as [self::A, self::B], or a class constant holding one.` |
 | a nullable value used as a number, string or float | `Expected a number (int or float) but got ?int, which may be null here: check it first with `!== null`, `isset()` or `??`.` |
 
 `min()` and `max()` take exactly two `int` arguments. `match` needs at least one arm, and without a `default` arm it must be exhaustive (see below).
+
+`in_array($x, [a, b, c], true)` is translated as `$x === a || $x === b || $x === c`, which is what PHP computes. Without `true`, PHP compares with `==`, so the needle must be an `int`, a `float`, a `bool` or an enum case, where `==` is exact: `1 == 1.0` is true, as in PHP, and enum cases compare by identity. A string or a nullable needle needs `strict: true`, because `"1e1" == "10"` and `null == 0` are true. The haystack is a list literal, whose elements can be any supported expression, or a class constant such as `self::VALIDATORS` whose value PHPStan folds to a list of scalars or enum cases.
 
 Instance methods of any class are fine as long as they never touch `$this`. In an enum or a readonly data class, `$this` is supported, see below. A method that reads `$this->state` on a class with mutable state is rejected.
 

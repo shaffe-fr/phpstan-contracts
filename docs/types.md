@@ -203,6 +203,7 @@ A PHP string is a sequence of bytes, and the prover models it as exactly that: e
 | `$a . $b`, `.=` | Between two strings only. |
 | `strlen()` | |
 | `str_starts_with()`, `str_ends_with()`, `str_contains()` | The needle may be empty. |
+| `in_array($code, ['EUR', 'USD'], true)` | Only with `strict: true`, which compares with `===`. |
 | `non-empty-string` | Adds `strlen($s) > 0` as an assumption. |
 
 Not supported: `==` and `!=` on strings (PHP compares two numeric strings as numbers, so `"1e1" == "10"`), `<` and `>`, string interpolation, converting an `int` to a string, `substr()`, `strpos()`, `trim()`, case functions, `sprintf()`, `explode()`, and regular expressions.
@@ -379,6 +380,7 @@ Pure enums and backed enums, with `int` or `string` backing values.
 | `self::Paid`, `static::Paid`, `self::from()`, `self::tryFrom()` | Inside the enum. An enum cannot be extended, so `static::` is the enum itself. |
 | a constant of the enum, `const DEFAULT = self::Pending;` | Inlined as the case or the scalar it holds. |
 | `$this` in an instance method | One of the cases: `===`, `!==`, `match ($this)`, `$this->value`, `$this->name`, and in contracts. |
+| `in_array($this, [self::Paid, self::Shipped])` | With or without `strict: true`: enum cases compare by identity either way. The list can be a constant, `in_array($this, self::FINAL_STATES)`. |
 
 Not supported: `cases()`, and calling another method on `$this` (`$this->isFinal()`), which is a method call.
 
