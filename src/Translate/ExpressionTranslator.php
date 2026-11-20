@@ -40,6 +40,7 @@ use PHPStan\Reflection\InitializerExprTypeResolver;
 use PHPStan\Reflection\ReflectionProvider;
 use PHPStan\Type\FloatType;
 use PHPStan\Type\IntegerType;
+use PHPStan\Type\Type;
 use PHPStan\Type\VerbosityLevel;
 
 /**
@@ -405,7 +406,7 @@ final class ExpressionTranslator
     /**
      * PHP `==`, allowed only where it behaves like `===` or like numeric comparison.
      */
-    private function looseEquals(BinaryOp $expr, Term $left, Term $right): Term
+    private function looseEquals(Expr $expr, Term $left, Term $right): Term
     {
         if ($left->sort->isNull() || $right->sort->isNull()) {
             throw $this->reject($expr, 'Comparing with null using == is true for 0, "" and false; use === null.');
@@ -601,6 +602,10 @@ final class ExpressionTranslator
         }
 
         $name = strtolower(ltrim($call->name->toString(), '\\'));
+        if ($name === 'in_array') {
+            return $this->inArray($call, $env, $pc);
+        }
+
         $arguments = [];
         foreach ($call->args as $argument) {
             if (!$argument instanceof Arg || $argument->unpack || $argument->name !== null) {
@@ -733,6 +738,91 @@ final class ExpressionTranslator
         return Smt::implies($premise, $conclusion);
     }
 
+    /**
+     * `in_array($needle, [a, b, c], $strict)` is `$needle === a || ...` when strict, and
+     * `$needle == a || ...` otherwise, which is what PHP computes element by element.
+     * The haystack must be a list literal, or a class constant holding one.
+     *
+     * @param array<string, Term> $env
+     */
+    private function inArray(FuncCall $call, array $env, Term $pc): Term
+    {
+        $slots = ['needle' => null, 'haystack' => null, 'strict' => null];
+        foreach ($call->args as $position => $argument) {
+            if (!$argument instanceof Arg || $argument->unpack) {
+                throw $this->reject($call, 'Argument unpacking is not supported.');
+            }
+            $slot = $argument->name?->toString() ?? array_keys($slots)[$position] ?? null;
+            if ($slot === null || !array_key_exists($slot, $slots) || $slots[$slot] !== null) {
+                throw $this->reject($call, 'in_array() takes a needle, a haystack and an optional strict flag.');
+            }
+            $slots[$slot] = $argument->value;
+        }
+        if ($slots['needle'] === null || $slots['haystack'] === null) {
+            throw $this->reject($call, 'in_array() takes a needle, a haystack and an optional strict flag.');
+        }
+
+        $strict = false;
+        if ($slots['strict'] !== null) {
+            $flag = $this->translate($slots['strict'], $env, $pc);
+            if (!$flag->isTrue() && !$flag->isFalse()) {
+                throw $this->reject($call, 'The strict argument of in_array() must be the literal true or false.');
+            }
+            $strict = $flag->isTrue();
+        }
+
+        $needle = $this->encoding->define('needle', $this->translate($slots['needle'], $env, $pc));
+        if (!$strict && !in_array($needle->sort->kind, [SortKind::Int, SortKind::Float, SortKind::Bool, SortKind::Enum], true)) {
+            throw $this->reject($call, sprintf(
+                'in_array() without strict: true compares with ==, which juggles a %s; pass true as the third argument.',
+                $needle->sort->describe(),
+            ));
+        }
+
+        $matches = [];
+        foreach ($this->listElements($slots['haystack'], $env, $pc) as $element) {
+            $matches[] = $strict
+                ? $this->identical($call, $needle, $element)
+                : $this->looseEquals($call, $needle, $element);
+        }
+
+        return Smt::any(...$matches);
+    }
+
+    /**
+     * @param array<string, Term> $env
+     * @return list<Term>
+     */
+    private function listElements(Expr $list, array $env, Term $pc): array
+    {
+        if ($list instanceof ClassConstFetch) {
+            [$type, $label] = $this->constantType($list);
+            $arrays = $type->getConstantArrays();
+            if (count($arrays) !== 1) {
+                throw $this->reject($list, sprintf('Constant %s does not hold a single array literal.', $label));
+            }
+
+            return array_values(array_map(
+                fn (Type $value): Term => $this->literalOfType($list, $value, sprintf('An element of %s', $label)),
+                $arrays[0]->getValueTypes(),
+            ));
+        }
+
+        if (!$list instanceof Expr\Array_) {
+            throw $this->reject($list, 'in_array() is only supported on a list literal, such as [self::A, self::B], or a class constant holding one.');
+        }
+
+        $elements = [];
+        foreach ($list->items as $item) {
+            if ($item->key !== null || $item->byRef || $item->unpack) {
+                throw $this->reject($list, 'in_array() is only supported on a list literal without keys, references or spreads.');
+            }
+            $elements[] = $this->translate($item->value, $env, $pc);
+        }
+
+        return $elements;
+    }
+
     private function isNull(Term $term): Term
     {
         return match (true) {
@@ -755,6 +845,58 @@ final class ExpressionTranslator
      */
     private function classConstant(ClassConstFetch $expr): Term
     {
+        if ($expr->class instanceof Name && $expr->name instanceof Identifier && $expr->name->toLowerString() !== 'class') {
+            $enum = $this->enums->find($this->classes->resolveStatically($expr->class, $this->lineOf($expr)));
+            if ($enum !== null && array_key_exists($expr->name->toString(), $enum->cases)) {
+                return $this->enumCaseTerm($enum, $expr->name->toString());
+            }
+        }
+
+        [$type, $label] = $this->constantType($expr);
+
+        return $this->literalOfType($expr, $type, 'Constant ' . $label);
+    }
+
+    /**
+     * A single scalar or a single enum case, as a literal.
+     */
+    private function literalOfType(Expr $at, Type $type, string $subject): Term
+    {
+        $cases = $type->getEnumCases();
+        if (count($cases) === 1 && $type->isObject()->yes()) {
+            $caseEnum = $this->enums->find($cases[0]->getClassName());
+            if ($caseEnum !== null && array_key_exists($cases[0]->getEnumCaseName(), $caseEnum->cases)) {
+                return $this->enumCaseTerm($caseEnum, $cases[0]->getEnumCaseName());
+            }
+        }
+
+        $values = $type->getConstantScalarValues();
+        if (count($values) === 1) {
+            $value = $values[0];
+
+            return match (true) {
+                is_int($value) => Smt::int($value),
+                is_float($value) => Smt::floatLiteral($value),
+                is_string($value) => Smt::stringLiteral($value),
+                is_bool($value) => Smt::bool($value),
+                default => Smt::nullLiteral(),
+            };
+        }
+
+        throw $this->reject($at, sprintf(
+            '%s has type %s; only constants holding a single int, float, string, bool or enum case are supported.',
+            $subject,
+            $type->describe(VerbosityLevel::typeOnly()),
+        ));
+    }
+
+    /**
+     * The value of a class constant, folded by PHPStan from its initializer.
+     *
+     * @return array{Type, string}
+     */
+    private function constantType(ClassConstFetch $expr): array
+    {
         if (!$expr->class instanceof Name || !$expr->name instanceof Identifier) {
             throw $this->reject($expr, 'Dynamic class constant access is forbidden in verified methods.');
         }
@@ -767,9 +909,6 @@ final class ExpressionTranslator
         // Late static binding is checked below, per constant: a final constant is safe even on a non-final class.
         $className = $this->classes->resolveStatically($expr->class, $this->lineOf($expr));
         $enum = $this->enums->find($className);
-        if ($enum !== null && array_key_exists($name, $enum->cases)) {
-            return $this->enumCaseTerm($enum, $name);
-        }
 
         if (!$this->reflection->hasClass($className)) {
             throw $this->reject($expr, sprintf('Class %s cannot be resolved.', $className));
@@ -813,32 +952,7 @@ final class ExpressionTranslator
             $type = $type->toFloat();
         }
 
-        $cases = $type->getEnumCases();
-        if (count($cases) === 1 && $type->isObject()->yes()) {
-            $caseEnum = $this->enums->find($cases[0]->getClassName());
-            if ($caseEnum !== null && array_key_exists($cases[0]->getEnumCaseName(), $caseEnum->cases)) {
-                return $this->enumCaseTerm($caseEnum, $cases[0]->getEnumCaseName());
-            }
-        }
-
-        $values = $type->getConstantScalarValues();
-        if (count($values) === 1) {
-            $value = $values[0];
-
-            return match (true) {
-                is_int($value) => Smt::int($value),
-                is_float($value) => Smt::floatLiteral($value),
-                is_string($value) => Smt::stringLiteral($value),
-                is_bool($value) => Smt::bool($value),
-                default => Smt::nullLiteral(),
-            };
-        }
-
-        throw $this->reject($expr, sprintf(
-            'Constant %s has type %s; only constants holding a single int, float, string, bool or enum case are supported.',
-            $label,
-            $type->describe(VerbosityLevel::typeOnly()),
-        ));
+        return [$type, $label];
     }
 
     private function enumCaseTerm(EnumSort $enum, string $case): Term
