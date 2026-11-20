@@ -6,10 +6,13 @@ namespace PhpstanContracts\Tests\Fixtures;
 
 use PhpstanContracts\Attribute\Ensures;
 use PhpstanContracts\Attribute\Pure;
+use PhpstanContracts\Attribute\Requires;
+use PhpstanContracts\Attribute\Throws;
 
 /**
- * Every method here is refuted. The replay test runs each one in PHP with the
- * values of the reported counterexample and checks that PHP agrees with Z3.
+ * Every public method here is refuted; the private ones are helpers that they
+ * call. The replay test runs each public method in PHP with the values of the
+ * reported counterexample and checks that PHP agrees with Z3.
  */
 final class ReplayFixture
 {
@@ -133,5 +136,73 @@ final class ReplayFixture
     public static function overflow(int $a, int $b): int
     {
         return $a * $b;
+    }
+
+    /** @param int<0, 1000> $days */
+    #[Ensures('strlen($result) === 7')]
+    public static function delayLabel(int $days): string
+    {
+        return $days . ' jours';
+    }
+
+    #[Ensures('$result === ($n === 1)')]
+    public static function inArrayWithoutStrict(int $n): bool
+    {
+        return in_array($n, [1, 2.0]);
+    }
+
+    #[Pure]
+    public static function overflowInACall(int $x): int
+    {
+        return self::twice($x);
+    }
+
+    /** The argument is the caller's parameter of the same name, so the replay can evaluate the precondition. */
+    #[Pure]
+    public static function brokenPreconditionOfACall(int $x): int
+    {
+        return self::halve($x);
+    }
+
+    #[Pure]
+    public static function undeclaredThrow(int $n): int
+    {
+        if ($n > 10) {
+            throw new \LogicException('Too large.');
+        }
+
+        return $n;
+    }
+
+    #[Throws(\InvalidArgumentException::class, when: '$x < 0')]
+    #[Throws(\RangeException::class, when: '$x < 10')]
+    public static function anotherClassThrownUnderACondition(int $x): int
+    {
+        if ($x < 10) {
+            throw new \RangeException('Small.');
+        }
+
+        return $x;
+    }
+
+    #[Throws(\InvalidArgumentException::class, when: '$n < 0 || $n > 100')]
+    public static function guardThatLetsTheLastValueThrough(int $n): int
+    {
+        if ($n < 0 || $n > 101) {
+            throw new \InvalidArgumentException('Out of range.');
+        }
+
+        return $n;
+    }
+
+    private static function twice(int $x): int
+    {
+        return $x * 2;
+    }
+
+    #[Requires('$x >= 0')]
+    private static function halve(int $x): int
+    {
+        return intdiv($x, 2);
     }
 }

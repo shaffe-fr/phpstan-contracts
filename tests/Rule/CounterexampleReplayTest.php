@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace PhpstanContracts\Tests\Rule;
 
 use Closure;
+use PhpstanContracts\Attribute\Throws;
 use PhpstanContracts\Tests\Fixtures\ReplayFixture;
 use PhpstanContracts\Tests\Fixtures\ReplayStatus;
 use PhpstanContracts\Tests\Support\Diagnostic;
@@ -15,6 +16,7 @@ use ReflectionMethod;
 use ReflectionNamedType;
 use ReflectionType;
 use RuntimeException;
+use Throwable;
 use TypeError;
 
 /**
@@ -23,7 +25,10 @@ use TypeError;
  * must return what the message says and falsify the contract.
  *
  * An instance method of an enum is called on the case that the message gives
- * as `$this`.
+ * as `$this`. A precondition of a called method is evaluated on the reported
+ * inputs, which the fixture passes to the callee under the same names. A throw
+ * that no `#[Throws]` allows must be thrown by PHP, and a `#[Throws]` that the
+ * method breaks must see PHP return although its condition holds.
  */
 final class CounterexampleReplayTest extends RuleFixtureTestCase
 {
@@ -39,7 +44,8 @@ final class CounterexampleReplayTest extends RuleFixtureTestCase
 
         foreach ($classes as $class) {
             foreach ((new ReflectionClass($class))->getMethods() as $method) {
-                if ($method->getDeclaringClass()->getName() !== $class || !$method->isUserDefined()) {
+                // Private methods are the helpers that the refuted methods call.
+                if ($method->getDeclaringClass()->getName() !== $class || !$method->isUserDefined() || $method->isPrivate()) {
                     continue;
                 }
 
@@ -73,6 +79,24 @@ final class CounterexampleReplayTest extends RuleFixtureTestCase
             return;
         }
 
+        if ($diagnostic->identifier === 'contracts.requiresViolated') {
+            $this->replayPrecondition($method, $diagnostic, $label);
+
+            return;
+        }
+
+        if ($diagnostic->identifier === 'contracts.unexpectedThrow') {
+            $this->replayUnexpectedThrow($method, $diagnostic, $label);
+
+            return;
+        }
+
+        if ($diagnostic->identifier === 'contracts.throwsViolated') {
+            $this->replayThrowsViolation($method, $diagnostic, $label);
+
+            return;
+        }
+
         self::assertSame('contracts.ensuresViolated', $diagnostic->identifier, $label);
 
         $parts = $this->parseViolation($diagnostic->message);
@@ -90,6 +114,69 @@ final class CounterexampleReplayTest extends RuleFixtureTestCase
         self::assertFalse(
             $this->evaluateContract($contract, $method, $object, $arguments, $actual),
             'The contract holds in PHP for the reported inputs, so the counterexample is not one. ' . $label,
+        );
+    }
+
+    private function replayPrecondition(ReflectionMethod $method, Diagnostic $diagnostic, string $label): void
+    {
+        if (preg_match('/#\[Requires\(\'(.*?)\'\)\]/s', $diagnostic->message, $matches) !== 1) {
+            self::fail('The message names no precondition: ' . $label);
+        }
+        [$object, $arguments] = $this->arguments($method, $this->between($diagnostic->message, 'Counterexample: ', '.'), $label);
+
+        self::assertFalse(
+            $this->evaluateContract($matches[1], $method, $object, $arguments, null),
+            'The precondition holds in PHP for the reported inputs. ' . $label,
+        );
+    }
+
+    private function replayUnexpectedThrow(ReflectionMethod $method, Diagnostic $diagnostic, string $label): void
+    {
+        [$object, $arguments] = $this->arguments($method, $this->between($diagnostic->message, 'Counterexample: ', '.'), $label);
+
+        $thrown = null;
+        try {
+            $method->invoke($object, ...$arguments);
+        } catch (Throwable $exception) {
+            $thrown = $exception;
+        }
+        self::assertNotNull($thrown, 'PHP did not throw. ' . $label);
+
+        // What ThrowPolicy::allowed() computes, evaluated in PHP.
+        $covered = false;
+        $conditions = true;
+        foreach ($method->getAttributes(Throws::class) as $attribute) {
+            $throws = $attribute->newInstance();
+            $holds = $throws->when === null ? null : $this->evaluateContract($throws->when, $method, $object, $arguments, null);
+            if ($thrown instanceof $throws->class) {
+                $covered = true;
+                $conditions = $conditions && $holds !== false;
+            } elseif ($holds === true) {
+                $conditions = false;
+            }
+        }
+
+        self::assertFalse($covered && $conditions, sprintf('PHP threw %s, which the #[Throws] allow. %s', $thrown::class, $label));
+    }
+
+    private function replayThrowsViolation(ReflectionMethod $method, Diagnostic $diagnostic, string $label): void
+    {
+        $pattern = '/^#\[Throws\(.*::class, when: \'(.*)\'\)\] is violated: the method can return although the condition holds\. Counterexample: (.*) => \$result = (.*) \(return at line \d+\)\.$/s';
+        if (preg_match($pattern, $diagnostic->message, $matches) !== 1) {
+            self::fail('The message has an unexpected shape: ' . $label);
+        }
+        [, $when, $inputs, $shownResult] = $matches;
+
+        [$object, $arguments] = $this->arguments($method, $inputs, $label);
+        $actual = $method->invoke($object, ...$arguments);
+
+        self::assertTrue(
+            $this->same($this->decode($shownResult, $this->typeName($method->getReturnType()), $label), $actual),
+            sprintf("PHP returns %s, the message says %s.\n%s", var_export($actual, true), $shownResult, $label),
+        );
+        self::assertTrue(
+            $this->evaluateContract($when, $method, $object, $arguments, $actual),
+            'The condition of the #[Throws] does not hold in PHP for the reported inputs. ' . $label,
         );
     }
 
