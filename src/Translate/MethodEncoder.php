@@ -51,9 +51,10 @@ final class MethodEncoder
             ? 'There is no $this in a static method.'
             : 'Object state ($this) is not part of the verified subset yet.';
 
-        // An enum case or a readonly data object has no mutable state, so `$this` is an
-        // implicit first parameter. It is declared only when used, so that the
-        // counterexamples of other instance methods stay as they are.
+        // `$this` is an implicit first parameter: its modelled properties are public readonly
+        // and cannot change during the call, and reading any other property is rejected. It
+        // is declared only when used, so that the counterexamples of other instance methods
+        // stay as they are.
         if (!$method->isStatic() && $declaringClass !== null && $this->usesThis($method, $contract)) {
             try {
                 $thisSpec = $this->types->mapClass($declaringClass->getName(), $method->getStartLine());

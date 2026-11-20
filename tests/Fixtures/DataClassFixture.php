@@ -211,4 +211,28 @@ final class DataClassFixture
     {
         return new PartlyMutable(1, []);
     }
+
+    #[Pure]
+    public static function nullsafeReadOfAMutableProperty(?PartlyMutable $object): ?int
+    {
+        return $object?->count;
+    }
+
+    #[Pure]
+    public static function issetOfAMutableProperty(PartlyMutable $object): bool
+    {
+        return isset($object->count);
+    }
+
+    #[Pure]
+    public static function onlyAPropertyOfAnUnsupportedType(OnlyTags $object): int
+    {
+        return 1;
+    }
+
+    #[Pure]
+    public static function holdsARecursiveClass(HoldsRecursive $object): int
+    {
+        return $object->count;
+    }
 }

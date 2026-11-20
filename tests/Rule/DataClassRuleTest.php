@@ -49,6 +49,10 @@ final class DataClassRuleTest extends RuleFixtureTestCase
                 'readsAMutableProperty' => ['contracts.unsupported: Property PhpstanContracts\Tests\Fixtures\PartlyMutable::$count must be public and readonly'],
                 'readsAPropertyOfAnUnsupportedType' => ['contracts.unsupported: Property PhpstanContracts\Tests\Fixtures\PartlyMutable::$tags cannot be read in a verified method: Type list<string> is not supported'],
                 'buildsAnObjectWithAnUnmodelledProperty' => ['contracts.unsupported: Cannot instantiate PartlyMutable: its constructor sets $tags, which is not modelled'],
+                'nullsafeReadOfAMutableProperty' => ['contracts.unsupported: Property PhpstanContracts\Tests\Fixtures\PartlyMutable::$count must be public and readonly'],
+                'issetOfAMutableProperty' => ['contracts.unsupported: Property PhpstanContracts\Tests\Fixtures\PartlyMutable::$count must be public and readonly'],
+                'onlyAPropertyOfAnUnsupportedType' => ['contracts.unsupported: Property PhpstanContracts\Tests\Fixtures\OnlyTags::$tags cannot be read in a verified method: Type list<string> is not supported'],
+                'holdsARecursiveClass' => ['contracts.unsupported: Class PhpstanContracts\Tests\Fixtures\Recursive refers to itself; recursive types are not supported.'],
             ],
             PriceContext::class => [
                 'isBulk' => [],
