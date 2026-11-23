@@ -55,26 +55,73 @@ final class ScriptRenderer
 
         $observed = implode(' ', $encoding->observedTerms());
 
-        foreach ($encoding->obligations as $obligation) {
-            $violation = Smt::all($obligation->pathCondition, Smt::not($obligation->goal));
+        foreach ($this->violations($encoding) as [$violation, $assumed]) {
             array_push($lines, ...$this->check($index++, $violation, $observed));
-            $lines[] = '(assert ' . Smt::implies($obligation->pathCondition, $obligation->goal)->smt . ')';
-        }
-
-        foreach ($encoding->ensures as $ensures) {
-            array_push($lines, ...$this->check($index++, Smt::not($ensures->term), $observed));
-        }
-
-        foreach ($encoding->throwsChecks as $throws) {
-            array_push($lines, ...$this->check($index++, $throws->violation, $observed));
-        }
-
-        if ($encoding->returnTypeCheck !== null) {
-            $check = $encoding->returnTypeCheck;
-            array_push($lines, ...$this->check($index++, Smt::all($check->pathCondition, Smt::not($check->goal)), $observed));
+            if ($assumed !== null) {
+                $lines[] = '(assert ' . $assumed->smt . ')';
+            }
         }
 
         return implode("\n", $lines) . "\n";
+    }
+
+    /**
+     * A script with one check, number 0, that asks again for the check `$check` of {@see self::render()}
+     * with the length of every list in the model bounded by `$maxLength`. It holds what the main
+     * script assumes before that check: the commands, and the obligations that come earlier. A
+     * model of it is therefore a model of the main check, only with shorter lists.
+     */
+    public function renderBoundedCheck(Encoding $encoding, int $check, int $maxLength): string
+    {
+        $lines = ['(set-option :produce-models true)', ...$this->declarations($encoding), self::PRELUDE, ...$encoding->commands()];
+
+        // Check 0 is the satisfiability of the assumptions, so the check n is the violation n - 1.
+        $violations = $this->violations($encoding);
+        foreach (array_slice($violations, 0, max(0, $check - 1)) as [, $assumed]) {
+            if ($assumed !== null) {
+                $lines[] = '(assert ' . $assumed->smt . ')';
+            }
+        }
+
+        [$violation] = $violations[$check - 1] ?? throw new \LogicException('There is no check number ' . $check . '.');
+        $lines[] = '(echo "@@0")';
+        $lines[] = '(assert ' . $violation->smt . ')';
+        foreach ($encoding->lengthProbes() as $length) {
+            $lines[] = sprintf('(assert (<= %s %d))', $length, $maxLength);
+        }
+        $lines[] = '(check-sat)';
+        $lines[] = '(get-value (' . implode(' ', $encoding->observedTerms()) . '))';
+
+        return implode("\n", $lines) . "\n";
+    }
+
+    /**
+     * What each check after the satisfiability of the assumptions asks Z3 to find, in script
+     * order, and for an obligation what holds once it has been checked.
+     *
+     * @return list<array{Term, Term|null}> the violation, and the assumption that follows an obligation
+     */
+    private function violations(Encoding $encoding): array
+    {
+        $violations = [];
+        foreach ($encoding->obligations as $obligation) {
+            $violations[] = [
+                Smt::all($obligation->pathCondition, Smt::not($obligation->goal)),
+                Smt::implies($obligation->pathCondition, $obligation->goal),
+            ];
+        }
+        foreach ($encoding->ensures as $ensures) {
+            $violations[] = [Smt::not($ensures->term), null];
+        }
+        foreach ($encoding->throwsChecks as $throws) {
+            $violations[] = [$throws->violation, null];
+        }
+        if ($encoding->returnTypeCheck !== null) {
+            $check = $encoding->returnTypeCheck;
+            $violations[] = [Smt::all($check->pathCondition, Smt::not($check->goal)), null];
+        }
+
+        return $violations;
     }
 
     /**

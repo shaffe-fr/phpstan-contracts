@@ -204,6 +204,57 @@ final class ScriptRendererTest extends TestCase
         self::assertStringStartsWith("(set-option :produce-models true)\n", $script);
     }
 
+    public function testABoundedCheckKeepsTheListsShortAndAssumesTheEarlierObligations(): void
+    {
+        $list = Sort::list(Sort::int());
+        $encoding = new Encoding();
+        $items = $encoding->declareInput('items', $list);
+        $encoding->declareResult(Sort::int());
+        $encoding->addObligation(new Obligation(ObligationKind::UndefinedKey, 3, '$items[0]', Smt::bool(true), Smt::compare('>', Smt::listLength($items), Smt::int(0))));
+        $encoding->ensures[] = new EnsuresCheck('count($items) < 3', 5, Smt::compare('<', Smt::listLength($items), Smt::int(3)));
+
+        $script = $this->renderer->renderBoundedCheck($encoding, 2, 10);
+        $lines = $this->afterThePrelude($script);
+
+        self::assertSame(1, $this->renderer->checkCount($encoding) - 2, 'the main script has the assumptions, the obligation and the postcondition');
+        self::assertContains('(assert (> (List_Int_len items@1) 0))', $lines, 'the obligation that came first is assumed');
+        self::assertContains('(assert (not (< (List_Int_len items@1) 3)))', $lines, 'the violation of the check is asserted');
+        self::assertContains('(assert (<= (List_Int_len items@1) 10))', $lines, 'every probed length is bounded');
+        self::assertSame(1, substr_count($script, '(check-sat)'));
+        self::assertSame(1, substr_count($script, '(echo "@@0")'), 'the answer is read as check 0');
+        self::assertStringNotContainsString('(push', $script);
+        self::assertSame(
+            '(check-sat)',
+            $lines[array_search('(assert (<= (List_Int_len items@1) 10))', $lines, true) + 1],
+            'the bounds come before the question',
+        );
+    }
+
+    public function testABoundedCheckOfTheFirstObligationAssumesNoObligation(): void
+    {
+        $encoding = new Encoding();
+        $x = $encoding->declareInput('x', Sort::int());
+        $encoding->addObligation(new Obligation(ObligationKind::Overflow, 3, '', Smt::bool(true), Smt::compare('>', $x, Smt::int(0))));
+        $encoding->addObligation(new Obligation(ObligationKind::Overflow, 4, '', Smt::bool(true), Smt::compare('<', $x, Smt::int(9))));
+
+        $first = $this->afterThePrelude($this->renderer->renderBoundedCheck($encoding, 1, 10));
+        $second = $this->afterThePrelude($this->renderer->renderBoundedCheck($encoding, 2, 10));
+
+        self::assertNotContains('(assert (> x@1 0))', $first);
+        self::assertContains('(assert (not (> x@1 0)))', $first);
+        self::assertContains('(assert (> x@1 0))', $second);
+        self::assertContains('(assert (not (< x@1 9)))', $second);
+    }
+
+    public function testABoundedCheckThatDoesNotExistIsRefused(): void
+    {
+        $encoding = new Encoding();
+        $encoding->declareInput('x', Sort::int());
+
+        $this->expectException(\LogicException::class);
+        $this->renderer->renderBoundedCheck($encoding, 1, 10);
+    }
+
     /**
      * @return list<string> the lines that follow the fixed prelude
      */

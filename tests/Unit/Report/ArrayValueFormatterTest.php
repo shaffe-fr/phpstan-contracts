@@ -117,6 +117,28 @@ final class ArrayValueFormatterTest extends TestCase
         self::assertSame("['n' => 1, 'tags' => ['EUR']]", $this->formatter->format($sort, $raw, 't@1', $probes));
     }
 
+    public function testAnArrayThatZ3SharesWithALetIsResolvedBeforeItIsRead(): void
+    {
+        $sort = Sort::list(Sort::int());
+        $raw = SExpr::parse('(let ((a!1 (store ((as const (Array Int Int)) 3) 0 1))) (mk_List_Int 1 a!1))')[0];
+        $probes = [];
+        for ($index = 0; $index < 10; ++$index) {
+            $probes[sprintf('(select (List_Int_items l@1) %d)', $index)] = $index === 0 ? '1' : '3';
+        }
+
+        self::assertSame('[1]', $this->formatter->format($sort, $raw, 'l@1', $probes));
+    }
+
+    public function testASharedArrayInsideAShapeIsResolved(): void
+    {
+        $list = Sort::list(Sort::int());
+        $sort = Sort::shape(ShapeSort::of(['items' => $list, 'n' => Sort::int()]), ['n', 'items']);
+        $raw = SExpr::parse(sprintf('(let ((a!1 (store ((as const (Array Int Int)) 0) 0 5))) (mk_%s (mk_List_Int 1 a!1) 2))', $sort->smt))[0];
+        $probes = [sprintf('(select (List_Int_items (%s_0 t@1)) 0)', $sort->smt) => '5'];
+
+        self::assertSame("['n' => 2, 'items' => [5]]", $this->formatter->format($sort, $raw, 't@1', $probes));
+    }
+
     public function testAnEmptyListLiteralHasNoValueToPrint(): void
     {
         self::assertSame('[]', $this->formatter->format(Sort::emptyList(), 'x'));

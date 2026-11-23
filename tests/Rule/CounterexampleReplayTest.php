@@ -65,6 +65,11 @@ final class CounterexampleReplayTest extends RuleFixtureTestCase
     private function replay(ReflectionMethod $method, Diagnostic $diagnostic): void
     {
         $label = $method->getName() . ': ' . $diagnostic->message;
+        self::assertDoesNotMatchRegularExpression(
+            '/a list of \d+ elements starting with/',
+            $diagnostic->message,
+            'The counterexample is not replayable: it holds a list too long to print, and the bounded re-run did not shorten it. ' . $label,
+        );
 
         if ($diagnostic->identifier === 'contracts.overflow') {
             [$object, $arguments] = $this->arguments($method, $this->between($diagnostic->message, 'Counterexample: ', '.'), $label);

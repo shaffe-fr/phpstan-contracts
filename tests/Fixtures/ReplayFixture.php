@@ -331,6 +331,68 @@ final class ReplayFixture
         return count($order['items']) === 0 ? 'none' : $order['label'];
     }
 
+    /**
+     * NAN is equal to nothing, itself included.
+     */
+    #[Ensures('$result')]
+    public static function aFloatIsNotFoundInItsOwnList(float $x): bool
+    {
+        $items = [$x];
+
+        return in_array($x, $items, true);
+    }
+
+    /**
+     * -0.0 is found as 0.0.
+     */
+    #[Ensures('!$result')]
+    public static function zeroIsFoundInAListOfZero(float $x): bool
+    {
+        $items = [0.0];
+
+        return in_array($x, $items, true);
+    }
+
+    /**
+     * @param list<?int> $items
+     */
+    #[Ensures('!$result')]
+    public static function aNullIsFoundInAListOfNullableInts(array $items): bool
+    {
+        return in_array(null, $items, true);
+    }
+
+    /**
+     * @param list<int> $first
+     * @param list<int> $second
+     */
+    #[Ensures('!$result')]
+    public static function twoListsCanBeIdentical(array $first, array $second): bool
+    {
+        return $first === $second;
+    }
+
+    /**
+     * @param list<int> $items
+     */
+    #[Ensures('count($items) < 3')]
+    public static function claimsEveryListIsShort(array $items): int
+    {
+        return count($items);
+    }
+
+    /**
+     * Z3 picks the length of the list freely: its first model for this check is a list of thousands
+     * of elements, so what is printed, and replayed here, is the model of the bounded re-run.
+     *
+     * @param list<int> $items
+     */
+    #[Ensures('!$result')]
+    public static function aNeedleIsFoundInALongList(array $items, int $n): bool
+    {
+        return in_array($n, $items, true);
+    }
+
     private static function twice(int $x): int
     {
         return $x * 2;

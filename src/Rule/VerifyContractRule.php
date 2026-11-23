@@ -16,6 +16,7 @@ use PhpstanContracts\Translate\Encoding;
 use PhpstanContracts\Translate\MethodEncoder;
 use PhpstanContracts\Translate\Obligation;
 use PhpstanContracts\Translate\ObligationKind;
+use PhpstanContracts\Translate\ProbePlanner;
 use PhpParser\Node;
 use PHPStan\Analyser\Scope;
 use PHPStan\Node\InClassMethodNode;
@@ -104,14 +105,15 @@ final class VerifyContractRule implements Rule
         }
 
         foreach ($encoding->obligations as $obligation) {
-            $result = $results[$cursor++];
+            $check = $cursor++;
+            $result = $results[$check];
 
             if ($result->verdict === Verdict::Sat) {
                 $errors[] = $this->error(
                     sprintf(
                         '%s Counterexample: %s.',
                         $this->describeObligation($obligation),
-                        $this->formatter->format($encoding, $result->values, false),
+                        $this->counterexample($encoding, $check, $result, false),
                     ),
                     'contracts.' . $obligation->kind->value,
                     $obligation->line,
@@ -122,14 +124,15 @@ final class VerifyContractRule implements Rule
         }
 
         foreach ($encoding->ensures as $ensures) {
-            $result = $results[$cursor++];
+            $check = $cursor++;
+            $result = $results[$check];
 
             if ($result->verdict === Verdict::Sat) {
                 $errors[] = $this->error(
                     sprintf(
                         'Postcondition #[Ensures(\'%s\')] can be violated. Counterexample: %s.',
                         $ensures->source,
-                        $this->formatter->format($encoding, $result->values, true),
+                        $this->counterexample($encoding, $check, $result, true),
                     ),
                     'contracts.ensuresViolated',
                     $ensures->line,
@@ -140,7 +143,8 @@ final class VerifyContractRule implements Rule
         }
 
         foreach ($encoding->throwsChecks as $throws) {
-            $result = $results[$cursor++];
+            $check = $cursor++;
+            $result = $results[$check];
             $declaration = sprintf('#[Throws(%s::class, when: \'%s\')]', $throws->class, $throws->when);
 
             if ($result->verdict === Verdict::Sat) {
@@ -148,7 +152,7 @@ final class VerifyContractRule implements Rule
                     sprintf(
                         '%s is violated: the method can return although the condition holds. Counterexample: %s.',
                         $declaration,
-                        $this->formatter->format($encoding, $result->values, true),
+                        $this->counterexample($encoding, $check, $result, true),
                     ),
                     'contracts.throwsViolated',
                     $throws->line,
@@ -160,14 +164,15 @@ final class VerifyContractRule implements Rule
 
         $returnTypeCheck = $encoding->returnTypeCheck;
         if ($returnTypeCheck !== null) {
-            $result = $results[$cursor++];
+            $check = $cursor++;
+            $result = $results[$check];
 
             if ($result->verdict === Verdict::Sat) {
                 $errors[] = $this->error(
                     sprintf(
                         '%s Counterexample: %s.',
                         $this->describeObligation($returnTypeCheck),
-                        $this->formatter->format($encoding, $result->values, true),
+                        $this->counterexample($encoding, $check, $result, true),
                     ),
                     'contracts.' . $returnTypeCheck->kind->value,
                     $returnTypeCheck->line,
@@ -178,6 +183,29 @@ final class VerifyContractRule implements Rule
         }
 
         return $errors;
+    }
+
+    /**
+     * Z3 picks the length of a list freely, and a counterexample that needs one element can come
+     * back with thousands. When the model holds a list too long to print, the check is asked
+     * again with every probed list kept to {@see ProbePlanner::MAX_ELEMENTS} elements: that model
+     * satisfies everything the first one did, so it is as genuine, and it can be printed in full.
+     * If the second question is not answered with a model, the long form is kept.
+     */
+    private function counterexample(Encoding $encoding, int $check, SolverResult $result, bool $withResult): string
+    {
+        $text = $this->formatter->format($encoding, $result->values, $withResult);
+        if (!$this->formatter->isTruncated($text)) {
+            return $text;
+        }
+
+        try {
+            $bounded = $this->z3->run($this->renderer->renderBoundedCheck($encoding, $check, ProbePlanner::MAX_ELEMENTS), 1)[0];
+        } catch (SolverFailure) {
+            return $text;
+        }
+
+        return $bounded->verdict === Verdict::Sat ? $this->formatter->format($encoding, $bounded->values, $withResult) : $text;
     }
 
     private function describeObligation(Obligation $obligation): string

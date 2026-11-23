@@ -257,6 +257,17 @@ final class Encoding
     }
 
     /**
+     * The terms among {@see self::observedTerms()} that are the length of a list, which a
+     * counterexample can be asked to keep short.
+     *
+     * @return list<string>
+     */
+    public function lengthProbes(): array
+    {
+        return array_values(array_filter($this->observedTerms(), static fn (string $term): bool => ProbePlanner::isLength($term)));
+    }
+
+    /**
      * Symbols whose value is read back from a counterexample.
      *
      * @return list<NamedSymbol>

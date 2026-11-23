@@ -13,6 +13,9 @@ use PhpstanContracts\Translate\ProbePlanner;
  */
 final class ValueFormatter
 {
+    /** What the long form of a list holds between its length and its first elements, which is not a PHP literal. */
+    public const LONG_LIST = ' elements starting with [';
+
     /**
      * @param string|list<mixed>|null $raw
      * @param string $term the SMT term whose value `$raw` is, which names the probes of the lists inside it
@@ -22,6 +25,9 @@ final class ValueFormatter
     {
         if ($raw === null) {
             return 'any';
+        }
+        if (is_array($raw)) {
+            $raw = $this->resolveLets($raw);
         }
 
         return match ($sort->kind) {
@@ -38,6 +44,45 @@ final class ValueFormatter
             SortKind::Null => 'null',
             SortKind::Never => 'never',
         };
+    }
+
+    /**
+     * Z3 shares a repeated array in a model with `(let ((a!1 <array>)) (mk_List_Int 1 a!1))`; the
+     * bound names are replaced by their values so that a datatype value is always the constructor
+     * applied to its fields.
+     *
+     * @param string|list<mixed> $raw
+     * @param array<string, string|list<mixed>> $bound
+     * @return string|list<mixed>
+     */
+    private function resolveLets(string|array $raw, array $bound = []): string|array
+    {
+        if (is_string($raw)) {
+            return $bound[$raw] ?? $raw;
+        }
+        if (($raw[0] ?? null) === 'let' && count($raw) === 3 && is_array($raw[1])) {
+            $inner = $bound;
+            foreach ($raw[1] as $binding) {
+                if (is_array($binding) && count($binding) === 2 && is_string($binding[0]) && (is_string($binding[1]) || is_array($binding[1]))) {
+                    /** @var string|list<mixed> $value */
+                    $value = $binding[1];
+                    $inner[$binding[0]] = $this->resolveLets($value, $bound);
+                }
+            }
+
+            /** @var string|list<mixed> $body */
+            $body = $raw[2];
+
+            return $this->resolveLets($body, $inner);
+        }
+
+        $parts = [];
+        foreach ($raw as $part) {
+            /** @var string|list<mixed> $part */
+            $parts[] = $this->resolveLets($part, $bound);
+        }
+
+        return $parts;
     }
 
     /**
@@ -149,7 +194,7 @@ final class ValueFormatter
         }
 
         if ((int) $length > ProbePlanner::MAX_ELEMENTS) {
-            return sprintf('a list of %s elements starting with [%s]', $length, implode(', ', $shown));
+            return sprintf('a list of %s%s%s]', $length, self::LONG_LIST, implode(', ', $shown));
         }
 
         return '[' . implode(', ', $shown) . ']';

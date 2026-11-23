@@ -13,6 +13,14 @@ final class CounterexampleFormatter
     }
 
     /**
+     * Whether a counterexample holds a list too long to print, in the form that is not a PHP literal.
+     */
+    public function isTruncated(string $text): bool
+    {
+        return str_contains($text, ValueFormatter::LONG_LIST);
+    }
+
+    /**
      * @param array<string, string|list<mixed>> $values
      */
     public function format(Encoding $encoding, array $values, bool $withResult): string

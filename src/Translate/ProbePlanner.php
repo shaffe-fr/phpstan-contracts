@@ -73,6 +73,11 @@ final class ProbePlanner
         return sprintf('(%s_len %s)', $list->smt, $term);
     }
 
+    public static function isLength(string $term): bool
+    {
+        return preg_match('/^\(List_\w+_len /', $term) === 1;
+    }
+
     public static function item(string $term, Sort $list, int $index): string
     {
         return sprintf('(select (%s_items %s) %d)', $list->smt, $term, $index);
