@@ -229,7 +229,12 @@ final class ExpressionTranslator
             return $subject !== null && $nonNull ? $this->markNonNull($subject, $env) : $env;
         }
 
-        if ($condition instanceof FuncCall && $condition->name instanceof Name && strtolower($condition->name->toString()) === 'is_null') {
+        if (
+            $condition instanceof FuncCall
+            && $condition->name instanceof Name
+            && strtolower($condition->name->toString()) === 'is_null'
+            && $this->isGlobalFunction($condition->name, 'is_null')
+        ) {
             $argument = $condition->args[0] ?? null;
 
             return $argument instanceof Arg && !$truth ? $this->markNonNull($argument->value, $env) : $env;
@@ -256,19 +261,51 @@ final class ExpressionTranslator
 
     private function constant(ConstFetch $expr): Term
     {
-        return match (strtolower(ltrim($expr->name->toString(), '\\'))) {
+        $name = ltrim($expr->name->toString(), '\\');
+
+        // true, false and null are the only case-insensitive constants, and no namespace can declare them.
+        $keyword = match (strtolower($name)) {
             'true' => Smt::bool(true),
             'false' => Smt::bool(false),
             'null' => Smt::nullLiteral(),
-            'php_int_max' => Smt::int(PHP_INT_MAX),
-            'php_int_min' => Smt::int(PHP_INT_MIN),
-            'nan' => Smt::floatLiteral(NAN),
-            'inf' => Smt::floatLiteral(INF),
-            'php_float_epsilon' => Smt::floatLiteral(PHP_FLOAT_EPSILON),
-            'php_float_max' => Smt::floatLiteral(PHP_FLOAT_MAX),
-            'php_float_min' => Smt::floatLiteral(PHP_FLOAT_MIN),
+            default => null,
+        };
+        if ($keyword !== null) {
+            return $keyword;
+        }
+
+        if (!$this->isGlobalConstant($expr->name, $name)) {
+            throw $this->reject($expr, sprintf(
+                'Constant %s\\%s is not part of the verified subset: PHP reads it instead of the built-in constant.',
+                $this->classes->namespace(),
+                $name,
+            ));
+        }
+
+        return match ($name) {
+            'PHP_INT_MAX' => Smt::int(PHP_INT_MAX),
+            'PHP_INT_MIN' => Smt::int(PHP_INT_MIN),
+            'NAN' => Smt::floatLiteral(NAN),
+            'INF' => Smt::floatLiteral(INF),
+            'PHP_FLOAT_EPSILON' => Smt::floatLiteral(PHP_FLOAT_EPSILON),
+            'PHP_FLOAT_MAX' => Smt::floatLiteral(PHP_FLOAT_MAX),
+            'PHP_FLOAT_MIN' => Smt::floatLiteral(PHP_FLOAT_MIN),
             default => throw $this->reject($expr, sprintf('Constant %s is not part of the verified subset.', $expr->name->toString())),
         };
+    }
+
+    /**
+     * Whether a constant resolves to the global one: an unqualified name in a namespace
+     * reads the constant of that namespace when there is one, as PHP does at runtime.
+     */
+    private function isGlobalConstant(Name $name, string $constant): bool
+    {
+        $namespace = $this->classes->namespace();
+        if ($name->isFullyQualified() || $namespace === null || $namespace === '') {
+            return true;
+        }
+
+        return !$this->reflection->hasConstant(new Name\FullyQualified($namespace . '\\' . $constant), null);
     }
 
     /**
@@ -777,15 +814,15 @@ final class ExpressionTranslator
         }
 
         $name = strtolower(ltrim($call->name->toString(), '\\'));
+        // implies() is not a PHP function: it only exists in contracts, which PHP never runs.
+        if ($name !== 'implies' && !$this->isGlobalFunction($call->name, $name)) {
+            throw $this->reject($call, sprintf(
+                'Call to %s\\%s() is not part of the verified subset: purity cannot be established.',
+                $this->classes->namespace(),
+                $call->name->toString(),
+            ));
+        }
         if ($name === 'in_array') {
-            if (!$this->isGlobalFunction($call->name, $name)) {
-                throw $this->reject($call, sprintf(
-                    'Call to %s\\%s() is not part of the verified subset: purity cannot be established.',
-                    $this->classes->namespace(),
-                    $call->name->toString(),
-                ));
-            }
-
             return $this->inArray($call, $env, $pc);
         }
 
