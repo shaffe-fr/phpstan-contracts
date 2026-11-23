@@ -4,7 +4,13 @@ declare(strict_types=1);
 
 namespace PhpstanContracts\Tests\Solver;
 
+use LogicException;
+use PhpstanContracts\Smt\ShapeSort;
 use PhpstanContracts\Smt\Smt;
+use PhpstanContracts\Smt\Sort;
+use PhpstanContracts\Smt\Term;
+use PhpstanContracts\Solver\ScriptRenderer;
+use PhpstanContracts\Translate\Encoding;
 use PhpstanContracts\Tests\Support\RequiresZ3;
 use PhpstanContracts\Tests\Support\Z3Evaluator;
 use PHPUnit\Framework\TestCase;
@@ -279,6 +285,80 @@ final class SemanticsTest extends TestCase
         }
 
         return $pairs;
+    }
+
+    /**
+     * A shape is built with its fields in the canonical order of its sort, whatever order the
+     * literal is written in, and `$shape['key']` is the accessor of that key: PHP reads the
+     * value that was stored under the key.
+     */
+    public function testShapeFieldReadsReturnTheValueOfThatKeyLikePhp(): void
+    {
+        $fieldSorts = [
+            'net' => Sort::int(),
+            'label' => Sort::string(),
+            'ratio' => Sort::float(),
+            'note' => Sort::nullable(Sort::string()),
+            'ok' => Sort::bool(),
+        ];
+        $sort = Sort::shape(ShapeSort::of($fieldSorts), array_keys($fieldSorts));
+        $arrays = [
+            ['ratio' => -0.0, 'note' => null, 'ok' => true, 'net' => PHP_INT_MIN, 'label' => "a\0\xC3\xA9"],
+            ['note' => 'x', 'label' => '', 'net' => PHP_INT_MAX, 'ratio' => NAN, 'ok' => false],
+            ['net' => 0, 'label' => 'EUR', 'ratio' => INF, 'note' => '', 'ok' => true],
+        ];
+
+        $encoding = new Encoding();
+        $encoding->registerSort($sort);
+        $terms = [];
+        $expected = [];
+        foreach ($arrays as $index => $array) {
+            $other = $arrays[($index + 1) % count($arrays)];
+            // An ite hides the components of the literal, so the read goes through the accessor of the datatype.
+            $selected = new Term(
+                sprintf('(ite (= 1 1) %s %s)', $this->shapeLiteral($sort, $array)->smt, $this->shapeLiteral($sort, $other)->smt),
+                $sort,
+            );
+            foreach ($array as $key => $value) {
+                $terms[] = sprintf('(= %s %s)', Smt::shapeField($selected, $key)->smt, $this->valueTerm($fieldSorts[$key], $value)->smt);
+                $expected[] = 'true';
+            }
+            // The value stored under another key is another value.
+            $terms[] = sprintf('(= %s %s)', Smt::shapeField($selected, 'net')->smt, $this->valueTerm(Sort::int(), $other['net'])->smt);
+            $expected[] = 'false';
+        }
+
+        $actual = array_map(
+            static fn (string|array $value): string => is_string($value) ? $value : 'not a bool',
+            $this->z3->evaluate($terms, (new ScriptRenderer())->declarations($encoding)),
+        );
+        $this->assertSameResults($terms, $expected, $actual);
+    }
+
+    /**
+     * @param array<string, mixed> $values
+     */
+    private function shapeLiteral(Sort $sort, array $values): Term
+    {
+        $shape = $sort->shape ?? throw new LogicException('A shape sort is needed.');
+
+        return Smt::shape($sort, array_map(
+            fn (string $key): Term => $this->valueTerm($shape->fields[$key], $values[$key]),
+            $shape->keys(),
+        ));
+    }
+
+    private function valueTerm(Sort $sort, mixed $value): Term
+    {
+        return match (true) {
+            $sort->isNullable() && $value === null => Smt::none($sort),
+            $sort->isNullable() && $sort->inner !== null => Smt::some($this->valueTerm($sort->inner, $value)),
+            is_int($value) => Smt::int($value),
+            is_float($value) => Smt::floatLiteral($value),
+            is_string($value) => Smt::stringLiteral($value),
+            is_bool($value) => Smt::bool($value),
+            default => throw new LogicException('Unsupported value.'),
+        };
     }
 
     /**

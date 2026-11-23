@@ -195,6 +195,46 @@ final class ReplayFixture
         return $n;
     }
 
+    /**
+     * @param int<0, 1000> $gross
+     * @return array{net: int, vat: int}
+     */
+    #[Ensures('$result["net"] + $result["vat"] === $gross')]
+    public static function shapeThatLosesACent(int $gross): array
+    {
+        return ['net' => $gross, 'vat' => 1];
+    }
+
+    /**
+     * The type declares total before label, the literal writes label first.
+     *
+     * @param array{total: int<0, 100>, label: string} $order
+     * @return array{total: int<0, 101>, label: string}
+     */
+    #[Ensures('$result["total"] === $order["total"] + 1')]
+    public static function shapeInAnotherKeyOrder(array $order): array
+    {
+        return ['label' => $order['label'], 'total' => $order['total']];
+    }
+
+    /**
+     * @param array{note: ?string} $entry
+     */
+    #[Ensures('$result !== "none"')]
+    public static function nullableFieldOfAShape(array $entry): string
+    {
+        return $entry['note'] ?? 'none';
+    }
+
+    /**
+     * @param array{net: int, vat: int} $totals
+     */
+    #[Pure]
+    public static function overflowOnShapeFields(array $totals): int
+    {
+        return $totals['net'] + $totals['vat'];
+    }
+
     private static function twice(int $x): int
     {
         return $x * 2;

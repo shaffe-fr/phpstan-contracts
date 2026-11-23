@@ -152,6 +152,16 @@ final class ClassNameResolver
                     self::collect($sort->inner, $classes);
                 }
                 break;
+            case SortKind::List:
+                if ($sort->element !== null) {
+                    self::collect($sort->element, $classes);
+                }
+                break;
+            case SortKind::Shape:
+                foreach ($sort->shape->fields ?? [] as $field) {
+                    self::collect($field, $classes);
+                }
+                break;
             default:
                 break;
         }

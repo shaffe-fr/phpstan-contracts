@@ -6,6 +6,7 @@ namespace PhpstanContracts\Translate;
 
 use PhpstanContracts\Exception\VerificationRejected;
 use PhpstanContracts\Smt\EnumSort;
+use PhpstanContracts\Smt\ShapeSort;
 use PhpstanContracts\Smt\Smt;
 use PhpstanContracts\Smt\Sort;
 use PhpstanContracts\Smt\SortKind;
@@ -129,6 +130,8 @@ final class ExpressionTranslator
             $expr instanceof Cast\Double => $this->castToFloat($expr, $env, $pc),
             $expr instanceof Cast\String_ => $this->toPhpString($expr, $this->translate($expr->expr, $env, $pc), true),
             $expr instanceof Node\Scalar\InterpolatedString => $this->interpolate($expr, $env, $pc),
+            $expr instanceof Expr\Array_ => $this->arrayLiteral($expr, $env, $pc),
+            $expr instanceof Expr\ArrayDimFetch => $this->arrayDimFetch($expr, $env, $pc),
             default => throw $this->reject($expr, $this->explainUnsupported($expr)),
         };
     }
@@ -195,6 +198,14 @@ final class ExpressionTranslator
         }
         if ($target->isNullable() && $target->inner !== null && $term->sort->equals($target->inner)) {
             return $this->some($term);
+        }
+        if ($term->sort->isShape() && $this->canCoerce($term->sort, $target)) {
+            $inner = $target->isNullable() ? $target->inner : $target;
+            if ($inner !== null) {
+                $rebuilt = $this->rebuildShape($at, $term, $inner);
+
+                return $target->isNullable() ? Smt::some($rebuilt) : $rebuilt;
+            }
         }
 
         throw $this->reject($at, sprintf('Cannot use a %s where a %s is expected.', $term->sort->describe(), $target->describe()));
@@ -441,6 +452,9 @@ final class ExpressionTranslator
      */
     private function comparison(string $operator, BinaryOp $expr, Term $left, Term $right): Term
     {
+        if ($left->sort->isArrayLike() || $right->sort->isArrayLike()) {
+            throw $this->reject($expr, sprintf('Arrays cannot be ordered with %s: PHP compares them by count, then key by key, which is not modelled. Compare count($list) or the elements.', $operator));
+        }
         $this->requireNumber($expr->left, $left);
         $this->requireNumber($expr->right, $right);
 
@@ -466,6 +480,10 @@ final class ExpressionTranslator
                 $other->sort->isNullable() => Smt::isNone($other),
                 default => Smt::bool(false),
             };
+        }
+
+        if ($left->sort->isArrayLike() || $right->sort->isArrayLike()) {
+            throw $this->reject($expr, $this->shapeIdentityRefusal());
         }
 
         if ($left->sort->isNullable() && $left->sort->inner !== null && $left->sort->inner->equals($right->sort)) {
@@ -497,6 +515,9 @@ final class ExpressionTranslator
      */
     private function looseEquals(Expr $expr, Term $left, Term $right): Term
     {
+        if ($left->sort->isArrayLike() || $right->sort->isArrayLike()) {
+            throw $this->reject($expr, 'Arrays compared with == are compared loosely, with type juggling on every element ([1] == [true], [\'1e1\'] == [\'10\']); use === on lists, or compare the elements.');
+        }
         if ($left->sort->isNull() || $right->sort->isNull()) {
             throw $this->reject($expr, 'Comparing with null using == is true for 0, "" and false; use === null.');
         }
@@ -689,6 +710,12 @@ final class ExpressionTranslator
      */
     private function unify(Node $at, Term $first, Term $second): array
     {
+        foreach ([$first, $second] as $branch) {
+            if ($branch->sort->containsNull() && !$branch->sort->isNull()) {
+                throw $this->reject($at, sprintf('A %s with a null value cannot be chosen between branches: return it directly, or build it from values that have the type it will hold.', $branch->sort->describe()));
+            }
+        }
+
         if ($first->sort->equals($second->sort)) {
             return [$first, $second];
         }
@@ -858,6 +885,12 @@ final class ExpressionTranslator
         if ($name === 'implies') {
             return $this->implication($call, $arguments, $env, $pc);
         }
+        if ($name === 'count') {
+            return $this->count($call, $arguments, $env, $pc);
+        }
+        if ($this->isArrayFunction($name) || (in_array($name, ['min', 'max'], true) && count($arguments) === 1)) {
+            throw $this->reject($call, sprintf('Call to %s() is not part of the verified subset: of the array functions, only count() and in_array() are supported.', $name));
+        }
 
         $arity = match ($name) {
             'abs', 'strlen', 'is_null', 'is_nan', 'is_infinite', 'is_finite', 'floor', 'ceil', 'sqrt' => 1,
@@ -1026,7 +1059,11 @@ final class ExpressionTranslator
             $strict = $flag->isTrue();
         }
 
-        $needle = $this->encoding->define('needle', $this->translate($slots['needle'], $env, $pc));
+        $needle = $this->translate($slots['needle'], $env, $pc);
+        if ($needle->sort->containsNull() && !$needle->sort->isNull()) {
+            throw $this->reject($call, sprintf('The needle of in_array() cannot be a %s with a null value inside it.', $needle->sort->describe()));
+        }
+        $needle = $this->encoding->define('needle', $needle);
         if (!$strict && !in_array($needle->sort->kind, [SortKind::Int, SortKind::Float, SortKind::Bool, SortKind::Enum], true)) {
             throw $this->reject($call, sprintf(
                 'in_array() without strict: true compares with ==, which juggles a %s; pass true as the third argument.',
@@ -1064,6 +1101,10 @@ final class ExpressionTranslator
         }
 
         if (!$list instanceof Expr\Array_) {
+            if ($this->translate($list, $env, $pc)->sort->isShape()) {
+                throw $this->reject($list, 'in_array() is only supported on a list or a list literal, not on an array shape; compare the values, such as $x === $totals[\'net\'] || $x === $totals[\'vat\'].');
+            }
+
             throw $this->reject($list, 'in_array() is only supported on a list literal, such as [self::A, self::B], or a class constant holding one.');
         }
 
@@ -1419,6 +1460,9 @@ final class ExpressionTranslator
 
         if ($object->sort->isNullable()) {
             throw $this->reject($expr, sprintf('$%s may be null here; check it first or use ?->.', $this->describeSubject($expr->var)));
+        }
+        if ($object->sort->isShape()) {
+            throw $this->reject($expr, sprintf('An array shape is read with [\'%1$s\'], not ->%1$s.', $property));
         }
 
         throw $this->reject($expr, sprintf('Property access ->%s is not supported on a %s.', $property, $object->sort->describe()));
@@ -1798,6 +1842,190 @@ final class ExpressionTranslator
         ];
     }
 
+    /**
+     * `['net' => $net, 'vat' => $vat]`: an array shape. The value of each key is translated
+     * in the order written, and the fields are laid out in the canonical order of the sort,
+     * which is not observable through any construct accepted here.
+     *
+     * @param array<string, Term> $env
+     */
+    private function arrayLiteral(Expr\Array_ $expr, array $env, Term $pc): Term
+    {
+        $keyed = 0;
+        foreach ($expr->items as $item) {
+            if ($item->unpack || $item->byRef) {
+                throw $this->reject($expr, 'Spreads and references in array literals are not supported: list the elements, such as [$a, $b], or append them with $list[] = $value.');
+            }
+            if ($item->key !== null) {
+                ++$keyed;
+            }
+        }
+        if ($keyed > 0 && $keyed < count($expr->items)) {
+            throw $this->reject($expr, 'An array literal is either a list without keys, such as [1, 2], or a shape with string keys, such as [\'net\' => 1]; mixing the two is not supported.');
+        }
+        if ($keyed === 0) {
+            throw $this->reject($expr, 'List literals are not supported yet: only array shapes with string keys, such as [\'net\' => $net, \'vat\' => $vat], are.');
+        }
+
+        $keys = [];
+        foreach ($expr->items as $item) {
+            $key = $item->key;
+            if ($key instanceof Int_ || ($key instanceof String_ && (string) (int) $key->value === $key->value)) {
+                throw $this->reject($expr, 'Integer keys, and string keys that PHP converts to integers such as \'1\', are not supported in array literals: write a list without keys, or use non-numeric string keys.');
+            }
+            if (!$key instanceof String_) {
+                throw $this->reject($expr, 'The keys of an array literal must be string literals, such as [\'net\' => $net].');
+            }
+            if (in_array($key->value, $keys, true)) {
+                throw $this->reject($expr, sprintf('Key \'%s\' appears twice in this array literal; PHP keeps the last value. Write it once.', $key->value));
+            }
+            $keys[] = $key->value;
+        }
+
+        /** @var array<string, Term> $values */
+        $values = [];
+        foreach ($expr->items as $position => $item) {
+            $value = $this->translate($item->value, $env, $pc);
+            if ($value->sort->isNever()) {
+                throw $this->reject($item->value, 'A value that always throws cannot be stored in an array literal; write a throw statement.');
+            }
+            $values[$keys[$position]] = $value;
+        }
+
+        $sorted = $values;
+        uksort($sorted, static fn (int|string $a, int|string $b): int => strcmp((string) $a, (string) $b));
+        $sort = Sort::shape(ShapeSort::of(array_map(static fn (Term $value): Sort => $value->sort, $sorted)), $keys);
+        $term = Smt::shape($sort, array_values($sorted));
+
+        // A `null` value has no datatype of its own: the literal stays a pair of terms until
+        // coerce() gives it the type that makes the value `?T`.
+        return $sort->containsNull() ? $term : $this->encoding->define('shape', $term);
+    }
+
+    /**
+     * `$shape['net']`, with a string literal that is a key of the shape: the type requires
+     * the key, so PHP raises no warning.
+     *
+     * @param array<string, Term> $env
+     */
+    private function arrayDimFetch(Expr\ArrayDimFetch $expr, array $env, Term $pc): Term
+    {
+        if ($expr->dim === null) {
+            throw $this->reject($expr, 'Cannot use [] for reading.');
+        }
+
+        $base = $this->translate($expr->var, $env, $pc);
+        $shape = $base->sort->shape;
+        if (!$base->sort->isShape() || $shape === null) {
+            throw $this->reject($expr, match (true) {
+                $base->sort->isString() => 'Reading [...] is only supported on lists and array shapes, not on a string; string offsets are not supported, use str_starts_with() or strlen().',
+                $base->sort->isNullable() => sprintf('Reading [...] is only supported on lists and array shapes, not on a %s, which may be null here: check it first with `!== null`, `isset()` or `??`.', $base->sort->describe()),
+                default => sprintf('Reading [...] is only supported on lists and array shapes, not on a %s.', $base->sort->describe()),
+            });
+        }
+        if (!$expr->dim instanceof String_) {
+            throw $this->reject($expr, 'The key of an array shape must be a string literal naming one of its keys, such as $totals[\'net\'].');
+        }
+        if (!$shape->has($expr->dim->value)) {
+            $names = array_map(static fn (string $key): string => "'" . $key . "'", $shape->keys());
+            $last = array_pop($names);
+
+            throw $this->reject($expr, sprintf(
+                "%s has no key '%s'; its keys are %s.",
+                $base->sort->describe(),
+                $expr->dim->value,
+                $names === [] ? $last : implode(', ', $names) . ' and ' . $last,
+            ));
+        }
+
+        return Smt::shapeField($base, $expr->dim->value);
+    }
+
+    /**
+     * Whether coerce() can give a value of one sort the other sort: nothing to do, `null`
+     * or a `T` for a `?T`, or an array shape whose fields can each be coerced.
+     */
+    public function canCoerce(Sort $from, Sort $to): bool
+    {
+        if ($from->equals($to)) {
+            return true;
+        }
+        if ($to->isNullable() && $to->inner !== null) {
+            return $from->isNull() || $from->equals($to->inner) || ($from->isShape() && $this->canCoerce($from, $to->inner));
+        }
+        if ($from->isShape() && $to->isShape() && $from->shape !== null && $to->shape !== null) {
+            if ($from->shape->keys() !== $to->shape->keys()) {
+                return false;
+            }
+            foreach ($from->shape->fields as $key => $field) {
+                if (!$this->canCoerce($field, $to->shape->fields[$key])) {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * The same array under a type that is wider field by field: PHP does not touch the value.
+     */
+    private function rebuildShape(Node $at, Term $term, Sort $target): Term
+    {
+        $from = $term->sort->shape;
+        $to = $target->shape;
+        if ($from === null || $to === null) {
+            throw $this->reject($at, sprintf('Cannot use a %s where a %s is expected.', $term->sort->describe(), $target->describe()));
+        }
+
+        $parts = [];
+        foreach ($from->keys() as $position => $key) {
+            $part = $term->components[$position] ?? Smt::shapeField($term, $key);
+            $parts[] = $this->coerce($at, $part, $to->fields[$key]);
+        }
+
+        return $this->encoding->define('shape', Smt::shape($target, $parts));
+    }
+
+    private function shapeIdentityRefusal(): string
+    {
+        return 'Array shapes compared with === also compare the order of their keys and any extra keys, which the type array{...} does not fix; compare the elements instead, such as $a[\'net\'] === $b[\'net\'].';
+    }
+
+    /**
+     * @param list<Expr> $arguments
+     * @param array<string, Term> $env
+     */
+    private function count(FuncCall $call, array $arguments, array $env, Term $pc): Term
+    {
+        if (count($arguments) !== 1) {
+            throw $this->reject($call, 'count() takes exactly one argument here; COUNT_RECURSIVE is not supported. Write count($list).');
+        }
+
+        $unsupported = $this->reject($call, 'Call to count() is not part of the verified subset: purity cannot be established.');
+        try {
+            $subject = $this->translate($arguments[0], $env, $pc);
+        } catch (VerificationRejected) {
+            throw $unsupported;
+        }
+        if ($subject->sort->isShape()) {
+            throw $this->reject($call, 'count() of an array shape is not supported: the type array{...} does not rule out extra keys. count() is supported on lists.');
+        }
+
+        throw $unsupported;
+    }
+
+    private function isArrayFunction(string $name): bool
+    {
+        return str_starts_with($name, 'array_') || in_array($name, [
+            'sort', 'rsort', 'usort', 'uasort', 'uksort', 'asort', 'arsort', 'ksort', 'krsort', 'shuffle', 'range', 'compact',
+            'extract', 'implode', 'join', 'explode', 'end', 'reset', 'next', 'prev', 'current', 'key', 'sizeof', 'key_exists',
+            'is_array', 'is_list', 'iterator_to_array',
+        ], true);
+    }
+
     private function explainUnsupported(Expr $expr): string
     {
         return match (true) {
@@ -1805,8 +2033,6 @@ final class ExpressionTranslator
                 => 'Assignments are only allowed as standalone statements on local variables.',
             $expr instanceof Expr\MethodCall, $expr instanceof Expr\NullsafeMethodCall
                 => 'Method calls and instantiations are not part of the verified subset yet: side effects cannot be ruled out.',
-            $expr instanceof Expr\Array_, $expr instanceof Expr\ArrayDimFetch
-                => 'Arrays are not supported yet.',
             $expr instanceof Cast
                 => 'Only (int), (float) and (string) casts are supported.',
             $expr instanceof Expr\Closure, $expr instanceof Expr\ArrowFunction

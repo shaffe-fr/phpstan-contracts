@@ -7,6 +7,7 @@ namespace PhpstanContracts\Translate;
 use PhpstanContracts\Exception\VerificationRejected;
 use PhpstanContracts\Smt\RecordSort;
 use PhpstanContracts\Smt\SmtName;
+use PhpstanContracts\Smt\ShapeSort;
 use PhpstanContracts\Smt\Sort;
 use PhpParser\Error;
 use PhpParser\Node;
@@ -27,8 +28,8 @@ use PHPStan\Type\VerbosityLevel;
 /**
  * Maps a PHPStan type, including PHPDoc ranges, to an SMT sort and its domain.
  *
- * Supported: int, bool, float, string, enums, readonly data classes, and any of
- * those made nullable.
+ * Supported: int, bool, float, string, enums, readonly data classes, array shapes
+ * with string keys, and any of those made nullable.
  */
 final class TypeMapper
 {
@@ -51,7 +52,8 @@ final class TypeMapper
 
     public function map(Type $type, int $line): VarSpec
     {
-        $description = $type->describe(VerbosityLevel::typeOnly());
+        // typeOnly() would print an array shape as array<string, int>, without its keys.
+        $description = $type->describe(TypeCombinator::removeNull($type)->isArray()->yes() ? VerbosityLevel::value() : VerbosityLevel::typeOnly());
 
         if (TypeCombinator::containsNull($type) && !$type->isNull()->yes()) {
             $inner = $this->map(TypeCombinator::removeNull($type), $line);
@@ -83,18 +85,83 @@ final class TypeMapper
             return new VarSpec(Sort::string(), nonEmpty: $type->isNonEmptyString()->yes(), description: $description);
         }
 
+        if ($type->isArray()->yes()) {
+            return $this->mapArray($type, $description, $line);
+        }
+
         $classNames = $type->getObjectClassNames();
         if (count($classNames) === 1) {
             return $this->mapClass($classNames[0], $line);
         }
 
-        throw new VerificationRejected(
+        throw $this->unsupported($description, $line);
+    }
+
+    private function unsupported(string $description, int $line): VerificationRejected
+    {
+        return new VerificationRejected(
             sprintf(
-                'Type %s is not supported in verified methods (supported: int, bool, float, string, enums, readonly data classes, and nullable versions of these).',
+                'Type %s is not supported in verified methods (supported: int, bool, float, string, enums, readonly data classes, array shapes with string keys, and nullable versions of these).',
                 $description,
             ),
             $line,
         );
+    }
+
+    /**
+     * An `array{a: T, b: U}` with required string keys is a shape; every other array type
+     * is rejected with what to write instead.
+     */
+    private function mapArray(Type $type, string $description, int $line): VarSpec
+    {
+        $constants = $type->getConstantArrays();
+        if (count($constants) > 1) {
+            throw $this->unsupported($description, $line);
+        }
+        if (count($constants) === 0) {
+            throw $type->isList()->yes()
+                ? $this->unsupported($description, $line)
+                : new VerificationRejected(
+                    sprintf('Type %s is not supported in verified methods: an array with arbitrary keys is not modelled. Use an array shape with string keys such as array{net: int, vat: int}.', $description),
+                    $line,
+                );
+        }
+
+        $array = $constants[0];
+        $keys = $array->getKeyTypes();
+        if ($keys === []) {
+            throw new VerificationRejected(
+                sprintf('Type %s is not supported: an array shape needs at least one key.', $description),
+                $line,
+            );
+        }
+        $names = [];
+        foreach ($keys as $key) {
+            $strings = $key->getConstantStrings();
+            if (count($strings) !== 1) {
+                throw new VerificationRejected(
+                    sprintf('Type %s is not supported: array shapes are only supported with string keys. Use array{amount: int, label: string} or a data class.', $description),
+                    $line,
+                );
+            }
+            $names[] = $strings[0]->getValue();
+        }
+        foreach ($array->getOptionalKeys() as $optional) {
+            throw new VerificationRejected(
+                sprintf('Type %s is not supported: the optional key %s may be missing, which is not modelled. Make the key required, with a nullable value if it can be absent.', $description, $names[$optional] ?? ''),
+                $line,
+            );
+        }
+
+        $specs = [];
+        foreach ($array->getValueTypes() as $position => $valueType) {
+            $specs[$names[$position]] = $this->map($valueType, $line);
+        }
+        $declared = array_map(strval(...), array_keys($specs));
+        uksort($specs, static fn (int|string $a, int|string $b): int => strcmp((string) $a, (string) $b));
+        $shape = ShapeSort::of(array_map(static fn (VarSpec $spec): Sort => $spec->sort, $specs));
+
+        return new VarSpec(Sort::shape($shape, $declared), fields: $specs, description: $description);
     }
 
     public function mapClass(string $className, int $line): VarSpec

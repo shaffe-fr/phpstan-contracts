@@ -140,6 +140,12 @@ final class StatementTranslator
 
     private function assign(Expr $target, Expr $value, State $state, Expr $at): State
     {
+        if ($target instanceof Expr\Array_ || $target instanceof Expr\List_) {
+            throw $this->expressions->reject($at, 'Destructuring ([$a, $b] = ...) is not supported: read the elements with their key, such as $shape[\'net\'].');
+        }
+        if ($target instanceof Expr\ArrayDimFetch) {
+            throw $this->expressions->reject($at, $this->arrayWriteRefusal($target, $state));
+        }
         if (!$target instanceof Variable || !is_string($target->name) || $target->name === 'this') {
             throw $this->expressions->reject($at, 'Only assignments to local variables are allowed (no property, array or dynamic writes).');
         }
@@ -147,6 +153,14 @@ final class StatementTranslator
         $name = $target->name;
         $term = $this->valueOf($value, $state, $at);
         $previous = $state->variables[$name] ?? null;
+
+        // An array that holds `null` has no type of its own: it needs the type of the variable it is assigned to.
+        if ($term->sort->containsNull() && !$term->sort->isNull()) {
+            if ($previous === null) {
+                throw $this->expressions->reject($at, sprintf('Cannot infer a type for $%s from a %s: a null inside an array has no type of its own; assign it to a variable that already has the type it will hold, or return it directly.', $name, $term->sort->describe()));
+            }
+            $term = $this->expressions->coerce($at, $term, $previous->sort->isNullable() && $previous->sort->inner !== null ? $previous->sort->inner : $previous->sort);
+        }
 
         if ($previous === null && $term->sort->isNull()) {
             throw $this->expressions->reject($at, sprintf('Cannot infer a type for $%s from null; assign a value of the type it will hold, or give a nullable parameter.', $name));
@@ -209,7 +223,7 @@ final class StatementTranslator
         $value = $this->valueOf($statement->expr, $state, $statement);
         $state = $this->stopThrownPaths($state);
         if (!$value->sort->equals($this->resultSort)) {
-            if (!$this->canCoerce($value->sort)) {
+            if (!$this->expressions->canCoerce($value->sort, $this->resultSort)) {
                 throw $this->expressions->reject($statement, sprintf(
                     'Returns %s but the method is declared to return %s.',
                     $value->sort->describe(),
@@ -228,13 +242,22 @@ final class StatementTranslator
         return $state->withReached(Smt::bool(false));
     }
 
-    private function canCoerce(Sort $valueSort): bool
+    /**
+     * Why an assignment through `[...]` is refused, by what is written to.
+     */
+    private function arrayWriteRefusal(Expr\ArrayDimFetch $target, State $state): string
     {
-        if (!$this->resultSort->isNullable()) {
-            return false;
+        if ($target->var instanceof Expr\ArrayDimFetch) {
+            return 'Nested writes such as $a[$i][$j] = ... are not supported: build a new shape literal, such as [\'net\' => $net, \'vat\' => $vat].';
+        }
+        $base = $target->var instanceof Variable && is_string($target->var->name) ? ($state->variables[$target->var->name] ?? null) : null;
+        if ($base !== null && $base->sort->isShape()) {
+            return $target->dim === null
+                ? 'Appending to an array shape is not supported: build a new shape literal.'
+                : 'Writing to an array shape is not supported: build a new shape literal, such as [\'net\' => $net, \'vat\' => $vat].';
         }
 
-        return $valueSort->isNull() || ($this->resultSort->inner !== null && $this->resultSort->inner->equals($valueSort));
+        return 'Only assignments to local variables are allowed (no property, array or dynamic writes).';
     }
 
     /**

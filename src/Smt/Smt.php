@@ -146,7 +146,7 @@ final class Smt
         return match ($left->sort->kind) {
             SortKind::Float => new Term('(fp.eq ' . $left->smt . ' ' . $right->smt . ')', Sort::bool()),
             SortKind::Nullable => self::nullableEquals($left, $right),
-            SortKind::Record, SortKind::Null, SortKind::Never => throw new LogicException('Records, null and never have no PHP equality here.'),
+            SortKind::Record, SortKind::Shape, SortKind::List, SortKind::EmptyList, SortKind::Null, SortKind::Never => throw new LogicException('Records, arrays, null and never have no PHP equality here.'),
             default => self::eq($left, $right),
         };
     }
@@ -371,6 +371,39 @@ final class Smt
         $sort = $definition->fields[$field] ?? throw new LogicException('Unknown field ' . $field);
 
         return new Term(sprintf('(%s %s)', $definition->accessor($field), $record->smt), $sort);
+    }
+
+    /**
+     * An array shape built from the terms of its fields, given in the order of the sort.
+     *
+     * @param list<Term> $fields
+     */
+    public static function shape(Sort $shape, array $fields): Term
+    {
+        $definition = $shape->shape ?? throw new LogicException('shape() needs a shape sort.');
+
+        return new Term(
+            sprintf('(%s %s)', $definition->constructorName(), implode(' ', array_map(static fn (Term $t): string => $t->smt, $fields))),
+            $shape,
+            components: $fields,
+        );
+    }
+
+    /**
+     * The value under a key of an array shape.
+     */
+    public static function shapeField(Term $shape, string $key): Term
+    {
+        $definition = $shape->sort->shape ?? throw new LogicException('shapeField() needs a shape term.');
+        $position = array_search($key, $definition->keys(), true);
+        if ($position === false) {
+            throw new LogicException('Unknown key ' . $key);
+        }
+        if ($shape->components !== null) {
+            return $shape->components[$position];
+        }
+
+        return new Term(sprintf('(%s %s)', $definition->accessorAt($position), $shape->smt), $definition->fields[$key]);
     }
 
     private static function nullableEquals(Term $left, Term $right): Term

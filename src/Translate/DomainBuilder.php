@@ -37,6 +37,11 @@ final class DomainBuilder
                 array_keys($spec->fields),
                 array_values($spec->fields),
             )),
+            SortKind::Shape => Smt::all(...array_map(
+                fn (string $key, VarSpec $field): Term => $this->constraint($field, Smt::shapeField($term, $key), $isInput),
+                array_map(strval(...), array_keys($spec->fields)),
+                array_values($spec->fields),
+            )),
             default => Smt::bool(true),
         };
     }

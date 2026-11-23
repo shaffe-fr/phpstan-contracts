@@ -23,6 +23,7 @@ use PHPStan\Reflection\ClassReflection;
 use PHPStan\Reflection\ExtendedMethodReflection;
 use PHPStan\Reflection\InitializerExprTypeResolver;
 use PHPStan\Reflection\ReflectionProvider;
+use PHPStan\Type\TypeCombinator;
 use PHPStan\Type\VerbosityLevel;
 
 /**
@@ -249,6 +250,14 @@ final class MethodInliner
             } catch (VerificationRejected) {
                 $native = null;
             }
+            // PHP never converts an array argument, in either typing mode: the native type
+            // `array` (or `?array`) holds exactly what an array shape in PHPDoc describes.
+            $nativeType = $parameter->getNativeType();
+            $nativeNullable = TypeCombinator::containsNull($nativeType);
+            $inner = $sort->isNullable() && $sort->inner !== null ? $sort->inner : $sort;
+            if ($native === null && $inner->isShape() && $nativeNullable === $sort->isNullable() && TypeCombinator::removeNull($nativeType)->isArray()->yes()) {
+                $native = $sort;
+            }
             if ($native === null || !$native->equals($sort)) {
                 throw new VerificationRejected(sprintf(
                     'Parameter $%s of %s has the native type %s, which is what PHP converts its argument to, but the PHPDoc type %s; make them agree.',
@@ -293,6 +302,8 @@ final class MethodInliner
                 $parameters[$name],
                 sprintf('Argument $%s of %s', $name, $label),
                 $line,
+                $caller,
+                $argument->value,
             );
         }
 
@@ -304,12 +315,15 @@ final class MethodInliner
      * nothing, wrapping into a nullable, or converting an int to a float for a
      * parameter whose native type is `float` or `?float`, which parameterSorts() ensures.
      */
-    private function coerce(Term $value, Sort $target, string $subject, int $line): Term
+    private function coerce(Term $value, Sort $target, string $subject, int $line, ExpressionTranslator $translator, Node $at): Term
     {
         if ($value->sort->equals($target)) {
             return $value;
         }
         $this->encoding->registerSort($target);
+        if ($value->sort->isShape() && $translator->canCoerce($value->sort, $target)) {
+            return $translator->coerce($at, $value, $target);
+        }
         if ($target->isNullable() && $value->sort->isNull()) {
             return Smt::none($target);
         }
@@ -365,7 +379,7 @@ final class MethodInliner
             if ($param->default === null) {
                 throw new VerificationRejected(sprintf('Every parameter of %s without a default value needs an argument.', $label), $line);
             }
-            $entry[$name] = $this->coerce($body->translate($param->default, [], $pc), $parameters[$name], sprintf('The default value of $%s', $name), $line);
+            $entry[$name] = $this->coerce($body->translate($param->default, [], $pc), $parameters[$name], sprintf('The default value of $%s', $name), $line, $body, $param->default);
         }
 
         // The callee was proven assuming its preconditions; here they are checked.

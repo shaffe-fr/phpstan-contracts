@@ -272,6 +272,14 @@ final class CounterexampleReplayTest extends RuleFixtureTestCase
         if (enum_exists($name)) {
             return $this->decodeEnum($name, $literal);
         }
+        if ($name === 'array') {
+            $position = 0;
+            $value = $this->parseValue($literal, $position, $label);
+            $this->skipSpaces($literal, $position);
+            self::assertSame(strlen($literal), $position, 'Trailing text after the array literal. ' . $label);
+
+            return $value;
+        }
 
         return match (true) {
             $name === 'bool' => $literal === 'true',
@@ -285,6 +293,81 @@ final class CounterexampleReplayTest extends RuleFixtureTestCase
             $name === 'string' => $this->decodeString($literal),
             default => throw new RuntimeException(sprintf('Cannot decode %s as %s. %s', $literal, $name, $label)),
         };
+    }
+
+    /**
+     * A recursive-descent reader for the literals the formatter prints, without eval:
+     * lists and shapes, strings in both quote styles, null, booleans, NAN and INF, numbers,
+     * and enum cases written as `Short::Case`, which belong to the namespace of the fixtures.
+     */
+    private function parseValue(string $text, int &$position, string $label): mixed
+    {
+        $this->skipSpaces($text, $position);
+        $character = $text[$position] ?? '';
+        if ($character === '[') {
+            ++$position;
+            $items = [];
+            while (true) {
+                $this->skipSpaces($text, $position);
+                if (($text[$position] ?? '') === ']') {
+                    ++$position;
+
+                    return $items;
+                }
+                $value = $this->parseValue($text, $position, $label);
+                $this->skipSpaces($text, $position);
+                if (substr($text, $position, 2) === '=>') {
+                    $position += 2;
+                    self::assertTrue(is_string($value) || is_int($value), 'An array key must be a string or an int. ' . $label);
+                    $items[$value] = $this->parseValue($text, $position, $label);
+                } else {
+                    $items[] = $value;
+                }
+                $this->skipSpaces($text, $position);
+                if (($text[$position] ?? '') === ',') {
+                    ++$position;
+                }
+            }
+        }
+        if ($character === "'" || $character === '"') {
+            $start = $position++;
+            while (isset($text[$position]) && $text[$position] !== $character) {
+                $position += $text[$position] === '\\' ? 2 : 1;
+            }
+            ++$position;
+
+            return $this->decodeString(substr($text, $start, $position - $start));
+        }
+        if (preg_match('/\G[A-Za-z0-9_.+\\\\:-]+/', $text, $token, 0, $position) !== 1) {
+            self::fail('Cannot read a value at offset ' . $position . '. ' . $label);
+        }
+        $word = $token[0];
+        $position += strlen($word);
+
+        if (str_contains($word, '::')) {
+            $enum = 'PhpstanContracts\\Tests\\Fixtures\\' . explode('::', $word, 2)[0];
+            self::assertTrue(enum_exists($enum), 'Unknown enum in ' . $word . '. ' . $label);
+
+            return $this->decodeEnum($enum, $word);
+        }
+
+        return match (true) {
+            $word === 'null' => null,
+            $word === 'true' => true,
+            $word === 'false' => false,
+            $word === 'NAN' => NAN,
+            $word === 'INF' => INF,
+            $word === '-INF' => -INF,
+            strpbrk($word, '.E') !== false => (float) $word,
+            default => (int) $word,
+        };
+    }
+
+    private function skipSpaces(string $text, int &$position): void
+    {
+        while (isset($text[$position]) && $text[$position] === ' ') {
+            ++$position;
+        }
     }
 
     private function decodeString(string $literal): string
@@ -314,6 +397,23 @@ final class CounterexampleReplayTest extends RuleFixtureTestCase
 
     private function same(mixed $expected, mixed $actual): bool
     {
+        // A shape is printed in the order of its declared type and built in the order of the literal.
+        if (is_array($expected) && is_array($actual)) {
+            if (!array_is_list($expected) || !array_is_list($actual)) {
+                ksort($expected);
+                ksort($actual);
+            }
+            if (array_keys($expected) !== array_keys($actual)) {
+                return false;
+            }
+            foreach ($expected as $key => $value) {
+                if (!$this->same($value, $actual[$key])) {
+                    return false;
+                }
+            }
+
+            return true;
+        }
         if (is_float($expected) && is_float($actual) && is_nan($expected) && is_nan($actual)) {
             return true;
         }

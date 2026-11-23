@@ -34,7 +34,7 @@ final class StatementRuleTest extends RuleFixtureTestCase
                 'writesAProperty' => ['contracts.unsupported: Only assignments to local variables are allowed'],
                 'callsAnUnknownFunction' => ['contracts.unsupported: Call to strtoupper() is not part of the verified subset'],
                 'closure' => ['contracts.unsupported: Closures are not supported'],
-                'arrayLiteral' => ['contracts.unsupported: Arrays are not supported yet'],
+                'arrayLiteral' => ['contracts.unsupported: List literals are not supported yet'],
                 'shortTernary' => ['contracts.unsupported: The short ternary'],
                 'power' => ['contracts.unsupported: Operator "**" is not part of the verified subset'],
                 'spaceship' => ['contracts.unsupported: Operator "<=>" is not part of the verified subset'],
