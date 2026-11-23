@@ -82,4 +82,22 @@ final class Uploads
     {
         return $tenant . '/' . $name;
     }
+
+    /**
+     * With strict: true the list is a disjunction of `===`, which is exact on strings.
+     */
+    #[Ensures('$result === ($extension === "png" || $extension === "jpg")')]
+    public static function isImageExtension(string $extension): bool
+    {
+        return in_array($extension, ['png', 'jpg'], true);
+    }
+
+    /**
+     * "jpeg" is a valid extension too, and the list forgets it.
+     */
+    #[Ensures('implies($extension === "jpeg", $result)')]
+    public static function isImageExtensionBroken(string $extension): bool
+    {
+        return in_array($extension, ['png', 'jpg'], true);
+    }
 }

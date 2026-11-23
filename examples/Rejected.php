@@ -130,13 +130,6 @@ final class Rejected
         return 1;
     }
 
-    /** A data class is modelled by its public readonly properties: the mutable state of its base class cannot be read. */
-    #[Pure]
-    public static function frameworkState(PriceContext $context): bool
-    {
-        return $context->additional === [];
-    }
-
     /** A method of another file is not translated: the result cache would not redo the proof when its body changes. */
     #[Ensures('$result >= 0')]
     public static function callToAnotherFile(PriceContext $context): int
@@ -156,5 +149,22 @@ final class Rejected
     public static function brokenContract(int $quantity): int
     {
         return $quantity;
+    }
+
+    /** Without strict: true, PHP compares strings with ==, so "1e1" matches "10". */
+    #[Pure]
+    public static function looseInArray(string $code): bool
+    {
+        return in_array($code, ['10', '20']);
+    }
+
+    /** No #[Throws] declares this exception, and the input reaches it. */
+    #[Pure]
+    public static function undeclaredThrow(int $x): int
+    {
+        if ($x < 0) {
+            throw new \InvalidArgumentException('Negative.');
+        }
+        return $x;
     }
 }

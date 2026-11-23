@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace PhpstanContracts\Examples\RealWorld;
 
 use PhpstanContracts\Attribute\Ensures;
+use PhpstanContracts\Attribute\Requires;
 use PhpstanContracts\Attribute\Throws;
 
 /**
@@ -66,5 +67,35 @@ final class ErpCode
         }
 
         return self::OFFSET + $webId;
+    }
+
+    /**
+     * Which of the two ERP shards holds the code. The default arm is a consistency check:
+     * undeclared by #[Throws], so the proof shows that it cannot be reached.
+     */
+    #[Requires('$webId >= 0 && $webId < 1000')]
+    #[Ensures('$result >= 1 && $result <= 2')]
+    #[Ensures('implies($webId < 500, $result === 1)')]
+    public static function shard(int $webId): int
+    {
+        return match (intdiv($webId, 500)) {
+            0 => 1,
+            1 => 2,
+            default => throw new \LogicException('Unknown shard.'),
+        };
+    }
+
+    /**
+     * The domain grew to 1499 but the match did not: the default arm can be reached.
+     */
+    #[Requires('$webId >= 0 && $webId < 1500')]
+    #[Ensures('$result >= 1 && $result <= 2')]
+    public static function shardBroken(int $webId): int
+    {
+        return match (intdiv($webId, 500)) {
+            0 => 1,
+            1 => 2,
+            default => throw new \LogicException('Unknown shard.'),
+        };
     }
 }

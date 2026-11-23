@@ -5,7 +5,8 @@ declare(strict_types=1);
 namespace PhpstanContracts\Tests\Fixtures;
 
 /**
- * The mutable state that Spatie\LaravelData\Data brings in through its traits.
+ * The mutable state that a data framework base class brings in through its traits, as
+ * Spatie\LaravelData\Data does with `$_additional`.
  */
 trait AppendsAdditional
 {

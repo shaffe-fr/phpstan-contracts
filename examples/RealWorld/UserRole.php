@@ -57,7 +57,7 @@ enum UserRole: string
     #[Ensures('$result === ($this === self::Administrator || $this === self::Validator)')]
     public function canValidate(): bool
     {
-        return in_array($this, [self::Administrator, self::Validator], true);
+        return in_array($this, [self::Administrator, self::Validator]);
     }
 
     /**

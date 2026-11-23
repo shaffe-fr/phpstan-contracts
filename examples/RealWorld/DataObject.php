@@ -5,20 +5,20 @@ declare(strict_types=1);
 namespace PhpstanContracts\Examples\RealWorld;
 
 /**
- * Shaped like the base class of a data framework, such as spatie/laravel-data: state
- * that the framework fills in after construction, so it is not readonly.
+ * Shaped like the base class of a data framework (Spatie\LaravelData\Data is one): protected
+ * state that the framework fills in after construction, so it is mutable.
  */
 abstract class DataObject
 {
     /** @var array<string, mixed> */
-    public array $additional = [];
+    protected array $state = [];
 
     /**
      * @param array<string, mixed> $values
      */
     public function with(array $values): static
     {
-        $this->additional = array_merge($this->additional, $values);
+        $this->state = array_merge($this->state, $values);
 
         return $this;
     }
