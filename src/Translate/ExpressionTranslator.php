@@ -1372,6 +1372,7 @@ final class ExpressionTranslator
                 throw $this->reject($expr, $object->sort->record->unmodelled[$property]
                     ?? sprintf('%s has no property $%s.', $object->sort->record->shortName(), $property));
             }
+            $this->rejectShadowedProperty($expr, $object->sort->record->className, $property, '->');
 
             return Smt::field($object, $property);
         }
@@ -1381,6 +1382,39 @@ final class ExpressionTranslator
         }
 
         throw $this->reject($expr, sprintf('Property access ->%s is not supported on a %s.', $property, $object->sort->describe()));
+    }
+
+    /**
+     * `$c->x` from a class S reads the private S::$x when $c is an instance of a subclass
+     * of S, even if the subclass declares a public $x: PHP flags a property that redeclares
+     * a private one, and then picks the private property of the calling scope
+     * (zend_get_parent_private_property). The record models the subclass's property.
+     */
+    private function rejectShadowedProperty(PropertyFetch|NullsafePropertyFetch $expr, string $className, string $property, string $operator): void
+    {
+        $scope = $this->classes->declaringClass();
+        if ($scope === null || $scope->getName() === $className || !$this->reflection->hasClass($className)) {
+            return;
+        }
+        $class = $this->reflection->getClass($className);
+        $native = $scope->getNativeReflection();
+        if (!$class->isSubclassOfClass($scope) || !$native->hasProperty($property)) {
+            return;
+        }
+
+        $declared = $native->getProperty($property);
+        if (!$declared->isPrivate() || $declared->getDeclaringClass()->getName() !== $scope->getName()) {
+            return;
+        }
+
+        throw $this->reject($expr, sprintf(
+            'From %1$s, $%2$s%3$s%4$s reads the private property %1$s::$%4$s, not %5$s::$%4$s: PHP picks the private property of the calling class. Rename one of the two properties.',
+            $scope->getDisplayName(),
+            $this->describeSubject($expr->var),
+            $operator,
+            $property,
+            $class->getDisplayName(),
+        ));
     }
 
     private function enumProperty(Expr $at, Term $object, string $property): Term
@@ -1434,6 +1468,7 @@ final class ExpressionTranslator
         if ($record === null || $record->kind !== SortKind::Record || $record->record === null || !isset($record->record->fields[$property])) {
             throw $this->reject($expr, sprintf('Property access ?->%s is not supported on a %s.', $property, $object->sort->describe()));
         }
+        $this->rejectShadowedProperty($expr, $record->record->className, $property, '?->');
 
         $object = $this->encoding->define('o', $object);
         $field = Smt::field($nullable ? Smt::unwrap($object) : $object, $property);

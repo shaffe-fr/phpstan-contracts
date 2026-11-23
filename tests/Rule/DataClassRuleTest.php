@@ -7,6 +7,8 @@ namespace PhpstanContracts\Tests\Rule;
 use PhpstanContracts\Tests\Fixtures\DataClassFixture;
 use PhpstanContracts\Tests\Fixtures\Interval;
 use PhpstanContracts\Tests\Fixtures\PriceContext;
+use PhpstanContracts\Tests\Fixtures\PropertyShadowParent;
+use PhpstanContracts\Tests\Fixtures\PropertyShadowReader;
 use PhpstanContracts\Tests\Support\RuleFixtureTestCase;
 
 final class DataClassRuleTest extends RuleFixtureTestCase
@@ -57,6 +59,24 @@ final class DataClassRuleTest extends RuleFixtureTestCase
             PriceContext::class => [
                 'isBulk' => [],
                 'readsInheritedState' => ['contracts.unsupported: Property PhpstanContracts\Tests\Fixtures\PriceContext::$_additional must be public and readonly'],
+            ],
+        ]);
+    }
+
+    /**
+     * From a class that declares a private $x, `$c->x` on an instance of a subclass reads
+     * that private property, not the public readonly $x of the subclass.
+     */
+    public function testAPrivatePropertyOfTheCallingClassShadowsTheSubclassProperty(): void
+    {
+        $this->assertOutcomes([
+            PropertyShadowParent::class => [
+                'readsThePrivatePropertyOfTheCallingClass' => ['contracts.unsupported: From PhpstanContracts\Tests\Fixtures\PropertyShadowParent, $c->x reads the private property PhpstanContracts\Tests\Fixtures\PropertyShadowParent::$x, not PhpstanContracts\Tests\Fixtures\PropertyShadowChild::$x: PHP picks the private property of the calling class. Rename one of the two properties.'],
+                'nullsafeReadOfThePrivatePropertyOfTheCallingClass' => ['contracts.unsupported: From PhpstanContracts\Tests\Fixtures\PropertyShadowParent, $c?->x reads the private property PhpstanContracts\Tests\Fixtures\PropertyShadowParent::$x, not PhpstanContracts\Tests\Fixtures\PropertyShadowChild::$x'],
+                'readsAPropertyThatThisClassDoesNotDeclare' => [],
+            ],
+            PropertyShadowReader::class => [
+                'readsThePropertyOfTheChild' => [],
             ],
         ]);
     }
