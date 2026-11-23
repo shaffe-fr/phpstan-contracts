@@ -184,6 +184,7 @@ final class ExamplesTest extends RuleFixtureTestCase
                 'looseInArray' => ['contracts.unsupported: in_array() without strict: true compares with =='],
                 'undeclaredThrow' => ['contracts.unexpectedThrow: `throw new \\InvalidArgumentException(\'Negative.\')` can be reached where no #[Throws] allows it. Counterexample: $x = -1'],
                 'brokenContract' => ['contracts.invalidContract: is not valid PHP'],
+                'objectOfAnotherFile' => ['contracts.unsupported: Cannot instantiate Receipt: its constructor is declared in another file.'],
             ],
             CartLimits::class => [
                 'itemsLateBound' => ['contracts.unsupported: static::MAX_ITEMS is late bound'],

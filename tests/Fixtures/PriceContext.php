@@ -26,6 +26,18 @@ final class PriceContext extends FrameworkData
         return $this->quantity >= 10;
     }
 
+    /**
+     * The constructor is declared in this file, so the object can be built here. The
+     * properties inherited from FrameworkData keep their default values.
+     *
+     * @param int<0, 1000> $quantity
+     */
+    #[Ensures('$result->quantity === $quantity && $result->customerId === null')]
+    public static function buildsAnObjectWithInheritedState(int $quantity): PriceContext
+    {
+        return new PriceContext($quantity, null);
+    }
+
     #[Pure]
     public function readsInheritedState(): bool
     {

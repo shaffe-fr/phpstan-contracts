@@ -32,21 +32,31 @@ final class DataClassFixture
     /** @param int<-100, 100> $x */
     #[Ensures('$result->x === $x')]
     #[Ensures('$result->y === 0')]
-    public static function buildsAPoint(int $x): Point
+    public static function buildsAnObject(int $x): Position
     {
-        return new Point($x, 0);
+        return new Position($x, 0);
     }
 
     #[Ensures('$result->x === 1 && $result->y === 2')]
-    public static function namedArgumentsFollowTheirNames(): Point
+    public static function namedArgumentsFollowTheirNames(): Position
     {
-        return new Point(y: 2, x: 1);
+        return new Position(y: 2, x: 1);
     }
 
     #[Ensures('$result->x === $point->y && $result->y === $point->x')]
-    public static function swapsTheCoordinates(Point $point): Point
+    public static function swapsTheCoordinates(Point $point): Position
     {
-        return new Point($point->y, $point->x);
+        return new Position($point->y, $point->x);
+    }
+
+    /**
+     * Point is declared in Point.php. Its constructor body could gain logic without
+     * PHPStan re-analysing this file, so the proof could go stale.
+     */
+    #[Ensures('$result->x === 1')]
+    public static function buildsAClassOfAnotherFile(): Point
+    {
+        return new Point(1, 2);
     }
 
     #[Ensures('implies($segment->end === null, $result === 0)')]
@@ -170,22 +180,15 @@ final class DataClassFixture
     }
 
     #[Pure]
-    public static function everyConstructorArgumentIsRequired(): Point
+    public static function everyConstructorArgumentIsRequired(): Position
     {
-        return new Point(1);
+        return new Position(1);
     }
 
     #[Ensures('$result === ($context->quantity > 0)')]
     public static function inheritedStateThatIsNeverRead(PriceContext $context): bool
     {
         return $context->quantity > 0;
-    }
-
-    /** @param int<0, 1000> $quantity */
-    #[Ensures('$result->quantity === $quantity && $result->customerId === null')]
-    public static function buildsAnObjectWithInheritedState(int $quantity): PriceContext
-    {
-        return new PriceContext($quantity, null);
     }
 
     #[Ensures('$result === $object->limit')]
@@ -234,5 +237,53 @@ final class DataClassFixture
     public static function holdsARecursiveClass(HoldsRecursive $object): int
     {
         return $object->count;
+    }
+}
+
+/** The data classes below are built by the methods above, so they are declared in this file. */
+final readonly class Position
+{
+    public function __construct(
+        public int $x,
+        public int $y,
+    ) {
+    }
+}
+
+final readonly class Percent
+{
+    public function __construct(
+        /** @var int<0, 100> */
+        public int $value,
+    ) {
+    }
+}
+
+final readonly class Checked
+{
+    public function __construct(public int $value)
+    {
+        if ($value < 0) {
+            throw new \InvalidArgumentException('negative');
+        }
+    }
+}
+
+final class Tagged
+{
+    public function __construct(
+        public readonly int $id,
+        public readonly string $tag,
+    ) {
+    }
+}
+
+final class Assigned
+{
+    public readonly int $value;
+
+    public function __construct(int $value)
+    {
+        $this->value = $value;
     }
 }

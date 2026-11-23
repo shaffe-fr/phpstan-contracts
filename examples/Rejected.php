@@ -167,4 +167,23 @@ final class Rejected
         }
         return $x;
     }
+
+    /** Receipt is declared in RealWorld/Checkout.php: the result cache would not redo the proof when its constructor body changes. */
+    #[Pure]
+    public static function objectOfAnotherFile(): int
+    {
+        $receipt = new RealWorld\Receipt(0, 0, false);
+        return $receipt->totalCents;
+    }
+}
+
+/** Declared in this file, so that its constructor is read in the file that builds it. */
+final readonly class Percentage
+{
+    public function __construct(public int $value)
+    {
+        if ($value < 0 || $value > 100) {
+            throw new \InvalidArgumentException('A percentage is between 0 and 100.');
+        }
+    }
 }

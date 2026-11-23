@@ -77,6 +77,7 @@ final class ExpressionTranslator
      * @param bool $isContract contract expressions use unbounded integer semantics, so overflow is not checked
      * @param int|null $fixedLine line reported for contract expressions, whose own line numbers are meaningless
      * @param list<string> $calls in an inlined method, the calls that lead to it from the verified method
+     * @param string|null $file the analysed file, the only one whose constructor bodies `new` may rely on
      */
     public function __construct(
         private readonly Encoding $encoding,
@@ -91,6 +92,7 @@ final class ExpressionTranslator
         private readonly ?MethodInliner $inliner = null,
         private readonly array $calls = [],
         private readonly ?ThrowPolicy $throws = null,
+        private readonly ?string $file = null,
     ) {
         $this->printer = new Standard();
     }
@@ -1483,7 +1485,8 @@ final class ExpressionTranslator
     }
 
     /**
-     * `new Data(...)` for a data class whose constructor only promotes its properties.
+     * `new Data(...)` for a data class whose constructor only promotes its properties
+     * and is declared in the analysed file.
      *
      * @param array<string, Term> $env
      */
@@ -1502,6 +1505,10 @@ final class ExpressionTranslator
         }
         if ($record->constructorOrder === null) {
             throw $this->reject($expr, sprintf('Cannot instantiate %s: %s.', $record->shortName(), $record->constructionRefusal));
+        }
+        $refusal = $this->types->constructorBodyRefusal($record->className, $this->file);
+        if ($refusal !== null) {
+            throw $this->reject($expr, sprintf('Cannot instantiate %s: %s.', $record->shortName(), $refusal));
         }
 
         $values = [];

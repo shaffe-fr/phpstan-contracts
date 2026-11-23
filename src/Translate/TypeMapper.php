@@ -8,9 +8,11 @@ use PhpstanContracts\Exception\VerificationRejected;
 use PhpstanContracts\Smt\RecordSort;
 use PhpstanContracts\Smt\Sort;
 use PhpParser\Error;
-use PhpParser\Node\Stmt\Class_;
-use PhpParser\Node\Stmt\ClassMethod;
+use PhpParser\Node;
+use PhpParser\Node\Stmt\ClassLike;
 use PhpParser\NodeFinder;
+use PhpParser\NodeTraverser;
+use PhpParser\NodeVisitor\NameResolver;
 use PhpParser\ParserFactory;
 use PHPStan\Reflection\ReflectionProvider;
 use PHPStan\Type\Constant\ConstantFloatType;
@@ -35,6 +37,9 @@ final class TypeMapper
     private array $building = [];
 
     private ?VerificationRejected $recursion = null;
+
+    /** @var array<string, string|null> class declaring a constructor => why its body cannot be modelled, null when it is empty */
+    private array $constructorBodies = [];
 
     public function __construct(
         private readonly EnumRegistry $enums,
@@ -172,7 +177,7 @@ final class TypeMapper
             );
         }
 
-        [$order, $refusal] = $this->constructorOrder($native->getFileName() ?: null, $className, $native->getConstructor(), $fieldSpecs, $unmodelled);
+        [$order, $refusal] = $this->constructorOrder($native->getConstructor(), $fieldSpecs, $unmodelled);
 
         $record = new RecordSort(
             $className,
@@ -193,6 +198,8 @@ final class TypeMapper
     /**
      * `new X(...)` can be modelled when the constructor only promotes every property
      * and does nothing else: then an instance is exactly its constructor arguments.
+     * This checks the parameters, which are part of the signature; the body is checked
+     * by {@see constructorBodyRefusal()} for the file that builds the object.
      *
      * The properties left out of the model keep their default value, or stay uninitialized,
      * and are never read, so they do not change what the instance is.
@@ -201,7 +208,7 @@ final class TypeMapper
      * @param array<string, string> $unmodelled
      * @return array{list<string>|null, string|null}
      */
-    private function constructorOrder(?string $file, string $className, ?\ReflectionMethod $constructor, array $fields, array $unmodelled): array
+    private function constructorOrder(?\ReflectionMethod $constructor, array $fields, array $unmodelled): array
     {
         if ($constructor === null) {
             return [null, 'it has no constructor'];
@@ -222,41 +229,57 @@ final class TypeMapper
             return [null, 'its constructor does not set every property'];
         }
 
-        if ($file === null || !$this->hasEmptyConstructorBody($file, $className)) {
-            return [null, 'its constructor contains logic, which is not verified'];
-        }
-
         return [$order, null];
     }
 
-    private function hasEmptyConstructorBody(string $file, string $className): bool
+    /**
+     * Why the body of the constructor of a data class cannot be relied on in `$file`, or
+     * null when it is empty and declared in that file.
+     *
+     * Only that file: when a file changes, PHPStan re-analyses the files that depend on
+     * it only if its exported nodes change (ResultCacheManager), and an exported method
+     * keeps its signature, not its body (ExportedNodeResolver). A proof that read the
+     * constructor body of another file would not be redone when that body changes.
+     */
+    public function constructorBodyRefusal(string $className, ?string $file): ?string
+    {
+        $constructor = $this->reflectionProvider->getClass($className)->getNativeReflection()->getConstructor();
+        $declaredIn = $constructor?->getFileName();
+        if ($constructor === null || !is_string($declaredIn) || $file === null || realpath($declaredIn) !== realpath($file)) {
+            return 'its constructor is declared in another file. Only classes whose constructor is in the same file can be built: PHPStan re-analyses a file when the signatures it uses change, not when a body in another file does, so the proof would not be redone';
+        }
+
+        $declaringClass = $constructor->getDeclaringClass()->getName();
+        if (!array_key_exists($declaringClass, $this->constructorBodies)) {
+            $this->constructorBodies[$declaringClass] = $this->readConstructorBody($declaredIn, $declaringClass);
+        }
+
+        return $this->constructorBodies[$declaringClass];
+    }
+
+    private function readConstructorBody(string $file, string $className): ?string
     {
         $code = @file_get_contents($file);
         if ($code === false) {
-            return false;
+            return sprintf('%s cannot be read', $file);
         }
 
         try {
-            $statements = (new ParserFactory())->createForNewestSupportedVersion()->parse($code);
+            $statements = (new ParserFactory())->createForNewestSupportedVersion()->parse($code) ?? [];
         } catch (Error) {
-            return false;
+            return sprintf('%s cannot be parsed', $file);
         }
 
-        $shortName = ($position = strrpos($className, '\\')) === false ? $className : substr($className, $position + 1);
-        $finder = new NodeFinder();
-        $class = $finder->findFirst(
-            $statements ?? [],
-            static fn ($node): bool => $node instanceof Class_ && $node->name?->toString() === $shortName,
+        $class = (new NodeFinder())->findFirst(
+            (new NodeTraverser(new NameResolver()))->traverse($statements),
+            static fn (Node $node): bool => $node instanceof ClassLike && $node->namespacedName?->toString() === $className,
         );
-        if (!$class instanceof Class_) {
-            return false;
-        }
+        $constructor = $class instanceof ClassLike ? $class->getMethod('__construct') : null;
 
-        $constructor = $finder->findFirst(
-            $class->stmts,
-            static fn ($node): bool => $node instanceof ClassMethod && $node->name->toLowerString() === '__construct',
-        );
-
-        return $constructor instanceof ClassMethod && $constructor->stmts === [];
+        return match (true) {
+            $constructor === null => 'the body of its constructor cannot be found; constructors that come from a trait are not supported',
+            $constructor->stmts !== [] => 'its constructor contains logic, which is not verified',
+            default => null,
+        };
     }
 }

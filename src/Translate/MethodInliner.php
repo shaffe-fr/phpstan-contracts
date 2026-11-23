@@ -346,7 +346,7 @@ final class MethodInliner
         $thisRefusal = $method->isStatic() ? 'There is no $this in a static method.' : 'Object state ($this) is not available here.';
         // The calls that lead here from the verified method, outermost first, this one last.
         $calls = array_slice($this->stack, 1);
-        $body = new ExpressionTranslator($this->encoding, $this->types, $this->enums, $classes, $this->reflection, $this->initializers, false, $line, $thisRefusal, $this, $calls);
+        $body = new ExpressionTranslator($this->encoding, $this->types, $this->enums, $classes, $this->reflection, $this->initializers, false, $line, $thisRefusal, $this, $calls, file: $this->file);
 
         $entry = [];
         if ($receiver !== null && !$method->isStatic()) {
@@ -367,7 +367,7 @@ final class MethodInliner
         // The callee was proven assuming its preconditions; here they are checked.
         $view = $entry;
         foreach ($this->contracts->read($node)->requires as $clause) {
-            $contract = new ExpressionTranslator($this->encoding, $this->types, $this->enums, $classes, $this->reflection, $this->initializers, true, $line, $thisRefusal, null, $calls);
+            $contract = new ExpressionTranslator($this->encoding, $this->types, $this->enums, $classes, $this->reflection, $this->initializers, true, $line, $thisRefusal, null, $calls, file: $this->file);
             $this->encoding->addObligation(new Obligation(
                 ObligationKind::RequiresViolated,
                 $line,

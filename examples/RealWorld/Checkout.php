@@ -72,3 +72,19 @@ final class Checkout
         return $cart->coupon !== null && $cart->coupon->minimumCents === null;
     }
 }
+
+/**
+ * Declared in this file because Checkout builds it: a verified method can only build an
+ * object whose constructor is in the same file.
+ */
+final readonly class Receipt
+{
+    public function __construct(
+        /** @var int<0, 100000000> */
+        public int $discountCents,
+        /** @var int<0, 100000000> */
+        public int $totalCents,
+        public bool $couponApplied,
+    ) {
+    }
+}

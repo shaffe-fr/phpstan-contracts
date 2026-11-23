@@ -20,9 +20,10 @@ final class DataClassRuleTest extends RuleFixtureTestCase
                 'readsAField' => [],
                 'sumOfBoundedFields' => [],
                 'nestedRead' => [],
-                'buildsAPoint' => [],
+                'buildsAnObject' => [],
                 'namedArgumentsFollowTheirNames' => [],
                 'swapsTheCoordinates' => [],
+                'buildsAClassOfAnotherFile' => ['contracts.unsupported: Cannot instantiate Point: its constructor is declared in another file. Only classes whose constructor is in the same file can be built: PHPStan re-analyses a file when the signatures it uses change, not when a body in another file does, so the proof would not be redone.'],
                 'nullsafeRead' => [],
                 'nullCheckOnAField' => [],
                 'narrowedByANullCheck' => [],
@@ -43,10 +44,9 @@ final class DataClassRuleTest extends RuleFixtureTestCase
                 'identityOfObjects' => ['contracts.unsupported: compared by identity'],
                 'methodCallOnAnObject' => ['contracts.unsupported: PhpstanContracts\Tests\Fixtures\Point::sum() is declared in another file'],
                 'nullableObjectWithoutACheck' => ['contracts.unsupported: may be null here'],
-                'everyConstructorArgumentIsRequired' => ['contracts.unsupported: Every constructor argument of Point must be passed explicitly'],
+                'everyConstructorArgumentIsRequired' => ['contracts.unsupported: Every constructor argument of Position must be passed explicitly'],
 
                 'inheritedStateThatIsNeverRead' => [],
-                'buildsAnObjectWithInheritedState' => [],
                 'readsTheModelledPartOfAnObject' => [],
                 'readsAMutableProperty' => ['contracts.unsupported: Property PhpstanContracts\Tests\Fixtures\PartlyMutable::$count must be public and readonly'],
                 'readsAPropertyOfAnUnsupportedType' => ['contracts.unsupported: Property PhpstanContracts\Tests\Fixtures\PartlyMutable::$tags cannot be read in a verified method: Type list<string> is not supported'],
@@ -58,6 +58,7 @@ final class DataClassRuleTest extends RuleFixtureTestCase
             ],
             PriceContext::class => [
                 'isBulk' => [],
+                'buildsAnObjectWithInheritedState' => [],
                 'readsInheritedState' => ['contracts.unsupported: Property PhpstanContracts\Tests\Fixtures\PriceContext::$_additional must be public and readonly'],
             ],
         ]);

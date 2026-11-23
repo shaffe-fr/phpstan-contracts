@@ -107,7 +107,7 @@ final class MethodEncoder
         // postconditions that the value is not null, just like an `if` would.
         $view = $entry;
         foreach ($contract->requires as $clause) {
-            $contractExpressions = $this->translator($encoding, $classes, true, $clause->line, $thisRefusal);
+            $contractExpressions = $this->translator($encoding, $classes, true, $clause->line, $thisRefusal, $scope->getFile());
             $encoding->assert($contractExpressions->translateBoolean($clause->expression, $view, Smt::bool(true)));
             $view = $contractExpressions->narrow($clause->expression, true, $view);
         }
@@ -126,7 +126,7 @@ final class MethodEncoder
             }
             $when = $throws->when === null
                 ? Smt::bool(true)
-                : $this->translator($encoding, $classes, true, $throws->line, $thisRefusal)->translateBoolean($throws->when->expression, $view, Smt::bool(true));
+                : $this->translator($encoding, $classes, true, $throws->line, $thisRefusal, $scope->getFile())->translateBoolean($throws->when->expression, $view, Smt::bool(true));
             $declaredThrows[] = [$thrown->getName(), $encoding->define('throws', $when), $throws];
         }
         $policy = new ThrowPolicy(array_map(fn (array $declared): array => [
@@ -146,7 +146,7 @@ final class MethodEncoder
             $scope->getFile(),
             [sprintf('%s::%s()', $methodReflection->getDeclaringClass()->getDisplayName(), $methodReflection->getName())],
         );
-        $body = new ExpressionTranslator($encoding, $this->types, $this->enums, $classes, $this->reflectionProvider, $this->initializers, false, null, $thisRefusal, $inliner, [], $policy);
+        $body = new ExpressionTranslator($encoding, $this->types, $this->enums, $classes, $this->reflectionProvider, $this->initializers, false, null, $thisRefusal, $inliner, [], $policy, $scope->getFile());
         $statements = new StatementTranslator($body, $encoding, $resultSpec->sort);
         $final = $statements->execute($method->stmts ?? [], (new State($entry, Smt::bool(true)))->withView($view));
 
@@ -175,7 +175,7 @@ final class MethodEncoder
         // A postcondition is about the paths that return. Without a throw, every path does.
         $postconditionEnv = [...$view, 'result' => $result];
         foreach ($contract->ensures as $clause) {
-            $contractExpressions = $this->translator($encoding, $classes, true, $clause->line, $thisRefusal);
+            $contractExpressions = $this->translator($encoding, $classes, true, $clause->line, $thisRefusal, $scope->getFile());
             $term = $contractExpressions->translateBoolean($clause->expression, $postconditionEnv, $policy->anyThrow() ? $returnCondition : Smt::bool(true));
             $encoding->ensures[] = new EnsuresCheck(
                 $clause->source,
@@ -211,9 +211,9 @@ final class MethodEncoder
         return $this->reflectionProvider->getClass($class)->getDisplayName();
     }
 
-    private function translator(Encoding $encoding, ClassNameResolver $classes, bool $isContract, ?int $line, string $thisRefusal): ExpressionTranslator
+    private function translator(Encoding $encoding, ClassNameResolver $classes, bool $isContract, ?int $line, string $thisRefusal, string $file): ExpressionTranslator
     {
-        return new ExpressionTranslator($encoding, $this->types, $this->enums, $classes, $this->reflectionProvider, $this->initializers, $isContract, $line, $thisRefusal);
+        return new ExpressionTranslator($encoding, $this->types, $this->enums, $classes, $this->reflectionProvider, $this->initializers, $isContract, $line, $thisRefusal, file: $file);
     }
 
     private function usesThis(ClassMethod $method, MethodContract $contract): bool
