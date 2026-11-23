@@ -7,7 +7,9 @@ namespace PhpstanContracts\Translate;
 use PhpParser\Error;
 use PhpParser\Node;
 use PhpParser\Node\Arg;
+use PhpParser\Node\ArrayItem;
 use PhpParser\Node\Expr;
+use PhpParser\Node\Expr\BinaryOp;
 use PhpParser\Node\Expr\BinaryOp\Concat;
 use PhpParser\Node\Expr\Cast;
 use PhpParser\Node\Expr\ClassConstFetch;
@@ -30,18 +32,23 @@ use PHPStan\Reflection\ConstantReflection;
 use PHPStan\Reflection\InitializerExprContext;
 use PHPStan\Reflection\InitializerExprTypeResolver;
 use PHPStan\Reflection\ReflectionProvider;
+use PHPStan\Type\Type;
 
 /**
  * Why a class constant or an enum case cannot be read as the value PHPStan folds it to.
  *
- * Two things in the initializer make the folded value wrong for some runs: reading a
- * `#[\Deprecated]` constant, case or global constant triggers a deprecation, which runs
- * the error handler (and throws under the handlers of Laravel or PHPUnit), and converting
+ * Some initializers make the folded value wrong for some runs: reading a
+ * `#[\Deprecated]` constant, case or global constant, or converting a float to an int
+ * implicitly (`1.5 | 0`), runs the error handler (and throws under the handlers of
+ * Laravel or PHPUnit), and converting
  * a float to a string depends on the `precision` ini setting, which PHPStan folds with
- * its own value. Constants referenced by the initializer are checked the same way.
+ * its own value. That conversion is a concatenation, a `(string)` cast, or an ordering
+ * (`<`, `<=`, `>`, `>=`, `<=>`) between a float and a string. Constants referenced by the
+ * initializer are checked the same way.
  *
  * A global constant that is not built in is evaluated where it is defined, not where it
- * is read, so only the float-to-string conversion is looked for in its initializer.
+ * is read, so only the float-to-string conversion is looked for in its initializer: what
+ * runs the error handler there runs it where the constant is defined.
  */
 final class ConstantGuard
 {
@@ -101,7 +108,7 @@ final class ConstantGuard
 
     /**
      * @param array<string, true> $seen
-     * @param bool $deprecations whether a deprecated constant read here triggers its notice where the folded value is read
+     * @param bool $deprecations whether what runs the error handler here runs it where the folded value is read
      */
     private function constant(ClassConstantReflection $constant, array &$seen, bool $deprecations): ?string
     {
@@ -168,13 +175,15 @@ final class ConstantGuard
     {
         $nodes = (new NodeFinder())->find(
             $initializer,
-            static fn (Node $node): bool => $node instanceof Concat || $node instanceof Cast\String_ || $node instanceof ClassConstFetch || $node instanceof ConstFetch,
+            static fn (Node $node): bool => $node instanceof Concat || $node instanceof Cast\String_ || self::isOrdering($node) || self::intOperands($node) !== [] || $node instanceof ClassConstFetch || $node instanceof ConstFetch,
         );
 
         foreach ($nodes as $node) {
             $refusal = match (true) {
                 $node instanceof Concat => $this->floatToString([$node->left, $node->right], $types, $where),
                 $node instanceof Cast\String_ => $this->floatToString([$node->expr], $types, $where),
+                self::isOrdering($node) => $this->floatComparedToString($node, $types, $where),
+                self::intOperands($node) !== [] => $deprecations ? $this->floatToInt(self::intOperands($node), $types, $where) : null,
                 $node instanceof ClassConstFetch => $this->classConstant($node, $class, $where, $seen, $deprecations),
                 $node instanceof ConstFetch => $this->globalConstant($node, $types, $where, $seen, $deprecations),
                 default => null,
@@ -188,20 +197,90 @@ final class ConstantGuard
     }
 
     /**
+     * `==` and `!=` are left out: a finite float prints as a numeric string, which never
+     * equals a non-numeric one, and INF and NAN print the same at every precision.
+     *
+     * @phpstan-assert-if-true BinaryOp $node
+     */
+    private static function isOrdering(Node $node): bool
+    {
+        return $node instanceof BinaryOp\Smaller
+            || $node instanceof BinaryOp\SmallerOrEqual
+            || $node instanceof BinaryOp\Greater
+            || $node instanceof BinaryOp\GreaterOrEqual
+            || $node instanceof BinaryOp\Spaceship;
+    }
+
+    /**
+     * PHP 8 orders a float and a non-numeric string by printing the float, so the answer depends on its digits.
+     */
+    private function floatComparedToString(BinaryOp $comparison, InitializerExprContext $types, string $where): ?string
+    {
+        $left = $this->initializers->getType($comparison->left, $types);
+        $right = $this->initializers->getType($comparison->right, $types);
+        $mixes = static fn (Type $float, Type $string): bool => !$float->isFloat()->no() && !$string->isString()->no();
+
+        return $mixes($left, $right) || $mixes($right, $left) ? $this->floatPrinted($where) : null;
+    }
+
+    /**
+     * The operands that PHP converts to an int: those of the bitwise operators, the shifts
+     * and `%`, an array key and an array offset.
+     *
+     * @return list<Expr>
+     */
+    private static function intOperands(Node $node): array
+    {
+        return match (true) {
+            $node instanceof BinaryOp\BitwiseAnd, $node instanceof BinaryOp\BitwiseOr, $node instanceof BinaryOp\BitwiseXor,
+            $node instanceof BinaryOp\ShiftLeft, $node instanceof BinaryOp\ShiftRight, $node instanceof BinaryOp\Mod => [$node->left, $node->right],
+            $node instanceof Expr\BitwiseNot => [$node->expr],
+            $node instanceof ArrayItem && $node->key !== null => [$node->key],
+            $node instanceof Expr\ArrayDimFetch && $node->dim !== null => [$node->dim],
+            default => [],
+        };
+    }
+
+    /**
+     * From PHP 8.1 on, converting a float to an int implicitly runs the error handler
+     * unless the float holds an integer in the range of int.
+     *
      * @param list<Expr> $operands
      */
-    private function floatToString(array $operands, InitializerExprContext $types, string $where): ?string
+    private function floatToInt(array $operands, InitializerExprContext $types, string $where): ?string
     {
         foreach ($operands as $operand) {
             if (!$this->initializers->getType($operand, $types)->isFloat()->no()) {
                 return sprintf(
-                    '%s converts a float to a string, whose digits depend on the precision ini setting, which is not modelled.',
+                    '%s converts a float to an int implicitly, which runs the error handler unless the float holds an integer in the range of int.',
                     $where,
                 );
             }
         }
 
         return null;
+    }
+
+    /**
+     * @param list<Expr> $operands
+     */
+    private function floatToString(array $operands, InitializerExprContext $types, string $where): ?string
+    {
+        foreach ($operands as $operand) {
+            if (!$this->initializers->getType($operand, $types)->isFloat()->no()) {
+                return $this->floatPrinted($where);
+            }
+        }
+
+        return null;
+    }
+
+    private function floatPrinted(string $where): string
+    {
+        return sprintf(
+            '%s converts a float to a string, whose digits depend on the precision ini setting, which is not modelled.',
+            $where,
+        );
     }
 
     /**
