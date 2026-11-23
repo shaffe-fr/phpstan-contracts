@@ -6,6 +6,7 @@ namespace PhpstanContracts\Translate;
 
 use PhpstanContracts\Exception\VerificationRejected;
 use PhpstanContracts\Smt\RecordSort;
+use PhpstanContracts\Smt\SmtName;
 use PhpstanContracts\Smt\Sort;
 use PhpParser\Error;
 use PhpParser\Node;
@@ -14,6 +15,7 @@ use PhpParser\NodeFinder;
 use PhpParser\NodeTraverser;
 use PhpParser\NodeVisitor\NameResolver;
 use PhpParser\ParserFactory;
+use PHPStan\Reflection\ClassReflection;
 use PHPStan\Reflection\ReflectionProvider;
 use PHPStan\Type\Constant\ConstantFloatType;
 use PHPStan\Type\Constant\ConstantIntegerType;
@@ -128,6 +130,7 @@ final class TypeMapper
         }
 
         $native = $class->getNativeReflection();
+        $constructor = $native->getConstructor();
         $this->building[] = $className;
 
         // A public readonly property cannot change once the object exists, whatever the
@@ -149,10 +152,26 @@ final class TypeMapper
                     );
                     continue;
                 }
+                $uninitialized = $this->uninitializedReason($class, $constructor, $property, $label);
+                if ($uninitialized !== null) {
+                    $unmodelled[$property->getName()] = $uninitialized;
+                    continue;
+                }
 
-                $fieldType = $class->getNativeProperty($property->getName())->getReadableType();
+                $declared = $class->getNativeProperty($property->getName());
+                $fieldType = $declared->getReadableType();
                 try {
-                    $fieldSpecs[$property->getName()] = $this->map($fieldType, $line);
+                    $fieldSpec = $this->map($fieldType, $line);
+                    if (self::holdsFloat($fieldSpec->sort) && !$this->convertsToFloat($declared->getNativeType())) {
+                        $unmodelled[$property->getName()] = sprintf(
+                            'Property %s cannot be read in a verified method: its PHPDoc type is %s but its native type is %s, so an int assigned to it stays an int. Declare float natively.',
+                            $label,
+                            $fieldType->describe(VerbosityLevel::typeOnly()),
+                            $declared->getNativeType()->describe(VerbosityLevel::typeOnly()),
+                        );
+                        continue;
+                    }
+                    $fieldSpecs[$property->getName()] = $fieldSpec;
                 } catch (VerificationRejected $unsupported) {
                     // Which class of a cycle is reached first depends on the analysis order,
                     // so a cycle rejects every class in it instead of hiding one field.
@@ -177,11 +196,11 @@ final class TypeMapper
             );
         }
 
-        [$order, $refusal] = $this->constructorOrder($native->getConstructor(), $fieldSpecs, $unmodelled);
+        [$order, $refusal] = $this->constructorOrder($constructor, $fieldSpecs, $unmodelled);
 
         $record = new RecordSort(
             $className,
-            'R_' . preg_replace('/[^A-Za-z0-9_]/', '_', $className),
+            'R_' . SmtName::of($class->getName()),
             array_map(static fn (VarSpec $spec): Sort => $spec->sort, $fieldSpecs),
             $order,
             $refusal,
@@ -193,6 +212,58 @@ final class TypeMapper
             fields: $fieldSpecs,
             description: $class->getDisplayName(),
         );
+    }
+
+    public static function holdsFloat(Sort $sort): bool
+    {
+        return $sort->isFloat() || ($sort->isNullable() && $sort->inner?->isFloat() === true);
+    }
+
+    /**
+     * Whether PHP converts an int to a float for a parameter or property of this native type.
+     */
+    public function convertsToFloat(Type $native): bool
+    {
+        try {
+            return self::holdsFloat($this->map($native, 0)->sort);
+        } catch (VerificationRejected) {
+            return false;
+        }
+    }
+
+    /**
+     * Reading a typed property that no one has set throws an Error. A property promoted by
+     * the constructor is set before the constructor body runs, so it is set in every object
+     * that the constructor built, provided that every object of the type is built by that
+     * constructor: the class is final, or the constructor is, so no subclass constructor
+     * can skip it. Objects created without their constructor, through reflection or
+     * unserialize(), are outside the guarantee.
+     */
+    private function uninitializedReason(ClassReflection $class, ?\ReflectionMethod $constructor, \ReflectionProperty $property, string $label): ?string
+    {
+        if (!$property->isPromoted()) {
+            return sprintf(
+                'Property %s may be uninitialized: only the properties promoted by the constructor are known to be set in every object.',
+                $label,
+            );
+        }
+        if ($constructor === null || $constructor->getDeclaringClass()->getName() !== $property->getDeclaringClass()->getName()) {
+            return sprintf(
+                'Property %s may be uninitialized: it is promoted by the constructor of %s, which the constructor of %s does not have to call.',
+                $label,
+                $property->getDeclaringClass()->getName(),
+                $class->getDisplayName(),
+            );
+        }
+        if (!$class->isFinalByKeyword() && !$constructor->isFinal()) {
+            return sprintf(
+                'Property %s may be uninitialized: %s is not final and neither is its constructor, so a subclass constructor can skip the one that sets it. Make the class or the constructor final.',
+                $label,
+                $class->getDisplayName(),
+            );
+        }
+
+        return null;
     }
 
     /**

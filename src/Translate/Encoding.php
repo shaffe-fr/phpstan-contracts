@@ -61,7 +61,12 @@ final class Encoding
      */
     public function registerSort(Sort $sort): void
     {
-        if (isset($this->datatypes[$sort->smt])) {
+        $registered = $this->datatypes[$sort->smt] ?? null;
+        if ($registered !== null) {
+            if ($registered->enum?->className !== $sort->enum?->className || $registered->record?->className !== $sort->record?->className) {
+                throw new LogicException(sprintf('Two classes share the SMT sort %s.', $sort->smt));
+            }
+
             return;
         }
 

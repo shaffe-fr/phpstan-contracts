@@ -13,6 +13,7 @@ parametersSchema:
 
 services:
 	- PhpstanContracts\Contract\ContractReader
+	- PhpstanContracts\Translate\ConstantGuard
 	- PhpstanContracts\Translate\EnumRegistry
 	- PhpstanContracts\Translate\TypeMapper
 	- PhpstanContracts\Translate\DomainBuilder
@@ -33,5 +34,9 @@ services:
 		class: PhpstanContracts\Rule\VerifyContractRule
 		arguments:
 			timeoutMs: %contracts.timeoutMs%
+		tags:
+			- phpstan.rules.rule
+	-
+		class: PhpstanContracts\Rule\PropertyHookContractRule
 		tags:
 			- phpstan.rules.rule

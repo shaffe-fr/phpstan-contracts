@@ -205,6 +205,9 @@ final class MethodInliner
         if ($methodNode->stmts === null) {
             throw new VerificationRejected(sprintf('%s has no body.', $label), $line);
         }
+        if (StatementTranslator::isGenerator($methodNode->stmts)) {
+            throw new VerificationRejected(sprintf('%s contains a yield, so calling it returns a Generator.', $label), $line);
+        }
         foreach ($methodNode->attrGroups as $group) {
             foreach ($group->attrs as $attribute) {
                 if (strcasecmp($attribute->name->toString(), 'Deprecated') === 0) {
@@ -306,6 +309,7 @@ final class MethodInliner
         if ($value->sort->equals($target)) {
             return $value;
         }
+        $this->encoding->registerSort($target);
         if ($target->isNullable() && $value->sort->isNull()) {
             return Smt::none($target);
         }

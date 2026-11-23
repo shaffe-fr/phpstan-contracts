@@ -191,10 +191,10 @@ final class ExpressionTranslator
             return $term;
         }
         if ($term->sort->isNull() && $target->isNullable()) {
-            return Smt::none($target);
+            return $this->none($target);
         }
         if ($target->isNullable() && $target->inner !== null && $term->sort->equals($target->inner)) {
-            return Smt::some($term);
+            return $this->some($term);
         }
 
         throw $this->reject($at, sprintf('Cannot use a %s where a %s is expected.', $term->sort->describe(), $target->describe()));
@@ -469,9 +469,9 @@ final class ExpressionTranslator
         }
 
         if ($left->sort->isNullable() && $left->sort->inner !== null && $left->sort->inner->equals($right->sort)) {
-            $right = Smt::some($right);
+            $right = $this->some($right);
         } elseif ($right->sort->isNullable() && $right->sort->inner !== null && $right->sort->inner->equals($left->sort)) {
-            $left = Smt::some($left);
+            $left = $this->some($left);
         }
 
         if (!$left->sort->equals($right->sort)) {
@@ -641,14 +641,15 @@ final class ExpressionTranslator
             }
 
             $matches = [];
-            $armEnv = $remainingEnv;
             foreach ($arm->conds as $condition) {
                 $candidate = $this->translate($condition, $remainingEnv, $remaining);
                 $matches[] = $this->identical($expr, $subject, $candidate);
-                if ($matchesTrue) {
-                    $armEnv = $this->narrow($condition, true, $armEnv);
-                }
             }
+            // The arm runs when any of its conditions holds, so only a single condition
+            // tells the body something; several are a disjunction, like `||`.
+            $armEnv = $matchesTrue && count($arm->conds) === 1
+                ? $this->narrow($arm->conds[0], true, $remainingEnv)
+                : $remainingEnv;
             $armCondition = $this->encoding->define('arm', Smt::any(...$matches));
 
             $value = $this->translateBranch($arm->body, $armEnv, Smt::all($remaining, $armCondition), $tail);
@@ -704,18 +705,18 @@ final class ExpressionTranslator
         if ($first->sort->isNull() && !$second->sort->isNull()) {
             $target = $second->sort->isNullable() ? $second->sort : Sort::nullable($second->sort);
 
-            return [Smt::none($target), $this->coerce($at, $second, $target)];
+            return [$this->none($target), $this->coerce($at, $second, $target)];
         }
         if ($second->sort->isNull() && !$first->sort->isNull()) {
             $target = $first->sort->isNullable() ? $first->sort : Sort::nullable($first->sort);
 
-            return [$this->coerce($at, $first, $target), Smt::none($target)];
+            return [$this->coerce($at, $first, $target), $this->none($target)];
         }
         if ($first->sort->isNullable() && $first->sort->inner?->equals($second->sort) === true) {
-            return [$first, Smt::some($second)];
+            return [$first, $this->some($second)];
         }
         if ($second->sort->isNullable() && $second->sort->inner?->equals($first->sort) === true) {
-            return [Smt::some($first), $second];
+            return [$this->some($first), $second];
         }
 
         throw $this->reject($at, sprintf(
@@ -723,6 +724,24 @@ final class ExpressionTranslator
             $first->sort->describe(),
             $second->sort->describe(),
         ));
+    }
+
+    /**
+     * A nullable value built from a literal, whose sort no declaration has registered yet.
+     */
+    private function none(Sort $nullable): Term
+    {
+        $this->encoding->registerSort($nullable);
+
+        return Smt::none($nullable);
+    }
+
+    private function some(Term $value): Term
+    {
+        $wrapped = Smt::some($value);
+        $this->encoding->registerSort($wrapped->sort);
+
+        return $wrapped;
     }
 
     private function unreached(Term $like): Term
@@ -1084,6 +1103,11 @@ final class ExpressionTranslator
         if ($expr->class instanceof Name && $expr->name instanceof Identifier && $expr->name->toLowerString() !== 'class') {
             $enum = $this->enums->find($this->classes->resolveStatically($expr->class, $this->lineOf($expr)));
             if ($enum !== null && array_key_exists($expr->name->toString(), $enum->cases)) {
+                $refusal = $this->enums->guard()->caseRefusal($this->reflection->getClass($enum->className), $expr->name->toString());
+                if ($refusal !== null) {
+                    throw $this->reject($expr, $refusal);
+                }
+
                 return $this->enumCaseTerm($enum, $expr->name->toString());
             }
         }
@@ -1170,6 +1194,12 @@ final class ExpressionTranslator
         if (!$this->canAccess($constant->getDeclaringClass(), $constant->isPrivate(), $constant->isPublic())) {
             throw $this->reject($expr, sprintf('Constant %s is not accessible here.', $label));
         }
+        $refusal = $enum !== null && $class->hasEnumCase($name)
+            ? $this->enums->guard()->caseRefusal($class, $name)
+            : $this->enums->guard()->constantRefusal($constant);
+        if ($refusal !== null) {
+            throw $this->reject($expr, $refusal);
+        }
 
         // Not getValueType(): for a typed constant it is the declared type, which a subclass
         // may narrow. The access is statically bound here, so the initializer is the value.
@@ -1237,6 +1267,14 @@ final class ExpressionTranslator
             ? $this->enums->find($this->classes->resolveStatically($expr->class, $this->lineOf($expr)))
             : null;
 
+        // A pure enum has no built-in from(), but may declare a static method of that name.
+        if ($enum !== null && !$enum->backed) {
+            if (!$this->reflection->getClass($enum->className)->hasNativeMethod($expr->name->toString())) {
+                throw $this->reject($expr, sprintf('%s is not a backed enum, so it has no %s().', $enum->shortName(), $expr->name->toString()));
+            }
+            $enum = null;
+        }
+
         if ($enum === null) {
             return $this->inline(
                 $expr,
@@ -1249,7 +1287,7 @@ final class ExpressionTranslator
             );
         }
         if ($enum->backingType === null) {
-            throw $this->reject($expr, sprintf('%s is not a backed enum, so it has no %s().', $enum->shortName(), $expr->name->toString()));
+            throw $this->reject($expr, sprintf('%s::%s() is not supported: %s', $enum->shortName(), $expr->name->toString(), $enum->unmodelledBacking));
         }
 
         $argument = $expr->args[0] ?? null;
@@ -1438,9 +1476,11 @@ final class ExpressionTranslator
             return Smt::call($enum->valueFunction(), $enum->backingType === 'int' ? Sort::int() : Sort::string(), $object);
         }
 
-        throw $this->reject($at, $property === 'value'
-            ? sprintf('%s is not a backed enum, so it has no ->value.', $enum->shortName())
-            : sprintf('Property ->%s is not available on enum %s.', $property, $enum->shortName()));
+        throw $this->reject($at, match (true) {
+            $property === 'value' && $enum->backed => sprintf('->value of %s is not supported: %s', $enum->shortName(), $enum->unmodelledBacking),
+            $property === 'value' => sprintf('%s is not a backed enum, so it has no ->value.', $enum->shortName()),
+            default => sprintf('Property ->%s is not available on enum %s.', $property, $enum->shortName()),
+        });
     }
 
     /**
@@ -1509,6 +1549,23 @@ final class ExpressionTranslator
         $refusal = $this->types->constructorBodyRefusal($record->className, $this->file);
         if ($refusal !== null) {
             throw $this->reject($expr, sprintf('Cannot instantiate %s: %s.', $record->shortName(), $refusal));
+        }
+
+        $class = $this->reflection->getClass($record->className);
+        $constructor = $class->getConstructor();
+        // PHPStan reports an inaccessible constructor too, but a proof must not rest on code that throws.
+        if (!$this->canAccess($constructor->getDeclaringClass(), $constructor->isPrivate(), $constructor->isPublic())) {
+            throw $this->reject($expr, sprintf('Cannot instantiate %s: its constructor is not accessible here.', $record->shortName()));
+        }
+        if (ConstantGuard::hasDeprecatedAttribute($constructor->getAttributes())) {
+            throw $this->reject($expr, sprintf(
+                'Cannot instantiate %s: its constructor is #[\Deprecated], and calling it triggers E_USER_DEPRECATED, which runs the error handler.',
+                $record->shortName(),
+            ));
+        }
+        // The object built here is destroyed at the end of the statement, or later.
+        if ($class->hasNativeMethod('__destruct')) {
+            throw $this->reject($expr, sprintf('Cannot instantiate %s: its destructor runs code that is not verified.', $record->shortName()));
         }
 
         $values = [];

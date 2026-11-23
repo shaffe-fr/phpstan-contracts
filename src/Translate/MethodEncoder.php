@@ -18,6 +18,7 @@ use PHPStan\Analyser\Scope;
 use PHPStan\Node\InClassMethodNode;
 use PHPStan\Reflection\InitializerExprTypeResolver;
 use PHPStan\Reflection\ReflectionProvider;
+use PHPStan\Type\VerbosityLevel;
 
 /**
  * Turns one annotated method into an {@see Encoding}: parameters become
@@ -40,6 +41,10 @@ final class MethodEncoder
     {
         $method = $node->getOriginalNode();
         $encoding = new Encoding();
+
+        if (StatementTranslator::isGenerator($method->stmts ?? [])) {
+            throw new VerificationRejected(StatementTranslator::GENERATOR_REFUSAL, $method->getStartLine());
+        }
 
         /** @var array<string, Term> $entry */
         $entry = [];
@@ -88,6 +93,7 @@ final class MethodEncoder
             }
 
             $spec = $this->types->map($scope->getVariableType($name), $param->getStartLine());
+            $this->rejectPhpDocFloat($node, $name, $spec->sort, $param->getStartLine());
             $term = $encoding->declareInput($name, $spec->sort);
             $encoding->assert($this->domains->constraint($spec, $term, true));
             $signature[] = $spec->sort;
@@ -197,6 +203,32 @@ final class MethodEncoder
         }
 
         return $encoding;
+    }
+
+    /**
+     * PHP converts an int argument to float by the native type only: for a parameter typed
+     * `float` in PHPDoc alone, which PHPStan lets callers pass an int to, the int stays an int.
+     */
+    private function rejectPhpDocFloat(InClassMethodNode $node, string $name, Sort $sort, int $line): void
+    {
+        if (!TypeMapper::holdsFloat($sort)) {
+            return;
+        }
+
+        foreach ($node->getMethodReflection()->getOnlyVariant()->getParameters() as $parameter) {
+            if ($parameter->getName() !== $name) {
+                continue;
+            }
+            $native = $parameter->getNativeType();
+            if (!$this->types->convertsToFloat($native)) {
+                throw new VerificationRejected(sprintf(
+                    'Parameter $%s has the PHPDoc type %s but the native type %s, which is what PHP converts its argument to: an int argument stays an int. Declare float in the signature.',
+                    $name,
+                    $parameter->getType()->describe(VerbosityLevel::typeOnly()),
+                    $native->describe(VerbosityLevel::typeOnly()),
+                ), $line);
+            }
+        }
     }
 
     private function describeThrows(string $class, ?string $when): string

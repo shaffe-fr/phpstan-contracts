@@ -32,7 +32,7 @@ final readonly class RecordSort
 
     public function accessor(string $field): string
     {
-        return $this->smtName . '_' . preg_replace('/[^A-Za-z0-9_]/', '_', $field);
+        return $this->smtName . SmtName::SEPARATOR . SmtName::of($field);
     }
 
     public function shortName(): string

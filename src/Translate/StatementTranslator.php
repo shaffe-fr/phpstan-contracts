@@ -12,6 +12,9 @@ use PhpParser\Node\Expr;
 use PhpParser\Node\Expr\BinaryOp;
 use PhpParser\Node\Expr\Variable;
 use PhpParser\Node\Stmt;
+use PhpParser\NodeTraverser;
+use PhpParser\NodeVisitor;
+use PhpParser\NodeVisitorAbstract;
 
 /**
  * Symbolic execution of structured statements into SSA form.
@@ -29,6 +32,41 @@ final class StatementTranslator
         private readonly Sort $resultSort,
         private readonly ?InlinedReturns $inlinedReturns = null,
     ) {
+    }
+
+    public const GENERATOR_REFUSAL = 'Generators are not supported: a yield anywhere in the body, even in unreachable code, makes the method return a Generator.';
+
+    /**
+     * Whether a `yield` makes the body a generator. PHP decides this when it compiles the
+     * body, so the `yield` counts even where no path reaches it, which execute() skips.
+     *
+     * @param array<Stmt> $statements
+     */
+    public static function isGenerator(array $statements): bool
+    {
+        $traverser = new NodeTraverser();
+        $visitor = new class extends NodeVisitorAbstract {
+            public bool $found = false;
+
+            public function enterNode(Node $node): ?int
+            {
+                // A closure or a class has a body of its own.
+                if ($node instanceof Expr\Closure || $node instanceof Expr\ArrowFunction || $node instanceof Stmt\ClassLike || $node instanceof Stmt\Function_) {
+                    return NodeVisitor::DONT_TRAVERSE_CHILDREN;
+                }
+                if ($node instanceof Expr\Yield_ || $node instanceof Expr\YieldFrom) {
+                    $this->found = true;
+
+                    return NodeVisitor::STOP_TRAVERSAL;
+                }
+
+                return null;
+            }
+        };
+        $traverser->addVisitor($visitor);
+        $traverser->traverse($statements);
+
+        return $visitor->found;
     }
 
     /**
