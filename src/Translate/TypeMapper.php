@@ -109,6 +109,14 @@ final class TypeMapper
 
     private function mapRecord(string $className, int $line): VarSpec
     {
+        if (!$this->reflectionProvider->hasClass($className)) {
+            throw new VerificationRejected(sprintf('Class %s cannot be resolved.', $className), $line);
+        }
+
+        // Class names are case-insensitive: every spelling of a class is the same record.
+        $class = $this->reflectionProvider->getClass($className);
+        $className = $class->getName();
+
         if (isset($this->records[$className])) {
             return $this->records[$className];
         }
@@ -117,11 +125,6 @@ final class TypeMapper
             throw $this->recursion = new VerificationRejected(sprintf('Class %s refers to itself; recursive types are not supported.', $className), $line);
         }
 
-        if (!$this->reflectionProvider->hasClass($className)) {
-            throw new VerificationRejected(sprintf('Class %s cannot be resolved.', $className), $line);
-        }
-
-        $class = $this->reflectionProvider->getClass($className);
         if ($class->isInterface() || $class->isAbstract() || $class->isAnonymous() || $class->isEnum()) {
             throw new VerificationRejected(
                 sprintf('Type %s is not supported: only concrete readonly data classes are.', $className),
