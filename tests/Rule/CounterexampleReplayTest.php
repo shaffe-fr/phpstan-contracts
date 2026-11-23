@@ -79,6 +79,12 @@ final class CounterexampleReplayTest extends RuleFixtureTestCase
             return;
         }
 
+        if ($diagnostic->identifier === 'contracts.undefinedKey') {
+            $this->replayUndefinedKey($method, $diagnostic, $label);
+
+            return;
+        }
+
         if ($diagnostic->identifier === 'contracts.requiresViolated') {
             $this->replayPrecondition($method, $diagnostic, $label);
 
@@ -115,6 +121,26 @@ final class CounterexampleReplayTest extends RuleFixtureTestCase
             $this->evaluateContract($contract, $method, $object, $arguments, $actual),
             'The contract holds in PHP for the reported inputs, so the counterexample is not one. ' . $label,
         );
+    }
+
+    /**
+     * PHP raises "Undefined array key" for the read, which the error handler of a framework
+     * turns into an exception, so the replay turns it into one too.
+     */
+    private function replayUndefinedKey(ReflectionMethod $method, Diagnostic $diagnostic, string $label): void
+    {
+        [$object, $arguments] = $this->arguments($method, $this->between($diagnostic->message, 'Counterexample: ', '.'), $label);
+        set_error_handler(static function (int $level, string $message): never {
+            throw new RuntimeException($message);
+        }, E_WARNING);
+        try {
+            $method->invoke($object, ...$arguments);
+            self::fail('PHP read the key without a warning. ' . $label);
+        } catch (RuntimeException $warning) {
+            self::assertStringContainsString('Undefined array key', $warning->getMessage(), $label);
+        } finally {
+            restore_error_handler();
+        }
     }
 
     private function replayPrecondition(ReflectionMethod $method, Diagnostic $diagnostic, string $label): void

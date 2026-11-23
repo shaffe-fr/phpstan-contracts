@@ -49,6 +49,38 @@ final class Z3Evaluator
     }
 
     /**
+     * Whether each closed formula is valid, which is its negation being unsatisfiable. Terms with
+     * quantifiers and unconstrained constants are not reduced by `simplify`, but they can be decided.
+     *
+     * @param list<string> $formulas closed boolean SMT-LIB terms
+     * @param list<string> $declarations datatypes as ScriptRenderer::declarations() writes them, then any constants the formulas hold for
+     * @return list<bool>
+     */
+    public function holds(array $formulas, array $declarations = []): array
+    {
+        $prelude = (new ReflectionClassConstant(ScriptRenderer::class, 'PRELUDE'))->getValue();
+        $checks = array_map(static fn (string $formula): string => "(push 1)\n(assert (not " . $formula . "))\n(check-sat)\n(pop 1)", $formulas);
+        $script = implode("\n", $declarations) . "\n" . $prelude . "\n" . implode("\n", $checks) . "\n";
+
+        $process = new Process([$this->binary, '-in', '-smt2']);
+        $process->setInput($script);
+        $process->setTimeout(120);
+        $process->run();
+
+        $answers = preg_split('/\s+/', trim($process->getOutput())) ?: [];
+        if (count($answers) !== count($formulas)) {
+            throw new RuntimeException(sprintf(
+                "Z3 returned %d answers for %d formulas.\n%s",
+                count($answers),
+                count($formulas),
+                substr($process->getOutput() . $process->getErrorOutput(), 0, 600),
+            ));
+        }
+
+        return array_map(static fn (string $answer): bool => $answer === 'unsat', $answers);
+    }
+
+    /**
      * @param string|list<mixed> $value
      */
     public static function integer(string|array $value): string

@@ -336,6 +336,102 @@ final class SemanticsTest extends TestCase
     }
 
     /**
+     * `count()`, `$list[$k]`, `$list[] = $x` (and the copy it leaves alone), `isset($list[$i])` and
+     * `$list[$i] ?? $default` against real PHP arrays, for ints at both ends, strings with NUL and
+     * non-ASCII bytes, floats with NAN, both zeros and infinities, bools and nullable ints whose
+     * `null` elements make `isset()` false. A list built from a literal has junk beyond its length,
+     * so every formula must hold for any contents of that junk.
+     */
+    public function testListOperationsMatchPhpArrays(): void
+    {
+        $pools = [
+            'int' => [Sort::int(), [PHP_INT_MIN, PHP_INT_MAX, -1, 0, 1, 42]],
+            'string' => [Sort::string(), ['', "a\0b", "\xC3\xA9", 'EUR', "\xFF", '0']],
+            'float' => [Sort::float(), [0.0, -0.0, NAN, INF, -INF, 1.5, PHP_FLOAT_MAX]],
+            'bool' => [Sort::bool(), [true, false]],
+            'nullable int' => [Sort::nullable(Sort::int()), [null, 0, PHP_INT_MAX, -5]],
+        ];
+
+        mt_srand(11);
+        $formulas = [];
+        foreach ($pools as $name => [$elementSort, $pool]) {
+            $listSort = Sort::list($elementSort);
+            $encoding = new Encoding();
+            $encoding->registerSort($listSort);
+            $declarations = [...(new ScriptRenderer())->declarations($encoding), sprintf('(declare-const base %s)', $listSort->smt)];
+            $base = Smt::symbol('base', $listSort);
+            $default = $pool[array_key_last($pool)];
+            $defaultTerm = $this->valueTerm($elementSort->isNullable() ? ($elementSort->inner ?? $elementSort) : $elementSort, $elementSort->isNullable() ? 7 : $default);
+
+            $lists = [[], array_slice($pool, 0, 1), array_slice($pool, 0, 2)];
+            for ($i = 0; $i < 8; ++$i) {
+                $length = mt_rand(0, 6);
+                $list = [];
+                for ($k = 0; $k < $length; ++$k) {
+                    $list[] = $pool[mt_rand(0, count($pool) - 1)];
+                }
+                $lists[] = $list;
+            }
+            $long = [];
+            for ($k = 0; $k < 12; ++$k) {
+                $long[] = $pool[mt_rand(0, count($pool) - 1)];
+            }
+            $lists[] = $long;
+
+
+            foreach ($lists as $php) {
+                $term = Smt::listLiteral($listSort, array_map(fn (mixed $value): Term => $this->valueTerm($elementSort, $value), $php), $base);
+                $length = count($php);
+                $claims = [sprintf('(= %s %d)', Smt::listLength($term)->smt, $length)];
+
+                foreach ($php as $key => $value) {
+                    $claims[] = sprintf('(= %s %s)', Smt::listItem($term, Smt::int($key))->smt, $this->valueTerm($elementSort, $value)->smt);
+                }
+
+                // `$copy = $list; $copy[] = $x;` leaves `$list` alone.
+                $x = $pool[mt_rand(0, count($pool) - 1)];
+                $copy = $php;
+                $copy[] = $x;
+                $appended = Smt::listAppend($term, $this->valueTerm($elementSort, $x));
+                $claims[] = sprintf('(= %s %d)', Smt::listLength($appended)->smt, count($copy));
+                foreach ($copy as $key => $value) {
+                    $claims[] = sprintf('(= %s %s)', Smt::listItem($appended, Smt::int($key))->smt, $this->valueTerm($elementSort, $value)->smt);
+                }
+
+                foreach (range(-2, $length + 1) as $index) {
+                    $at = Smt::int($index);
+                    $element = Smt::listItem($term, $at);
+                    $present = $elementSort->isNullable()
+                        ? Smt::all(Smt::hasKey($term, $at), Smt::not(Smt::isNone($element)))
+                        : Smt::hasKey($term, $at);
+                    $claims[] = Smt::eq($present, Smt::bool(isset($php[$index])))->smt;
+
+                    $value = $elementSort->isNullable() ? Smt::unwrap($element) : $element;
+                    $coalesced = Smt::ite($present, $value, $defaultTerm);
+                    $expected = $php[$index] ?? ($elementSort->isNullable() ? 7 : $default);
+                    $claims[] = Smt::eq($coalesced, $this->valueTerm($elementSort->isNullable() ? Sort::int() : $elementSort, $expected))->smt;
+                }
+
+                foreach ($claims as $claim) {
+                    $formulas[$name][] = [$claim, $declarations];
+                }
+            }
+        }
+
+        foreach ($formulas as $name => $claims) {
+            $declarations = $claims[0][1];
+            $texts = array_map(static fn (array $claim): string => $claim[0], $claims);
+            $failed = [];
+            foreach ($this->z3->holds($texts, $declarations) as $position => $holds) {
+                if (!$holds) {
+                    $failed[] = $texts[$position];
+                }
+            }
+            self::assertSame([], array_slice($failed, 0, 5), sprintf('%d of %d claims about lists of %s differ from PHP.', count($failed), count($texts), $name));
+        }
+    }
+
+    /**
      * @param array<string, mixed> $values
      */
     private function shapeLiteral(Sort $sort, array $values): Term

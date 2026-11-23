@@ -235,6 +235,104 @@ final class ReplayFixture
         return $totals['net'] + $totals['vat'];
     }
 
+    /**
+     * @param list<int<0, 10000000>> $amounts
+     */
+    #[Ensures('$result >= 0')]
+    public static function readsWithAWrongGuard(array $amounts, int $index): int
+    {
+        if ($index >= 0 && $index <= count($amounts)) {
+            return $amounts[$index];
+        }
+
+        return 0;
+    }
+
+    /**
+     * @param list<int> $items
+     */
+    #[Pure]
+    public static function readsTheFirstElementWithoutAGuard(array $items): int
+    {
+        return $items[0];
+    }
+
+    /**
+     * @param list<int> $items
+     */
+    #[Ensures('$result === count($items)')]
+    public static function countsOneTooMany(array $items): int
+    {
+        return count($items) + 1;
+    }
+
+    /**
+     * @param list<int> $items
+     * @return list<int>
+     */
+    #[Ensures('count($result) === count($items) + 2')]
+    public static function appendsOnlyOnce(array $items, int $item): array
+    {
+        $items[] = $item;
+
+        return $items;
+    }
+
+    /**
+     * @param list<?int> $items
+     */
+    #[Ensures('implies($index >= 0 && $index < count($items), $result === $items[$index])')]
+    public static function coalescesAnElementThatIsNull(array $items, int $index): int
+    {
+        return $items[$index] ?? 0;
+    }
+
+    /**
+     * @param list<?int> $items
+     */
+    #[Ensures('implies($index >= 0 && $index < count($items), $result)')]
+    public static function issetIsFalseForANullElement(array $items, int $index): bool
+    {
+        return isset($items[$index]);
+    }
+
+    /**
+     * @param list<string> $names
+     */
+    #[Ensures('$result !== ""')]
+    public static function defaultsToTheEmptyString(array $names): string
+    {
+        return $names[0] ?? '';
+    }
+
+    /**
+     * @param list<ReplayStatus> $statuses
+     * @return list<ReplayStatus>
+     */
+    #[Ensures('count($result) === 0 || $result[0] === ReplayStatus::Active')]
+    public static function returnsTheStatusesItWasGiven(array $statuses): array
+    {
+        return $statuses;
+    }
+
+    /**
+     * @return list<float>
+     */
+    #[Ensures('count($result) === 3')]
+    public static function aLiteralOfFloatsWithTheWrongLength(): array
+    {
+        return [-0.0, NAN];
+    }
+
+    /**
+     * @param array{items: list<int>, label: string} $order
+     */
+    #[Ensures('$result === $order["label"]')]
+    public static function aShapeHoldingAList(array $order): string
+    {
+        return count($order['items']) === 0 ? 'none' : $order['label'];
+    }
+
     private static function twice(int $x): int
     {
         return $x * 2;
