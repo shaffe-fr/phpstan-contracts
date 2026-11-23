@@ -95,14 +95,26 @@ final class Rejected
     }
 
     /**
-     * Arrays are rejected.
+     * Arrays with arbitrary keys are rejected: use a list<T> or an array shape.
      *
-     * @param list<int> $items
+     * @param array<string, int> $items
      */
     #[Pure]
     public static function array(array $items): int
     {
         return 1;
+    }
+
+    /**
+     * == on arrays juggles the type of every element ([1] == [true]), so it is rejected.
+     *
+     * @param list<int> $left
+     * @param list<int> $right
+     */
+    #[Pure]
+    public static function looseArrayEquality(array $left, array $right): bool
+    {
+        return $left == $right;
     }
 
     /** Side effects are rejected. */

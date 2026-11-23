@@ -15,6 +15,7 @@ use PhpstanContracts\Examples\RealWorld\ErpCode;
 use PhpstanContracts\Examples\RealWorld\Floats;
 use PhpstanContracts\Examples\RealWorld\Invoice;
 use PhpstanContracts\Examples\RealWorld\Nullables;
+use PhpstanContracts\Examples\RealWorld\OrderLines;
 use PhpstanContracts\Examples\RealWorld\OrderWorkflow;
 use PhpstanContracts\Examples\RealWorld\Pagination;
 use PhpstanContracts\Examples\RealWorld\PriceContext;
@@ -25,6 +26,7 @@ use PhpstanContracts\Examples\RealWorld\StockLine;
 use PhpstanContracts\Examples\RealWorld\StockStatus;
 use PhpstanContracts\Examples\RealWorld\Uploads;
 use PhpstanContracts\Examples\RealWorld\UserRole;
+use PhpstanContracts\Examples\RealWorld\VatSplit;
 use PhpstanContracts\Examples\Rejected;
 use PhpstanContracts\Tests\Support\RuleFixtureTestCase;
 
@@ -98,6 +100,19 @@ final class ExamplesTest extends RuleFixtureTestCase
                 'canTransition' => [],
                 'canTransitionBroken' => ['contracts.ensuresViolated'],
                 'isFinal' => [],
+            ],
+            OrderLines::class => [
+                'lineAmount' => [],
+                'lineAmountBroken' => ['contracts.undefinedKey: Counterexample: $amounts = [], $index = 0'],
+                'firstAmount' => [],
+                'withLine' => [],
+                'withLineBroken' => ['contracts.returnType: The returned value can violate the declared return type `list<int<0, 10000000>>`. Counterexample: $amounts = [], $amount = 10000001 => $result = [10000001]'],
+                'isBlocked' => [],
+            ],
+            VatSplit::class => [
+                'split' => [],
+                'splitBroken' => ['contracts.ensuresViolated: Counterexample: $grossCents = 2, $rateBasisPoints = 1 => $result = [\'net\' => 1, \'vat\' => 0]'],
+                'vatShare' => [],
             ],
             Pagination::class => [
                 'pageCount' => [],
@@ -175,7 +190,8 @@ final class ExamplesTest extends RuleFixtureTestCase
                 'partialMatch' => ['contracts.unhandledMatch'],
                 'loop' => ['contracts.unsupported: Loops are not supported'],
                 'rounding' => ['contracts.unsupported: Call to round()'],
-                'array' => ['contracts.unsupported: Type list<int> is not supported'],
+                'array' => ['contracts.unsupported: Type array<string, int> is not supported in verified methods'],
+                'looseArrayEquality' => ['contracts.unsupported: Arrays compared with == are compared loosely'],
                 'effect' => ['contracts.unsupported: Side effects'],
                 'validatedConstructor' => ['contracts.unsupported: its constructor contains logic'],
                 'mutableObject' => ['contracts.unsupported: must be public and readonly'],
