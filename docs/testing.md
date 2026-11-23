@@ -151,7 +151,7 @@ That is a sample, not a measurement of coverage.
 
 ## What is not covered
 
-- **The installer.** `phpstan-contracts-install-z3` downloads a release and is tested by hand.
+- **The installer.** `phpstan-contracts-install-z3` has no unit tests. Every CI job runs it before the suite, so the download, the checksum, the extraction and the first start are exercised on Linux x64, Windows x64 and macOS arm64. The Linux arm64, Windows arm64 and macOS x64 archives are pinned but never installed by the CI.
 - **Other Z3 versions.** The tests run against the version that the installer provides. A different version may print counterexample values differently, which is why the rule tests match identifiers and message fragments and not whole messages.
-- **Operating systems.** The suite is developed on Windows and runs in the CI on Linux. macOS is not tested.
+- **Every PHP version on every OS.** The CI runs the whole suite on Linux with PHP 8.3, 8.4 and 8.5, and on Windows and macOS (arm64) with PHP 8.5 only. The suite is developed on Windows.
 - **Performance.** The tests check answers, not times. Only the timeout path is exercised.
