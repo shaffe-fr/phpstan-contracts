@@ -280,10 +280,7 @@ final class Tagged
 
 final class Assigned
 {
-    public readonly int $value;
-
-    public function __construct(int $value)
+    public function __construct(public readonly int $value, int $offset = 0)
     {
-        $this->value = $value;
     }
 }

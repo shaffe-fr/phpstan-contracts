@@ -155,7 +155,7 @@ final class ScriptRendererTest extends TestCase
 
         $script = $this->renderer->render($encoding);
 
-        self::assertStringContainsString('(declare-datatypes ((E_App_Level 0)) (((C_App_Level_Low) (C_App_Level_High))))', $script);
+        self::assertStringContainsString('(declare-datatypes ((E_App_Level 0)) (((C_App_Level/Low) (C_App_Level/High))))', $script);
         self::assertStringContainsString('(declare-datatypes ((Opt_E_App_Level 0)) (((none_Opt_E_App_Level) (some_Opt_E_App_Level (val_Opt_E_App_Level E_App_Level)))))', $script);
         self::assertLessThan(
             (int) strpos($script, '(declare-datatypes ((Opt_E_App_Level 0))'),
@@ -171,14 +171,14 @@ final class ScriptRendererTest extends TestCase
         $encoding->declareInput('level', Sort::enum($enum));
         $encoding->declareResult(Sort::int());
 
-        self::assertStringNotContainsString('E_App_Level_value', $this->renderer->render($encoding));
+        self::assertStringNotContainsString('E_App_Level/value', $this->renderer->render($encoding));
 
         $encoding->requireEnumFunction($enum, 'value');
         $encoding->requireEnumFunction($enum, 'name');
         $script = $this->renderer->render($encoding);
 
-        self::assertStringContainsString('(define-fun E_App_Level_value ((e E_App_Level)) Int (ite (= e C_App_Level_Low) 1 10))', $script);
-        self::assertStringContainsString('(define-fun E_App_Level_name ((e E_App_Level)) String (ite (= e C_App_Level_Low) "Low" "High"))', $script);
+        self::assertStringContainsString('(define-fun E_App_Level/value ((e E_App_Level)) Int (ite (= e C_App_Level/Low) 1 10))', $script);
+        self::assertStringContainsString('(define-fun E_App_Level/name ((e E_App_Level)) String (ite (= e C_App_Level/Low) "Low" "High"))', $script);
     }
 
     public function testStringBackedEnumsReturnStrings(): void
@@ -190,7 +190,7 @@ final class ScriptRendererTest extends TestCase
         $encoding->requireEnumFunction($enum, 'value');
 
         self::assertStringContainsString(
-            '(define-fun E_App_Code_value ((e E_App_Code)) String (ite (= e C_App_Code_Eur) "EUR" "USD"))',
+            '(define-fun E_App_Code/value ((e E_App_Code)) String (ite (= e C_App_Code/Eur) "EUR" "USD"))',
             $this->renderer->render($encoding),
         );
     }

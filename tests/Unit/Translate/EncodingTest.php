@@ -161,4 +161,15 @@ final class EncodingTest extends TestCase
             array_map(static fn ($symbol): string => $symbol->smtName, $encoding->observedSymbols()),
         );
     }
+
+    public function testTwoClassesCannotShareASort(): void
+    {
+        $encoding = new Encoding();
+        $encoding->registerSort(Sort::enum(new EnumSort('App\\A', 'E_App_A', ['X' => null], null)));
+
+        $this->expectException(LogicException::class);
+        $this->expectExceptionMessage('Two classes share the SMT sort E_App_A.');
+
+        $encoding->registerSort(Sort::enum(new EnumSort('App\\B', 'E_App_A', ['X' => null], null)));
+    }
 }

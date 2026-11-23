@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace PhpstanContracts\Tests\Rule;
 
+use PhpstanContracts\Tests\Fixtures\Generators;
 use PhpstanContracts\Tests\Fixtures\StatementFixture;
 use PhpstanContracts\Tests\Fixtures\TypeFixture;
 use PhpstanContracts\Tests\Support\RuleFixtureTestCase;
@@ -64,6 +65,19 @@ final class StatementRuleTest extends RuleFixtureTestCase
                 'variadicParameter' => ['contracts.unsupported: Variadic and by-reference parameters are not supported'],
                 'byReferenceParameter' => ['contracts.unsupported: Variadic and by-reference parameters are not supported'],
                 'parameterNamedResult' => ['contracts.invalidContract: reserved for #[Ensures]'],
+            ],
+        ]);
+    }
+
+    public function testAYieldAnywhereMakesAGenerator(): void
+    {
+        $this->assertOutcomes([
+            Generators::class => [
+                'yieldAfterTheReturn' => ['contracts.unsupported: Generators are not supported: a yield anywhere in the body, even in unreachable code, makes the method return a Generator.'],
+                'yieldInADeadBranch' => ['contracts.unsupported: Generators are not supported'],
+                'callsAGenerator' => ['contracts.unsupported: PhpstanContracts\Tests\Fixtures\Generators::five() contains a yield, so calling it returns a Generator.'],
+                'yieldInAClosureBelongsToTheClosure' => [],
+                'five' => [],
             ],
         ]);
     }

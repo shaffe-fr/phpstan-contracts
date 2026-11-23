@@ -88,7 +88,7 @@ final class ValueFormatterTest extends TestCase
     {
         $sort = Sort::enum(new EnumSort('App\\Currency', 'E_App_Currency', ['Eur' => 'EUR', 'Usd' => 'USD'], 'string'));
 
-        self::assertSame('Currency::Usd', $this->formatter->format($sort, 'C_App_Currency_Usd'));
+        self::assertSame('Currency::Usd', $this->formatter->format($sort, 'C_App_Currency/Usd'));
     }
 
     public function testNullableValues(): void

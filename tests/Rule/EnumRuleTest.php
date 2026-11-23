@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace PhpstanContracts\Tests\Rule;
 
 use PhpstanContracts\Tests\Fixtures\EnumFixture;
+use PhpstanContracts\Tests\Fixtures\EnumFromFixture;
 use PhpstanContracts\Tests\Fixtures\Stock;
+use PhpstanContracts\Tests\Fixtures\SymbolNames;
 use PhpstanContracts\Tests\Support\RuleFixtureTestCase;
 
 final class EnumRuleTest extends RuleFixtureTestCase
@@ -55,6 +57,32 @@ final class EnumRuleTest extends RuleFixtureTestCase
 
                 'methodCallOnThis' => [],
                 'noThisInAStaticMethod' => ['contracts.unsupported: There is no $this in a static method.'],
+            ],
+        ]);
+    }
+
+    /**
+     * `Order\Status` and `Order_Status`, or `A::B_C` and `A_B::C`, are different names and must stay apart in the solver.
+     */
+    public function testDifferentNamesGiveDifferentSymbols(): void
+    {
+        $this->assertOutcomes([
+            SymbolNames::class => [
+                'sumOfTwoEnumsWithCloseNames' => ['contracts.ensuresViolated: Counterexample: $modern = Status::'],
+                'casesWhoseNamesJoinTheSameWay' => ['contracts.ensuresViolated: Counterexample: $a = A::'],
+            ],
+        ]);
+    }
+
+    public function testFromIsBuiltInOnlyForBackedEnums(): void
+    {
+        $this->assertOutcomes([
+            EnumFromFixture::class => [
+                'callsTheFromOfAPureEnum' => [],
+                'fromOfAPureEnumWithoutOne' => ['contracts.unsupported: Flag is not a backed enum, so it has no from().'],
+                'tryFromOfAnEnumWithAnUnfoldedValue' => ['contracts.unsupported: Limit::tryFrom() is not supported: The backing value of PhpstanContracts\Tests\Fixtures\Limit::Huge cannot be folded to a literal; write it as a literal.'],
+                'valueOfAnEnumWithAnUnfoldedValue' => ['contracts.unsupported: ->value of Limit is not supported: The backing value of PhpstanContracts\Tests\Fixtures\Limit::Huge cannot be folded to a literal'],
+                'caseOfAnEnumWithAnUnfoldedValue' => [],
             ],
         ]);
     }

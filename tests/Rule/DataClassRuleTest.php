@@ -4,11 +4,14 @@ declare(strict_types=1);
 
 namespace PhpstanContracts\Tests\Rule;
 
+use PhpstanContracts\Tests\Fixtures\Construction;
 use PhpstanContracts\Tests\Fixtures\DataClassFixture;
+use PhpstanContracts\Tests\Fixtures\Initialization;
 use PhpstanContracts\Tests\Fixtures\Interval;
 use PhpstanContracts\Tests\Fixtures\PriceContext;
 use PhpstanContracts\Tests\Fixtures\PropertyShadowParent;
 use PhpstanContracts\Tests\Fixtures\PropertyShadowReader;
+use PhpstanContracts\Tests\Fixtures\Sealed;
 use PhpstanContracts\Tests\Support\RuleFixtureTestCase;
 
 final class DataClassRuleTest extends RuleFixtureTestCase
@@ -94,6 +97,39 @@ final class DataClassRuleTest extends RuleFixtureTestCase
                 'lengthBroken' => ['contracts.ensuresViolated: Counterexample: $this = Interval(start: '],
 
                 'methodCallOnThis' => ['contracts.requiresViolated: The call to PhpstanContracts\Tests\Fixtures\Interval::length() can violate its precondition #[Requires(\'$this->start <= $this->end\')]. Counterexample: $this = Interval('],
+            ],
+        ]);
+    }
+
+    /**
+     * A property is only modelled when every object of the type has it set: reading one that is not throws an Error.
+     */
+    public function testOnlyPropertiesThatAreAlwaysSetAreModelled(): void
+    {
+        $this->assertOutcomes([
+            Initialization::class => [
+                'readsAPropertyOfANonFinalClass' => ['contracts.unsupported: Property PhpstanContracts\Tests\Fixtures\OpenPoint::$x may be uninitialized: PhpstanContracts\Tests\Fixtures\OpenPoint is not final and neither is its constructor, so a subclass constructor can skip the one that sets it. Make the class or the constructor final.'],
+                'readsAPropertyPromotedByAParentConstructor' => ['contracts.unsupported: Property PhpstanContracts\Tests\Fixtures\Origin::$x may be uninitialized: it is promoted by the constructor of PhpstanContracts\Tests\Fixtures\OpenPoint, which the constructor of PhpstanContracts\Tests\Fixtures\Origin does not have to call.'],
+                'readsAPropertyAssignedInTheConstructorBody' => ['contracts.unsupported: Property PhpstanContracts\Tests\Fixtures\LazyInit::$x may be uninitialized: only the properties promoted by the constructor are known to be set in every object.'],
+                'readsAPropertyBehindAFinalConstructor' => [],
+            ],
+        ]);
+    }
+
+    /**
+     * `new` runs a constructor that must be callable here and not deprecated, and later a destructor the proof does not see.
+     */
+    public function testNewOnlyRunsCodeThatIsModelled(): void
+    {
+        $this->assertOutcomes([
+            Construction::class => [
+                'buildsWithADeprecatedConstructor' => ['contracts.unsupported: Cannot instantiate OldStyle: its constructor is #[\Deprecated], and calling it triggers E_USER_DEPRECATED, which runs the error handler.'],
+                'buildsWithAPrivateConstructor' => ['contracts.unsupported: Cannot instantiate Sealed: its constructor is not accessible here.'],
+                'buildsAClassWithADestructor' => ['contracts.unsupported: Cannot instantiate Noisy: its destructor runs code that is not verified.'],
+                'buildsAPlainClass' => [],
+            ],
+            Sealed::class => [
+                'of' => [],
             ],
         ]);
     }

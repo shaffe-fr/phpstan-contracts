@@ -6,6 +6,7 @@ namespace PhpstanContracts\Tests\Rule;
 
 use PhpstanContracts\Tests\Fixtures\AnnotatedFinal;
 use PhpstanContracts\Tests\Fixtures\ConstantFixture;
+use PhpstanContracts\Tests\Fixtures\ConstantInitializers;
 use PhpstanContracts\Tests\Fixtures\ConstantOutsider;
 use PhpstanContracts\Tests\Fixtures\LateBinding;
 use PhpstanContracts\Tests\Support\RuleFixtureTestCase;
@@ -61,6 +62,29 @@ final class ConstantRuleTest extends RuleFixtureTestCase
             ],
             ConstantOutsider::class => [
                 'protectedConstantOfAnotherClass' => ['contracts.unsupported: ConstantBase::GUARDED is not accessible here'],
+            ],
+        ]);
+    }
+
+    /**
+     * A folded value is wrong when reading the constant triggers a deprecation, or when its
+     * initializer turns a float into a string, which depends on the precision setting.
+     */
+    public function testConstantsWhoseFoldedValueCannotBeTrusted(): void
+    {
+        $this->assertOutcomes([
+            ConstantInitializers::class => [
+                'readsADeprecatedConstant' => ['contracts.unsupported: Constant PhpstanContracts\Tests\Fixtures\DeprecatedLimits::LIMIT is deprecated: reading it triggers a deprecation notice, which runs the error handler.'],
+                'readsAConstantBuiltFromADeprecatedOne' => ['contracts.unsupported: Constant PhpstanContracts\Tests\Fixtures\DeprecatedLimits::LIMIT is deprecated'],
+                'readsAConstant' => [],
+                'readsADeprecatedCase' => ['contracts.unsupported: Enum case PhpstanContracts\Tests\Fixtures\Mode::Legacy is deprecated'],
+                'matchesADeprecatedCase' => ['contracts.unsupported: Enum case PhpstanContracts\Tests\Fixtures\Mode::Legacy is deprecated'],
+                'readsACase' => [],
+                'concatenatesAFloatInAConstant' => ['contracts.unsupported: An initializer in PhpstanContracts\Tests\Fixtures\ConstantInitializers converts a float to a string, whose digits depend on the precision ini setting, which is not modelled.'],
+                'concatenatesADivisionInAConstant' => ['contracts.unsupported: An initializer in PhpstanContracts\Tests\Fixtures\ConstantInitializers converts a float to a string'],
+                'searchesAListWithAFloatLabel' => ['contracts.unsupported: An initializer in PhpstanContracts\Tests\Fixtures\ConstantInitializers converts a float to a string'],
+                'concatenatesAnIntInAConstant' => [],
+                'readsTheValueOfAnEnumWithAFloatLabel' => ['contracts.unsupported: ->value of FloatLabel is not supported: An initializer in PhpstanContracts\Tests\Fixtures\FloatLabel converts a float to a string'],
             ],
         ]);
     }

@@ -275,8 +275,12 @@ final class CallFixture
 
 readonly class OpenShape
 {
-    /** @param int<0, 100> $corners */
-    public function __construct(public int $corners)
+    /**
+     * Final, so that every OpenShape, subclasses included, has $corners set.
+     *
+     * @param int<0, 100> $corners
+     */
+    final public function __construct(public int $corners)
     {
     }
 

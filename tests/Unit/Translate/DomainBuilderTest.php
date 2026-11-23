@@ -108,7 +108,7 @@ final class DomainBuilderTest extends TestCase
         ]);
 
         self::assertSame(
-            '(and (>= (R_App_Box_size b) 1) (<= (R_App_Box_size b) 9))',
+            '(and (>= (R_App_Box/size b) 1) (<= (R_App_Box/size b) 9))',
             $this->domains->constraint($spec, $box, true)->smt,
         );
     }
@@ -128,7 +128,7 @@ final class DomainBuilderTest extends TestCase
 
         self::assertInstanceOf(Term::class, $constraint);
         self::assertSame(
-            '(or (= (R_App_Outer_inner o) none_Opt_R_App_Inner) (and (>= (R_App_Inner_n (val_Opt_R_App_Inner (R_App_Outer_inner o))) 0) (<= (R_App_Inner_n (val_Opt_R_App_Inner (R_App_Outer_inner o))) 1)))',
+            '(or (= (R_App_Outer/inner o) none_Opt_R_App_Inner) (and (>= (R_App_Inner/n (val_Opt_R_App_Inner (R_App_Outer/inner o))) 0) (<= (R_App_Inner/n (val_Opt_R_App_Inner (R_App_Outer/inner o))) 1)))',
             $constraint->smt,
         );
     }

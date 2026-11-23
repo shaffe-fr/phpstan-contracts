@@ -199,7 +199,7 @@ final class SmtTest extends TestCase
         $money = Smt::symbol('m', $sort);
 
         self::assertSame('(mk_R_App_Money 5 "EUR")', Smt::construct($sort, [Smt::int(5), Smt::stringLiteral('EUR')])->smt);
-        self::assertSame('(R_App_Money_cents m)', Smt::field($money, 'cents')->smt);
+        self::assertSame('(R_App_Money/cents m)', Smt::field($money, 'cents')->smt);
         self::assertTrue(Smt::field($money, 'currency')->sort->isString());
     }
 
@@ -209,8 +209,8 @@ final class SmtTest extends TestCase
         $sort = Sort::enum($enum);
 
         self::assertSame('E_App_Tier', $sort->smt);
-        self::assertSame('C_App_Tier_Gold', $enum->constructorOf('Gold'));
-        self::assertSame('Tier::Silver', $enum->displayConstructor('C_App_Tier_Silver'));
+        self::assertSame('C_App_Tier/Gold', $enum->constructorOf('Gold'));
+        self::assertSame('Tier::Silver', $enum->displayConstructor('C_App_Tier/Silver'));
         self::assertSame('Tier', $sort->describe());
     }
 

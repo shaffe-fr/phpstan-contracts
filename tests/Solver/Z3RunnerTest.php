@@ -124,7 +124,7 @@ final class Z3RunnerTest extends TestCase
     public function testAMalformedScriptIsAFailureAndNeverAnAnswer(): void
     {
         $this->expectException(SolverFailure::class);
-        $this->expectExceptionMessage('no answer for check 0');
+        $this->expectExceptionMessage('Z3 reported an error');
 
         $this->runner->run('(declare-const', 1);
     }
@@ -155,5 +155,24 @@ final class Z3RunnerTest extends TestCase
             SMT, 1);
 
         self::assertSame(Verdict::Unknown, $results[0]->verdict);
+    }
+
+    /**
+     * A failed command is skipped and the script goes on, so an assertion dropped after
+     * a verdict would only show up as an error line.
+     */
+    public function testAnErrorAfterAnAnswerIsAFailure(): void
+    {
+        $this->expectException(SolverFailure::class);
+        $this->expectExceptionMessage('Z3 reported an error: (error "line 4 column');
+
+        $this->runner->run("(declare-const x Int)\n(echo \"@@0\")\n(check-sat)\n(assert (= x undeclared))\n(echo \"@@1\")\n(push 1)\n(check-sat)\n(get-value (x))\n(pop 1)\n", 2);
+    }
+
+    public function testTheMissingModelOfAnUnsatisfiableCheckIsNotAnError(): void
+    {
+        $results = $this->runner->run("(set-option :produce-models true)\n(declare-const x Int)\n(echo \"@@0\")\n(push 1)\n(assert (> x x))\n(check-sat)\n(get-value (x))\n(pop 1)\n", 1);
+
+        self::assertSame(Verdict::Unsat, $results[0]->verdict);
     }
 }

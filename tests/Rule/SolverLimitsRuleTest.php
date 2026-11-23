@@ -25,6 +25,7 @@ final class SolverLimitsRuleTest extends RuleFixtureTestCase
             LimitsFixture::class => [
                 'easyQuestion' => [],
                 'nonLinearDivisibility' => ['contracts.unknown: Not proven: Z3 answered "unknown" after 2000 ms'],
+                'preconditionsThatMayBeContradictory' => ['contracts.unknown: Not proven: Z3 answered "unknown" after 2000 ms for the satisfiability of the parameter types and #[Requires], so every proof of this method may be vacuous.'],
             ],
             SolverLimits::class => [
                 'offsetDivisibility' => ['contracts.unknown'],

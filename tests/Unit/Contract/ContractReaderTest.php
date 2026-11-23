@@ -128,4 +128,15 @@ final class ContractReaderTest extends TestCase
 
         return $this->reader->read($method);
     }
+
+    /**
+     * Class names are case-insensitive, so PHP instantiates this attribute as Ensures.
+     */
+    public function testAttributeNamesAreReadWhateverTheirCase(): void
+    {
+        $contract = $this->read("#[\\PhpstanContracts\\Attribute\\ENSURES('\$result === 6')] #[\\phpstancontracts\\attribute\\pure]");
+
+        self::assertCount(1, $contract->ensures);
+        self::assertTrue($contract->pure);
+    }
 }
