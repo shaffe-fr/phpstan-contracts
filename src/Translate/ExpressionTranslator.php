@@ -177,7 +177,11 @@ final class ExpressionTranslator
         if (!$term->sort->isBool()) {
             throw $this->reject(
                 $expr,
-                sprintf('Expected a bool expression but got %s (implicit truthiness is not supported).', $term->sort->describe()),
+                sprintf(
+                    'Expected a bool expression but got %s (implicit truthiness is not supported).%s',
+                    $term->sort->describe(),
+                    $term->sort->isArrayLike() ? ' Write count($list) > 0 or count($list) === 0 to test whether a list is empty.' : '',
+                ),
             );
         }
 
@@ -192,6 +196,15 @@ final class ExpressionTranslator
     {
         if ($term->sort->equals($target)) {
             return $term;
+        }
+        if ($term->sort->isEmptyList()) {
+            $list = $target->isNullable() ? $target->inner : $target;
+            if ($list !== null && $list->isList()) {
+                $empty = $this->emptyListOf($list);
+                $this->encoding->registerSort($target);
+
+                return $target->isNullable() ? Smt::some($empty) : $empty;
+            }
         }
         if ($term->sort->isNull() && $target->isNullable()) {
             return $this->none($target);
@@ -483,7 +496,11 @@ final class ExpressionTranslator
         }
 
         if ($left->sort->isArrayLike() || $right->sort->isArrayLike()) {
-            throw $this->reject($expr, $this->shapeIdentityRefusal());
+            $isShape = static fn (Sort $sort): bool => ($sort->isNullable() ? $sort->inner : $sort)?->isShape() === true;
+
+            throw $this->reject($expr, $isShape($left->sort) || $isShape($right->sort)
+                ? $this->shapeIdentityRefusal()
+                : 'Lists compared with === are not supported yet: PHP compares the keys, their order and every value, which is not modelled. Compare count($list) and the elements, such as count($a) === count($b) && $a[0] === $b[0].');
         }
 
         if ($left->sort->isNullable() && $left->sort->inner !== null && $left->sort->inner->equals($right->sort)) {
@@ -591,7 +608,15 @@ final class ExpressionTranslator
      */
     private function coalesce(BinaryOp\Coalesce $expr, array $env, Term $pc, bool $tail): Term
     {
-        $left = $this->translate($expr->left, $env, $pc);
+        $read = $expr->left instanceof Expr\ArrayDimFetch && $expr->left->dim !== null ? $expr->left : null;
+        $base = $read === null ? null : $this->translate($read->var, $env, $pc);
+        if ($read !== null && $base !== null && $base->sort->isList()) {
+            return $this->coalesceListRead($expr, $this->listPresence($read, $base, $env, $pc), $env, $pc, $tail);
+        }
+
+        $left = $read !== null && $base !== null
+            ? $this->arrayDimFetch($read, $env, $pc, $base)
+            : $this->translate($expr->left, $env, $pc);
 
         if ($left->sort->isNull()) {
             return $this->translateBranch($expr->right, $env, $pc, $tail);
@@ -605,6 +630,9 @@ final class ExpressionTranslator
         $right = $this->translateBranch($expr->right, $env, Smt::all($pc, Smt::isNone($left)), $tail);
         if ($right->sort->isNever()) {
             $right = $this->encoding->fresh('unreached', $inner);
+        }
+        if ($right->sort->isEmptyList() && $this->canCoerce($right->sort, $inner)) {
+            $right = $this->coerce($expr, $right, $inner);
         }
 
         if ($right->sort->isNull()) {
@@ -622,6 +650,90 @@ final class ExpressionTranslator
             $right->sort->describe(),
             $left->sort->describe(),
         ));
+    }
+
+    /**
+     * `$list[$i] ?? $default`, given whether the key is there and holds a value. On a
+     * `list<?T>` an element that is `null` counts as missing, as in PHP.
+     *
+     * @param array{Term, Term} $read the condition that the element is set, and the element
+     * @param array<string, Term> $env
+     */
+    private function coalesceListRead(BinaryOp\Coalesce $expr, array $read, array $env, Term $pc, bool $tail): Term
+    {
+        [$present, $value] = $read;
+        $inner = $value->sort;
+
+        $right = $this->translateBranch($expr->right, $env, Smt::all($pc, Smt::not($present)), $tail);
+        if ($right->sort->isNever()) {
+            $right = $this->encoding->fresh('unreached', $inner);
+        }
+        if ($right->sort->isEmptyList() && $this->canCoerce($right->sort, $inner)) {
+            $right = $this->coerce($expr, $right, $inner);
+        }
+
+        $nullable = Sort::nullable($inner);
+        if ($right->sort->isNull()) {
+            $this->encoding->registerSort($nullable);
+
+            return Smt::ite($present, Smt::some($value), Smt::none($nullable));
+        }
+        if ($right->sort->equals($inner)) {
+            return Smt::ite($present, $value, $right);
+        }
+        if ($right->sort->equals($nullable)) {
+            $this->encoding->registerSort($nullable);
+
+            return Smt::ite($present, Smt::some($value), $right);
+        }
+
+        throw $this->reject($expr, sprintf(
+            'The right side of ?? is a %s but the left side is a %s.',
+            $right->sort->describe(),
+            $inner->describe(),
+        ));
+    }
+
+    /**
+     * Whether `$list[$i]` is set, which is the key existing and the element not being `null`,
+     * and the element itself without a safety obligation: `isset()` and `??` do not warn.
+     *
+     * @param array<string, Term> $env
+     * @return array{Term, Term} the condition, and the element unwrapped when it is nullable
+     */
+    private function listPresence(Expr\ArrayDimFetch $read, Term $list, array $env, Term $pc): array
+    {
+        $index = $this->listIndex($read, $env, $pc);
+        $element = $this->encoding->define('elem', Smt::listItem($list, $index));
+        $exists = Smt::hasKey($list, $index);
+
+        if ($element->sort->isNullable() && $element->sort->inner !== null) {
+            return [
+                $this->encoding->define('present', Smt::all($exists, Smt::not(Smt::isNone($element)))),
+                Smt::unwrap($element),
+            ];
+        }
+
+        return [$this->encoding->define('present', $exists), $element];
+    }
+
+    /**
+     * The index of a list read, which PHP would otherwise convert to a key: only an int is one.
+     *
+     * @param array<string, Term> $env
+     */
+    private function listIndex(Expr\ArrayDimFetch $read, array $env, Term $pc): Term
+    {
+        $dim = $read->dim ?? throw $this->reject($read, 'Cannot use [] for reading.');
+        $index = $this->translate($dim, $env, $pc);
+        if (!$index->sort->isInt()) {
+            throw $this->reject($dim, sprintf(
+                'The index of a list must be an int, not a %s: PHP converts some strings and floats to int keys, which is not modelled. Use an int index; for a float, check it and cast it with (int).',
+                $index->sort->describe(),
+            ));
+        }
+
+        return $this->encoding->define('idx', $index);
     }
 
     /**
@@ -727,6 +839,22 @@ final class ExpressionTranslator
         }
         if ($second->sort->isNever()) {
             return [$first, $this->unreached($first)];
+        }
+
+        // `[]` has no element type of its own: it takes the one of the other branch.
+        if ($first->sort->isEmptyList() || $second->sort->isEmptyList()) {
+            if ($first->sort->isEmptyList() && $this->canCoerce($first->sort, $second->sort)) {
+                return [$this->coerce($at, $first, $second->sort), $second];
+            }
+            if ($second->sort->isEmptyList() && $this->canCoerce($second->sort, $first->sort)) {
+                return [$first, $this->coerce($at, $second, $first->sort)];
+            }
+
+            throw $this->reject($at, sprintf(
+                'Branches have different types (%s and %s).',
+                $first->sort->describe(),
+                $second->sort->describe(),
+            ));
         }
 
         if ($first->sort->isNull() && !$second->sort->isNull()) {
@@ -1649,7 +1777,16 @@ final class ExpressionTranslator
     {
         $checks = [];
         foreach ($expr->vars as $variable) {
-            $term = $this->translate($variable, $env, $pc);
+            $read = $variable instanceof Expr\ArrayDimFetch && $variable->dim !== null ? $variable : null;
+            $base = $read === null ? null : $this->translate($read->var, $env, $pc);
+            if ($read !== null && $base !== null && $base->sort->isList()) {
+                $checks[] = $this->listPresence($read, $base, $env, $pc)[0];
+                continue;
+            }
+
+            $term = $read !== null && $base !== null
+                ? $this->arrayDimFetch($read, $env, $pc, $base)
+                : $this->translate($variable, $env, $pc);
             $checks[] = $term->sort->isNullable() ? Smt::not(Smt::isNone($term)) : Smt::bool(!$term->sort->isNull());
         }
 
@@ -1766,7 +1903,7 @@ final class ExpressionTranslator
         $this->obligate(ObligationKind::DivisionByZero, $at, $pc, Smt::not(Smt::eq($divisor, Smt::int(0))));
     }
 
-    private function obligate(ObligationKind $kind, Expr $at, Term $pc, Term $goal, ?string $allowedWhere = null): void
+    private function obligate(ObligationKind $kind, Expr $at, Term $pc, Term $goal, ?string $allowedWhere = null, ?string $guard = null): void
     {
         $this->encoding->addObligation(new Obligation(
             $kind,
@@ -1776,6 +1913,7 @@ final class ExpressionTranslator
             $goal,
             $this->calls,
             $allowedWhere,
+            $guard,
         ));
     }
 
@@ -1864,7 +2002,7 @@ final class ExpressionTranslator
             throw $this->reject($expr, 'An array literal is either a list without keys, such as [1, 2], or a shape with string keys, such as [\'net\' => 1]; mixing the two is not supported.');
         }
         if ($keyed === 0) {
-            throw $this->reject($expr, 'List literals are not supported yet: only array shapes with string keys, such as [\'net\' => $net, \'vat\' => $vat], are.');
+            return $this->listLiteral($expr, $env, $pc);
         }
 
         $keys = [];
@@ -1903,18 +2041,93 @@ final class ExpressionTranslator
     }
 
     /**
+     * `[a, b]`, a list whose elements have one type (`null` makes it nullable), and `[]`, which
+     * has no element type until it meets the one of a variable, a return type or the other
+     * branch of a conditional.
+     *
+     * @param array<string, Term> $env
+     */
+    private function listLiteral(Expr\Array_ $expr, array $env, Term $pc): Term
+    {
+        if ($expr->items === []) {
+            return Smt::symbol('empty_list', Sort::emptyList());
+        }
+
+        $values = [];
+        foreach ($expr->items as $item) {
+            $value = $this->translate($item->value, $env, $pc);
+            if ($value->sort->isNever()) {
+                throw $this->reject($item->value, 'A value that always throws cannot be stored in an array literal; write a throw statement.');
+            }
+            if ($value->sort->isList() || $value->sort->isEmptyList() || ($value->sort->isNullable() && $value->sort->inner?->isList() === true)) {
+                throw $this->reject($expr, 'A list of lists is not supported yet: nested lists are not modelled. Use a list of data classes or of array shapes.');
+            }
+            if ($value->sort->containsNull() && !$value->sort->isNull()) {
+                throw $this->reject($item->value, sprintf('A %s with a null value cannot be an element of a list: build it from values that have the type it will hold.', $value->sort->describe()));
+            }
+            $values[] = $value;
+        }
+
+        $bare = [];
+        $nullable = false;
+        foreach ($values as $value) {
+            if ($value->sort->isNull()) {
+                $nullable = true;
+                continue;
+            }
+            $nullable = $nullable || $value->sort->isNullable();
+            $bare[] = $value->sort->isNullable() && $value->sort->inner !== null ? $value->sort->inner : $value->sort;
+        }
+        if ($bare === []) {
+            throw $this->reject($expr, 'A list holding only null has no element type; give the list a type by returning it, or use a value of the type it will hold.');
+        }
+        foreach ($bare as $sort) {
+            if (!$sort->equals($bare[0])) {
+                throw $this->reject($expr, sprintf(
+                    'The elements of this list have different types (%s and %s); a list must hold a single type. Convert the elements first, such as (float) $x, or use an array shape with a key per value.',
+                    $bare[0]->describe(),
+                    $sort->describe(),
+                ));
+            }
+        }
+
+        $element = $nullable ? Sort::nullable($bare[0]) : $bare[0];
+        $list = Sort::list($element);
+        $base = $this->encoding->fresh('base', $list);
+        $this->encoding->registerSort($element);
+
+        return $this->encoding->define('list', Smt::listLiteral(
+            $list,
+            array_map(fn (Term $value): Term => $this->coerce($expr, $value, $element), $values),
+            $base,
+        ));
+    }
+
+    private function emptyListOf(Sort $list): Term
+    {
+        return $this->encoding->define('list', Smt::emptyListOf($list, $this->encoding->fresh('base', $list)));
+    }
+
+    /**
      * `$shape['net']`, with a string literal that is a key of the shape: the type requires
      * the key, so PHP raises no warning.
      *
      * @param array<string, Term> $env
      */
-    private function arrayDimFetch(Expr\ArrayDimFetch $expr, array $env, Term $pc): Term
+    private function arrayDimFetch(Expr\ArrayDimFetch $expr, array $env, Term $pc, ?Term $base = null): Term
     {
         if ($expr->dim === null) {
             throw $this->reject($expr, 'Cannot use [] for reading.');
         }
 
-        $base = $this->translate($expr->var, $env, $pc);
+        $base ??= $this->translate($expr->var, $env, $pc);
+        if ($base->sort->isEmptyList()) {
+            throw $this->reject($expr, 'This list is always empty, so reading from it always reads a missing key; append to the list before reading it, or check count() first.');
+        }
+        if ($base->sort->isList()) {
+            return $this->listRead($expr, $base, $env, $pc);
+        }
+
         $shape = $base->sort->shape;
         if (!$base->sort->isShape() || $shape === null) {
             throw $this->reject($expr, match (true) {
@@ -1942,13 +2155,41 @@ final class ExpressionTranslator
     }
 
     /**
+     * `$list[$i]`. PHP warns and yields null when the key does not exist, and a warning runs
+     * the error handler, so the read is allowed only where the key provably exists.
+     *
+     * @param array<string, Term> $env
+     */
+    private function listRead(Expr\ArrayDimFetch $expr, Term $list, array $env, Term $pc): Term
+    {
+        $index = $this->listIndex($expr, $env, $pc);
+        $subject = $this->printer->prettyPrintExpr($expr->var);
+        $position = $this->printer->prettyPrintExpr($expr->dim ?? $expr);
+        $guard = match (true) {
+            $expr->dim instanceof Int_ && $expr->dim->value >= 0 => sprintf('count(%s) > %s', $subject, $position),
+            default => sprintf(
+                '%1$s >= 0 && %1$s < count(%2$s)',
+                $expr->dim instanceof Variable || $expr->dim instanceof Int_ || $expr->dim instanceof PropertyFetch || $expr->dim instanceof Expr\ArrayDimFetch ? $position : '(' . $position . ')',
+                $subject,
+            ),
+        };
+
+        $this->obligate(ObligationKind::UndefinedKey, $expr, $pc, Smt::hasKey($list, $index), guard: $guard);
+
+        return $this->encoding->define('elem', Smt::listItem($list, $index));
+    }
+
+    /**
      * Whether coerce() can give a value of one sort the other sort: nothing to do, `null`
-     * or a `T` for a `?T`, or an array shape whose fields can each be coerced.
+     * or a `T` for a `?T`, `[]` for a list, or an array shape whose fields can each be coerced.
      */
     public function canCoerce(Sort $from, Sort $to): bool
     {
         if ($from->equals($to)) {
             return true;
+        }
+        if ($from->isEmptyList()) {
+            return $to->isList() || ($to->isNullable() && $to->inner?->isList() === true);
         }
         if ($to->isNullable() && $to->inner !== null) {
             return $from->isNull() || $from->equals($to->inner) || ($from->isShape() && $this->canCoerce($from, $to->inner));
@@ -2004,17 +2245,15 @@ final class ExpressionTranslator
             throw $this->reject($call, 'count() takes exactly one argument here; COUNT_RECURSIVE is not supported. Write count($list).');
         }
 
-        $unsupported = $this->reject($call, 'Call to count() is not part of the verified subset: purity cannot be established.');
-        try {
-            $subject = $this->translate($arguments[0], $env, $pc);
-        } catch (VerificationRejected) {
-            throw $unsupported;
-        }
-        if ($subject->sort->isShape()) {
-            throw $this->reject($call, 'count() of an array shape is not supported: the type array{...} does not rule out extra keys. count() is supported on lists.');
-        }
+        $subject = $this->translate($arguments[0], $env, $pc);
 
-        throw $unsupported;
+        return match (true) {
+            $subject->sort->isList() => Smt::listLength($subject),
+            $subject->sort->isEmptyList() => Smt::int(0),
+            $subject->sort->isShape() => throw $this->reject($call, 'count() of an array shape is not supported: the type array{...} does not rule out extra keys. count() is supported on lists.'),
+            $subject->sort->isNullable() && $subject->sort->inner?->isList() === true => throw $this->reject($call, sprintf('count() needs a list, not a %s, which may be null here: PHP throws a TypeError for count(null). Check it first with `!== null`.', $subject->sort->describe())),
+            default => throw $this->reject($call, sprintf('count() is only supported on lists, not on a %s.', $subject->sort->describe())),
+        };
     }
 
     private function isArrayFunction(string $name): bool
@@ -2033,6 +2272,8 @@ final class ExpressionTranslator
                 => 'Assignments are only allowed as standalone statements on local variables.',
             $expr instanceof Expr\MethodCall, $expr instanceof Expr\NullsafeMethodCall
                 => 'Method calls and instantiations are not part of the verified subset yet: side effects cannot be ruled out.',
+            $expr instanceof Expr\Empty_
+                => 'empty() relies on truthiness; write count($list) === 0.',
             $expr instanceof Cast
                 => 'Only (int), (float) and (string) casts are supported.',
             $expr instanceof Expr\Closure, $expr instanceof Expr\ArrowFunction

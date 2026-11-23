@@ -34,7 +34,7 @@ final class StatementRuleTest extends RuleFixtureTestCase
                 'writesAProperty' => ['contracts.unsupported: Only assignments to local variables are allowed'],
                 'callsAnUnknownFunction' => ['contracts.unsupported: Call to strtoupper() is not part of the verified subset'],
                 'closure' => ['contracts.unsupported: Closures are not supported'],
-                'arrayLiteral' => ['contracts.unsupported: List literals are not supported yet'],
+                'arrayLiteral' => [],
                 'shortTernary' => ['contracts.unsupported: The short ternary'],
                 'power' => ['contracts.unsupported: Operator "**" is not part of the verified subset'],
                 'spaceship' => ['contracts.unsupported: Operator "<=>" is not part of the verified subset'],
@@ -52,7 +52,7 @@ final class StatementRuleTest extends RuleFixtureTestCase
             TypeFixture::class => [
                 'everySupportedTypeIsAccepted' => [],
 
-                'arrayParameter' => ['contracts.unsupported: Type list<int> is not supported'],
+                'arrayParameter' => [],
                 'mixedParameter' => ['contracts.unsupported: Type mixed is not supported'],
                 'unionOfDifferentTypes' => ['contracts.unsupported: Type int|string is not supported'],
                 'intOrFloat' => ['contracts.unsupported: Type float|int is not supported'],

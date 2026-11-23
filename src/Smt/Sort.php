@@ -151,7 +151,8 @@ final readonly class Sort
             SortKind::Null => true,
             SortKind::Nullable => $this->inner?->containsNull() ?? false,
             SortKind::List => $this->element?->containsNull() ?? false,
-            SortKind::Shape => array_reduce($this->shape->fields ?? [], static fn (bool $found, self $field): bool => $found || $field->containsNull(), false),
+            // A field `[]` has no element type yet, so like `null` it cannot be declared until coerce() types it.
+            SortKind::Shape => array_reduce($this->shape->fields ?? [], static fn (bool $found, self $field): bool => $found || $field->containsNull() || $field->isEmptyList(), false),
             default => false,
         };
     }

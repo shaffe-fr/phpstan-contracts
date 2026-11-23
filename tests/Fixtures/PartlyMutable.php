@@ -12,7 +12,7 @@ final class PartlyMutable
     public int $count = 0;
 
     /**
-     * @param list<string> $tags
+     * @param array<string, string> $tags
      */
     public function __construct(
         public readonly int $limit,

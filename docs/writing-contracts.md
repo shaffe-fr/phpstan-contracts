@@ -397,6 +397,7 @@ Besides your contracts, every checked method must satisfy a set of safety condit
 | Every path returns | some path reaches the end of the method without `return` | `contracts.missingReturn` |
 | Valid enum value | `Status::from($v)` can receive a value that is not a backing value | `contracts.invalidEnumValue` |
 | Representable cast | `(int) $float` can receive `NAN`, an infinity, or a value outside the `int` range | `contracts.invalidCast` |
+| Existing list key | `$list[$i]` can read a key that does not exist: PHP warns and yields `null` | `contracts.undefinedKey` |
 | Return type respected | the returned value can leave the domain of its declared type, such as a PHPDoc range or a field range of a data class | `contracts.returnType` |
 | No undeclared exception | a `throw` can be reached where the [`#[Throws]`](#exceptions) declarations do not allow it | `contracts.unexpectedThrow` |
 | Callee preconditions respected | a [call to a method of the same file](#calls-to-other-methods) can break one of its `#[Requires]` | `contracts.requiresViolated` |
@@ -415,7 +416,9 @@ Each condition is checked **under the path that reaches it**. In `$parts > 0 && 
 | `contracts.unhandledMatch` | A `match` can throw `UnhandledMatchError`. | Add the missing arm or a `default`. |
 | `contracts.missingReturn` | A path ends without returning. | Return on every path. |
 | `contracts.invalidEnumValue` | `from()` can throw `ValueError`. | Use `tryFrom()` for untrusted input. |
+
 | `contracts.invalidCast` | `(int)` of a float that can be `NAN`, infinite or out of range: PHP 8.3 and 8.4 wrap the value or return 0, PHP 8.5 also raises a warning. | Bound the float, or exclude `NAN` and infinities with `#[Requires]`. |
+| `contracts.undefinedKey` | A list read `$list[$i]` whose key may not exist. | Guard the read with `$i >= 0 && $i < count($list)` or `isset($list[$i])`, or state the range with `#[Requires]`. |
 | `contracts.returnType` | The method can return a value that its declared type excludes. | Fix the computation, or widen the declared type. |
 | `contracts.unexpectedThrow` | A `throw` can be reached where no `#[Throws]` allows it, or where the `#[Throws]` declarations do not allow it; the message then lists the conditions that allow it. | Declare it with its condition, or fix the guard. |
 | `contracts.throwsViolated` | The method can return although the condition of a `#[Throws]` holds. | Fix the guard, or the condition. |

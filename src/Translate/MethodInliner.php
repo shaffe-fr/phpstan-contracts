@@ -255,7 +255,7 @@ final class MethodInliner
             $nativeType = $parameter->getNativeType();
             $nativeNullable = TypeCombinator::containsNull($nativeType);
             $inner = $sort->isNullable() && $sort->inner !== null ? $sort->inner : $sort;
-            if ($native === null && $inner->isShape() && $nativeNullable === $sort->isNullable() && TypeCombinator::removeNull($nativeType)->isArray()->yes()) {
+            if ($native === null && ($inner->isShape() || $inner->isList()) && $nativeNullable === $sort->isNullable() && TypeCombinator::removeNull($nativeType)->isArray()->yes()) {
                 $native = $sort;
             }
             if ($native === null || !$native->equals($sort)) {
@@ -321,7 +321,7 @@ final class MethodInliner
             return $value;
         }
         $this->encoding->registerSort($target);
-        if ($value->sort->isShape() && $translator->canCoerce($value->sort, $target)) {
+        if (($value->sort->isShape() || $value->sort->isEmptyList()) && $translator->canCoerce($value->sort, $target)) {
             return $translator->coerce($at, $value, $target);
         }
         if ($target->isNullable() && $value->sort->isNull()) {

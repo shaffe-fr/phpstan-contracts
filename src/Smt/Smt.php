@@ -406,6 +406,109 @@ final class Smt
         return new Term(sprintf('(%s %s)', $definition->accessorAt($position), $shape->smt), $definition->fields[$key]);
     }
 
+    /**
+     * `count($list)`.
+     */
+    public static function listLength(Term $list): Term
+    {
+        return new Term(sprintf('(%s_len %s)', $list->sort->smt, $list->smt), Sort::int());
+    }
+
+    /**
+     * The cell at a key. It is the element only where `0 <= $index < count($list)`; the caller
+     * either proves that or guards the read, because PHP warns and yields null elsewhere.
+     */
+    public static function listItem(Term $list, Term $index): Term
+    {
+        $element = $list->sort->element ?? throw new LogicException('listItem() needs a list term.');
+
+        return new Term(sprintf('(select (%s_items %s) %s)', $list->sort->smt, $list->smt, $index->smt), $element);
+    }
+
+    /**
+     * `[a, b]`: the cells 0 and 1 of a fresh, unconstrained list `$base` are replaced. The cells
+     * beyond the length are junk that nothing reads.
+     *
+     * @param list<Term> $elements
+     */
+    public static function listLiteral(Sort $list, array $elements, Term $base): Term
+    {
+        $items = sprintf('(%s_items %s)', $list->smt, $base->smt);
+        foreach ($elements as $position => $element) {
+            $items = sprintf('(store %s %d %s)', $items, $position, $element->smt);
+        }
+
+        return new Term(sprintf('(mk_%s %d %s)', $list->smt, count($elements), $items), $list);
+    }
+
+    /**
+     * `[]` of a given list sort, on top of a fresh, unconstrained list `$base`.
+     */
+    public static function emptyListOf(Sort $list, Term $base): Term
+    {
+        return self::listLiteral($list, [], $base);
+    }
+
+    /**
+     * `$list[] = $element`: the list with one more cell at the key `count($list)`.
+     */
+    public static function listAppend(Term $list, Term $element): Term
+    {
+        $length = self::listLength($list)->smt;
+
+        return new Term(
+            sprintf('(mk_%1$s (+ %2$s 1) (store (%1$s_items %3$s) %2$s %4$s))', $list->sort->smt, $length, $list->smt, $element->smt),
+            $list->sort,
+        );
+    }
+
+    /**
+     * `0 <= $index < count($list)`: the key exists.
+     */
+    public static function hasKey(Term $list, Term $index): Term
+    {
+        return self::all(
+            self::compare('<=', self::int(0), $index),
+            self::compare('<', $index, self::listLength($list)),
+        );
+    }
+
+    /**
+     * `(forall ((k!0 Int)) (! body :pattern (...)))`.
+     *
+     * @param list<Term> $patterns
+     */
+    public static function forall(string $variable, Term $body, array $patterns): Term
+    {
+        return self::quantifier('forall', $variable, $body, $patterns);
+    }
+
+    /**
+     * @param list<Term> $patterns
+     */
+    public static function exists(string $variable, Term $body, array $patterns = []): Term
+    {
+        return self::quantifier('exists', $variable, $body, $patterns);
+    }
+
+    /**
+     * @param 'forall'|'exists' $quantifier
+     * @param list<Term> $patterns
+     */
+    private static function quantifier(string $quantifier, string $variable, Term $body, array $patterns): Term
+    {
+        if ($body->isTrue() || $body->isFalse()) {
+            return $body;
+        }
+
+        $text = $body->smt;
+        if ($patterns !== []) {
+            $text = sprintf('(! %s %s)', $text, implode(' ', array_map(static fn (Term $pattern): string => ':pattern (' . $pattern->smt . ')', $patterns)));
+        }
+
+        return new Term(sprintf('(%s ((%s Int)) %s)', $quantifier, $variable, $text), Sort::bool());
+    }
+
     private static function nullableEquals(Term $left, Term $right): Term
     {
         return self::any(

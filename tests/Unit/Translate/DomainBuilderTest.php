@@ -132,4 +132,56 @@ final class DomainBuilderTest extends TestCase
             $constraint->smt,
         );
     }
+
+    public function testAListInputHasABoundedLengthAndElementsInTheirDomain(): void
+    {
+        $list = Sort::list(Sort::int());
+        $l = Smt::symbol('l', $list);
+        $spec = new VarSpec($list, element: new VarSpec(Sort::int(), 0, 100));
+
+        self::assertSame(
+            '(and (and (>= (List_Int_len l) 0) (<= (List_Int_len l) 1073741824)) '
+            . '(forall ((k!0 Int)) (! (or (not (and (<= 0 k!0) (< k!0 (List_Int_len l)))) (and (>= (select (List_Int_items l) k!0) 0) (<= (select (List_Int_items l) k!0) 100))) :pattern ((select (List_Int_items l) k!0)))))',
+            $this->domains->constraint($spec, $l, true)->smt,
+        );
+    }
+
+    public function testANonEmptyListNeedsAnElement(): void
+    {
+        $list = Sort::list(Sort::bool());
+        $l = Smt::symbol('l', $list);
+        $spec = new VarSpec($list, nonEmpty: true, element: new VarSpec(Sort::bool()));
+
+        self::assertSame('(>= (List_Bool_len l) 1)', $this->domains->constraint($spec, $l, false)->smt, 'a returned list has no bound to prove for a trivial element');
+        self::assertSame(
+            '(and (and (>= (List_Bool_len l) 0) (<= (List_Bool_len l) 1073741824)) (>= (List_Bool_len l) 1))',
+            $this->domains->constraint($spec, $l, true)->smt,
+        );
+    }
+
+    public function testAReturnedListIsOnlyCheckedWhereItsElementsHaveADomain(): void
+    {
+        $list = Sort::list(Sort::int());
+        $l = Smt::symbol('l', $list);
+
+        self::assertTrue($this->domains->constraint(new VarSpec($list, element: new VarSpec(Sort::int())), $l, false)->isTrue());
+        self::assertStringStartsWith('(forall ((k!0 Int))', $this->domains->constraint(new VarSpec($list, element: new VarSpec(Sort::int(), 0, 100)), $l, false)->smt);
+    }
+
+    public function testTheBoundVariableOfANestedListHasAnotherName(): void
+    {
+        $inner = Sort::list(Sort::int());
+        $shape = \PhpstanContracts\Smt\ShapeSort::of(['items' => $inner]);
+        $outer = Sort::list(Sort::shape($shape));
+        $l = Smt::symbol('l', $outer);
+        $spec = new VarSpec(
+            $outer,
+            element: new VarSpec(Sort::shape($shape), fields: ['items' => new VarSpec($inner, element: new VarSpec(Sort::int(), 0, 9))]),
+        );
+
+        $smt = $this->domains->constraint($spec, $l, false)->smt;
+        self::assertStringContainsString('(forall ((k!0 Int))', $smt);
+        self::assertStringContainsString('(forall ((k!1 Int))', $smt);
+        self::assertSame(2, substr_count($smt, 'forall'));
+    }
 }

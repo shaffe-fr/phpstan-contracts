@@ -30,6 +30,11 @@ final readonly class Obligation
          * allow it, in words, or null when none of them declares its class.
          */
         public ?string $allowedWhere = null,
+        /**
+         * For a read of a list element, the condition that makes the key exist, as code the
+         * author can paste, such as `$index >= 0 && $index < count($amounts)`.
+         */
+        public ?string $guard = null,
     ) {
     }
 }

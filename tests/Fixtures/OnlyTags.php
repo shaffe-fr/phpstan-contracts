@@ -10,7 +10,7 @@ namespace PhpstanContracts\Tests\Fixtures;
 final readonly class OnlyTags
 {
     /**
-     * @param list<string> $tags
+     * @param array<string, string> $tags
      */
     public function __construct(public array $tags)
     {

@@ -23,13 +23,14 @@ use PHPStan\Type\Constant\ConstantIntegerType;
 use PHPStan\Type\IntegerRangeType;
 use PHPStan\Type\Type;
 use PHPStan\Type\TypeCombinator;
+use PHPStan\Type\UnionType;
 use PHPStan\Type\VerbosityLevel;
 
 /**
  * Maps a PHPStan type, including PHPDoc ranges, to an SMT sort and its domain.
  *
- * Supported: int, bool, float, string, enums, readonly data classes, array shapes
- * with string keys, and any of those made nullable.
+ * Supported: int, bool, float, string, enums, readonly data classes, lists, array
+ * shapes with string keys, and any of those made nullable.
  */
 final class TypeMapper
 {
@@ -106,7 +107,7 @@ final class TypeMapper
     {
         return new VerificationRejected(
             sprintf(
-                'Type %s is not supported in verified methods (supported: int, bool, float, string, enums, readonly data classes, array shapes with string keys, and nullable versions of these).',
+                'Type %s is not supported in verified methods (supported: int, bool, float, string, enums, readonly data classes, lists, array shapes with string keys, and nullable versions of these).',
                 $description,
             ),
             $line,
@@ -124,19 +125,21 @@ final class TypeMapper
             throw $this->unsupported($description, $line);
         }
         if (count($constants) === 0) {
-            throw $type->isList()->yes()
-                ? $this->unsupported($description, $line)
-                : new VerificationRejected(
-                    sprintf('Type %s is not supported in verified methods: an array with arbitrary keys is not modelled. Use an array shape with string keys such as array{net: int, vat: int}.', $description),
-                    $line,
-                );
+            if ($type->isList()->yes()) {
+                return $this->mapList($type, $description, $line, $input);
+            }
+
+            throw new VerificationRejected(
+                sprintf('Type %s is not supported in verified methods: an array with arbitrary keys is not modelled. Use list<T> for a sequence, or an array shape with string keys such as array{net: int, vat: int}.', $description),
+                $line,
+            );
         }
 
         $array = $constants[0];
         $keys = $array->getKeyTypes();
         if ($keys === []) {
             throw new VerificationRejected(
-                sprintf('Type %s is not supported: an array shape needs at least one key.', $description),
+                sprintf('Type %s is not supported: declare list<T> for a list that may be empty.', $description),
                 $line,
             );
         }
@@ -174,6 +177,51 @@ final class TypeMapper
         $shape = ShapeSort::of(array_map(static fn (VarSpec $spec): Sort => $spec->sort, $specs));
 
         return new VarSpec(Sort::shape($shape, $declared), fields: $specs, description: $description);
+    }
+
+    /**
+     * `list<T>` and `non-empty-list<T>`: keys 0..n-1 in order, every value of one supported type.
+     */
+    private function mapList(Type $type, string $description, int $line, bool $input): VarSpec
+    {
+        $elementType = $type->getIterableValueType();
+        try {
+            $element = $this->map($elementType, $line, $input);
+        } catch (VerificationRejected $unsupported) {
+            if ($unsupported !== $this->recursion && TypeCombinator::removeNull($elementType) instanceof UnionType) {
+                throw new VerificationRejected(
+                    sprintf(
+                        'Type %s is not supported in verified methods: its elements have type %s, and a list must hold a single supported type (int, bool, float, string, an enum, a readonly data class, an array shape, or a nullable version of these).',
+                        $description,
+                        $elementType->describe(VerbosityLevel::value()),
+                    ),
+                    $line,
+                );
+            }
+
+            throw $unsupported;
+        }
+
+        $elementSort = $element->sort->isNullable() && $element->sort->inner !== null ? $element->sort->inner : $element->sort;
+        if ($elementSort->isList()) {
+            throw new VerificationRejected(
+                sprintf('Type %s is not supported yet: a list of lists is not modelled. Use a list of data classes or of array shapes.', $description),
+                $line,
+            );
+        }
+        if ($input && $elementSort->isFloat()) {
+            throw new VerificationRejected(
+                sprintf('Type %s is not supported for an input: PHP does not convert the values of an array and PHPStan accepts an int for a float in a list, so an element may hold an int. Use int (for example cents) or a list of data classes with a native float property.', $description),
+                $line,
+            );
+        }
+
+        return new VarSpec(
+            Sort::list($element->sort),
+            nonEmpty: $type->isIterableAtLeastOnce()->yes(),
+            description: $description,
+            element: $element,
+        );
     }
 
     public function mapClass(string $className, int $line): VarSpec

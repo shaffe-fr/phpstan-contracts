@@ -32,7 +32,7 @@ final class EnumRuleTest extends RuleFixtureTestCase
                 'fromAnUnboundedInteger' => ['contracts.invalidEnumValue: `\PhpstanContracts\Tests\Fixtures\Level::from($n)`'],
 
                 'valueOfAPureEnumDoesNotExist' => ['contracts.unsupported: not a backed enum'],
-                'casesIsNotSupported' => ['contracts.unsupported: Call to count()'],
+                'casesIsNotSupported' => ['contracts.unsupported: PhpstanContracts\Tests\Fixtures\Suit::cases() is declared in another file'],
                 'tryFromNeedsTheBackingType' => ['contracts.unsupported: Code::tryFrom() expects a string'],
             ],
         ]);

@@ -26,6 +26,8 @@ use PhpParser\NodeVisitorAbstract;
  */
 final class StatementTranslator
 {
+    private const LOCAL_WRITES_ONLY = 'Only assignments to local variables are allowed (no property, array or dynamic writes); appending is supported on a local list variable ($list[] = $value).';
+
     public function __construct(
         private readonly ExpressionTranslator $expressions,
         private readonly Encoding $encoding,
@@ -141,17 +143,85 @@ final class StatementTranslator
     private function assign(Expr $target, Expr $value, State $state, Expr $at): State
     {
         if ($target instanceof Expr\Array_ || $target instanceof Expr\List_) {
-            throw $this->expressions->reject($at, 'Destructuring ([$a, $b] = ...) is not supported: read the elements with their key, such as $shape[\'net\'].');
+            throw $this->expressions->reject($at, 'Destructuring ([$a, $b] = ...) is not supported: read the elements with $list[0] and $list[1], or with their key, such as $shape[\'net\'].');
         }
         if ($target instanceof Expr\ArrayDimFetch) {
+            if ($at instanceof Expr\Assign && $target->dim === null && $target->var instanceof Variable && is_string($target->var->name) && $target->var->name !== 'this') {
+                return $this->append($target->var->name, $value, $state, $at);
+            }
+
             throw $this->expressions->reject($at, $this->arrayWriteRefusal($target, $state));
         }
         if (!$target instanceof Variable || !is_string($target->name) || $target->name === 'this') {
-            throw $this->expressions->reject($at, 'Only assignments to local variables are allowed (no property, array or dynamic writes).');
+            throw $this->expressions->reject($at, self::LOCAL_WRITES_ONLY);
         }
 
-        $name = $target->name;
-        $term = $this->valueOf($value, $state, $at);
+        return $this->bind($target->name, $this->valueOf($value, $state, $at), $state, $at);
+    }
+
+    /**
+     * `$list[] = $value`: a copy of the list with one more element at the key `count($list)`.
+     * Every version of a variable is an immutable term, so the copy-on-write of PHP is free:
+     * what the variable held before, and any other variable that held the same list, is unchanged.
+     */
+    private function append(string $name, Expr $value, State $state, Expr $at): State
+    {
+        $list = $state->view()[$name] ?? null;
+        if ($list === null) {
+            throw $this->expressions->reject($at, sprintf('Appending to $%1$s, which is not defined at this point, would create an array; start with $%1$s = [].', $name));
+        }
+
+        $element = $this->valueOf($value, $state, $at);
+        $appended = match (true) {
+            $list->sort->isEmptyList() => $this->firstElement($name, $element, $at),
+            $list->sort->isList() => $this->appendTo($list, $element, $at),
+            $list->sort->isShape() => throw $this->expressions->reject($at, 'Appending to an array shape is not supported: build a new shape literal.'),
+            $list->sort->isNullable() && $list->sort->inner?->isList() === true => throw $this->expressions->reject($at, sprintf('Appending to $%1$s, which may be null here, would create a list; check it first with `!== null`, or start with $%1$s = [].', $name)),
+            default => throw $this->expressions->reject($at, sprintf('Appending to $%s is only supported on a list, not on a %s.', $name, $list->sort->describe())),
+        };
+
+        return $this->bind($name, $appended, $state, $at);
+    }
+
+    /**
+     * `$list = []; $list[] = $x;`: the first element gives the list its element type.
+     */
+    private function firstElement(string $name, Term $element, Expr $at): Term
+    {
+        $sort = $element->sort;
+        if ($sort->isNull() || $sort->isList() || $sort->isEmptyList() || ($sort->isNullable() && $sort->inner?->isList() === true) || $sort->containsNull()) {
+            throw $this->expressions->reject($at, sprintf(
+                'Cannot infer the element type of $%s from a %s: start the list with an element of the type it will hold, or return it directly. A list of lists is not supported yet.',
+                $name,
+                $sort->describe(),
+            ));
+        }
+
+        $list = Sort::list($sort);
+
+        return Smt::listLiteral($list, [$element], $this->encoding->fresh('base', $list));
+    }
+
+    private function appendTo(Term $list, Term $element, Expr $at): Term
+    {
+        $expected = $list->sort->element;
+        if ($expected === null || $element->sort->isList() || $element->sort->isEmptyList() || !$this->expressions->canCoerce($element->sort, $expected)) {
+            throw $this->expressions->reject($at, sprintf(
+                'Appending a %1$s to a %2$s would make a list of %3$s|%1$s, which is not supported; convert the value first, such as (float) $x.',
+                $element->sort->describe(),
+                $list->sort->describe(),
+                $expected?->describe() ?? '?',
+            ));
+        }
+
+        return Smt::listAppend($list, $this->expressions->coerce($at, $element, $expected));
+    }
+
+    /**
+     * Gives a local variable its new value.
+     */
+    private function bind(string $name, Term $term, State $state, Expr $at): State
+    {
         $previous = $state->variables[$name] ?? null;
 
         // An array that holds `null` has no type of its own: it needs the type of the variable it is assigned to.
@@ -166,8 +236,14 @@ final class StatementTranslator
             throw $this->expressions->reject($at, sprintf('Cannot infer a type for $%s from null; assign a value of the type it will hold, or give a nullable parameter.', $name));
         }
 
+        // `[]` has no type until it meets the list it is assigned to, or gives the variable that holds it one.
+        $inner = $previous !== null && $previous->sort->isNullable() ? $previous->sort->inner : null;
+        if ($previous !== null && $term->sort->isEmptyList() && $this->expressions->canCoerce($term->sort, $inner ?? $previous->sort)) {
+            $term = $this->expressions->coerce($at, $term, $inner ?? $previous->sort);
+        }
+
         $stored = $term;
-        if ($previous !== null && !$previous->sort->equals($term->sort)) {
+        if ($previous !== null && !$previous->sort->equals($term->sort) && !($previous->sort->isEmptyList() && $term->sort->isList())) {
             if (!$previous->sort->isNullable()) {
                 throw $this->expressions->reject($at, sprintf(
                     'Variable $%s changes type from %s to %s.',
@@ -248,16 +324,19 @@ final class StatementTranslator
     private function arrayWriteRefusal(Expr\ArrayDimFetch $target, State $state): string
     {
         if ($target->var instanceof Expr\ArrayDimFetch) {
-            return 'Nested writes such as $a[$i][$j] = ... are not supported: build a new shape literal, such as [\'net\' => $net, \'vat\' => $vat].';
+            return 'Nested writes such as $a[$i][$j] = ... are not supported: only appending to a local list variable ($list[] = $value) is.';
         }
-        $base = $target->var instanceof Variable && is_string($target->var->name) ? ($state->variables[$target->var->name] ?? null) : null;
+        $base = $target->var instanceof Variable && is_string($target->var->name) ? ($state->view()[$target->var->name] ?? null) : null;
         if ($base !== null && $base->sort->isShape()) {
             return $target->dim === null
                 ? 'Appending to an array shape is not supported: build a new shape literal.'
                 : 'Writing to an array shape is not supported: build a new shape literal, such as [\'net\' => $net, \'vat\' => $vat].';
         }
+        if ($base !== null && ($base->sort->isList() || $base->sort->isEmptyList() || ($base->sort->isNullable() && $base->sort->inner?->isList() === true))) {
+            return 'Only appending to a list ($list[] = $value) is supported: writing $list[$i] can add a key out of order, which turns the list into another kind of array.';
+        }
 
-        return 'Only assignments to local variables are allowed (no property, array or dynamic writes).';
+        return self::LOCAL_WRITES_ONLY;
     }
 
     /**
@@ -318,7 +397,14 @@ final class StatementTranslator
                 continue;
             }
             if (!$thenValue->sort->equals($elseValue->sort)) {
-                throw $this->expressions->reject($at, sprintf('Variable $%s has a different type in each branch.', $name));
+                // `[]` takes the type of the list in the other branch.
+                if ($thenValue->sort->isEmptyList() && $this->expressions->canCoerce($thenValue->sort, $elseValue->sort)) {
+                    $thenValue = $this->expressions->coerce($at, $thenValue, $elseValue->sort);
+                } elseif ($elseValue->sort->isEmptyList() && $this->expressions->canCoerce($elseValue->sort, $thenValue->sort)) {
+                    $elseValue = $this->expressions->coerce($at, $elseValue, $thenValue->sort);
+                } else {
+                    throw $this->expressions->reject($at, sprintf('Variable $%s has a different type in each branch.', $name));
+                }
             }
 
             $variables[$name] = $thenValue->smt === $elseValue->smt
@@ -352,15 +438,16 @@ final class StatementTranslator
             $statement instanceof Stmt\Do_,
             $statement instanceof Stmt\For_,
             $statement instanceof Stmt\Foreach_
-                => 'Loops are not supported: termination and loop invariants cannot be established.',
+                => 'Loops are not supported yet: termination and loop invariants cannot be established. Read a list with count($list), $list[$i] and in_array() instead.',
             $statement instanceof Stmt\Switch_
                 => 'switch is not supported; use match.',
             $statement instanceof Stmt\Echo_,
             $statement instanceof Stmt\InlineHTML,
             $statement instanceof Stmt\Global_,
-            $statement instanceof Stmt\Static_,
-            $statement instanceof Stmt\Unset_
+            $statement instanceof Stmt\Static_
                 => 'Side effects and global or static state are forbidden in verified methods.',
+            $statement instanceof Stmt\Unset_
+                => 'unset() is not supported: removing an element leaves a gap in the keys of a list, which is then no longer a list. Build the list without that element, with a literal or with $list[] = $value.',
             $statement instanceof Stmt\TryCatch
                 => 'try/catch is not supported: verified methods must not rely on exceptions.',
             default => sprintf('Statement %s is not part of the verified subset.', $statement->getType()),

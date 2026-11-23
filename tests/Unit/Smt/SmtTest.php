@@ -240,4 +240,35 @@ final class SmtTest extends TestCase
         self::assertSame('(str.in_re s (re.* (re.range "\u{0}" "\u{ff}")))', $term->smt);
         self::assertInstanceOf(Term::class, $term);
     }
+
+    public function testListTerms(): void
+    {
+        $list = Sort::list(Sort::int());
+        $l = Smt::symbol('l', $list);
+        $base = Smt::symbol('base', $list);
+        $i = Smt::symbol('i', Sort::int());
+
+        self::assertSame('(List_Int_len l)', Smt::listLength($l)->smt);
+        self::assertTrue(Smt::listLength($l)->sort->isInt());
+        self::assertSame('(select (List_Int_items l) i)', Smt::listItem($l, $i)->smt);
+        self::assertTrue(Smt::listItem($l, $i)->sort->isInt(), 'an element has the element sort');
+        self::assertSame('(mk_List_Int 2 (store (store (List_Int_items base) 0 1) 1 2))', Smt::listLiteral($list, [Smt::int(1), Smt::int(2)], $base)->smt);
+        self::assertSame('(mk_List_Int 0 (List_Int_items base))', Smt::emptyListOf($list, $base)->smt);
+        self::assertSame('(mk_List_Int (+ (List_Int_len l) 1) (store (List_Int_items l) (List_Int_len l) 5))', Smt::listAppend($l, Smt::int(5))->smt);
+        self::assertSame('(and (<= 0 i) (< i (List_Int_len l)))', Smt::hasKey($l, $i)->smt);
+        self::assertTrue($list->equals(Sort::list(Sort::int())));
+        self::assertFalse($list->equals(Sort::list(Sort::float())));
+        self::assertSame('list<?string>', Sort::list(Sort::nullable(Sort::string()))->describe());
+    }
+
+    public function testQuantifiers(): void
+    {
+        $body = Smt::symbol('p', Sort::bool());
+        $trigger = Smt::symbol('t', Sort::int());
+
+        self::assertSame('(forall ((k!0 Int)) (! p :pattern (t)))', Smt::forall('k!0', $body, [$trigger])->smt);
+        self::assertSame('(exists ((k!0 Int)) p)', Smt::exists('k!0', $body)->smt);
+        self::assertTrue(Smt::forall('k!0', Smt::bool(true), [$trigger])->isTrue(), 'a trivial domain needs no quantifier');
+        self::assertTrue(Smt::exists('k!0', Smt::bool(false))->isFalse());
+    }
 }

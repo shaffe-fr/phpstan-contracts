@@ -192,6 +192,12 @@ final class VerifyContractRule implements Rule
             ObligationKind::InvalidCast => sprintf('`%s` loses the value for NaN, infinities and values outside the int range: PHP 8.3 and 8.4 wrap it or return 0, and PHP 8.5 also raises a warning.', $obligation->expression),
             ObligationKind::ReturnType => sprintf('The returned value can violate the declared return type `%s`.', $obligation->expression),
             ObligationKind::RequiresViolated => sprintf('The call to %s can violate its precondition #[Requires(\'%s\')].', $callee ?? 'the method', $obligation->expression),
+            ObligationKind::UndefinedKey => sprintf(
+                '`%s` can read a key that does not exist: PHP raises the warning "Undefined array key" and yields null. Guard the read with `%s` or `isset(%s)`, or state the range with #[Requires].',
+                $obligation->expression,
+                $obligation->guard ?? 'count($list) > $index',
+                $obligation->expression,
+            ),
             ObligationKind::UnexpectedThrow => $obligation->allowedWhere === null
                 ? sprintf('`%s` can be reached where no #[Throws] allows it.', $obligation->expression)
                 : sprintf('`%s` can be reached where the #[Throws] declarations do not allow it: they allow it only where %s.', $obligation->expression, $obligation->allowedWhere),
@@ -213,6 +219,7 @@ final class VerifyContractRule implements Rule
             ObligationKind::InvalidEnumValue => sprintf('a valid backing value in `%s`', $obligation->expression),
             ObligationKind::InvalidCast => sprintf('a representable value in `%s`', $obligation->expression),
             ObligationKind::ReturnType => sprintf('the return type `%s`', $obligation->expression),
+            ObligationKind::UndefinedKey => sprintf('an existing key in `%s`', $obligation->expression),
         };
 
         return $through === null ? $claim : sprintf('%s, in the call to %s', $claim, $through);

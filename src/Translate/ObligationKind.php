@@ -15,4 +15,5 @@ enum ObligationKind: string
     case ReturnType = 'returnType';
     case RequiresViolated = 'requiresViolated';
     case UnexpectedThrow = 'unexpectedThrow';
+    case UndefinedKey = 'undefinedKey';
 }
