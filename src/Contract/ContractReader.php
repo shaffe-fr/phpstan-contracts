@@ -14,6 +14,7 @@ use PhpParser\Node\Attribute;
 use PhpParser\Node\Expr\ClassConstFetch;
 use PhpParser\Node\Identifier;
 use PhpParser\Node\Name;
+use PhpParser\Node\PropertyHook;
 use PhpParser\Node\Scalar\String_;
 use PhpParser\Node\Stmt\ClassMethod;
 use PhpParser\Node\Stmt\Expression;
@@ -29,7 +30,7 @@ final class ContractReader
         $this->parser = (new ParserFactory())->createForNewestSupportedVersion();
     }
 
-    public function read(ClassMethod $method): MethodContract
+    public function read(ClassMethod|PropertyHook $method): MethodContract
     {
         $requires = [];
         $ensures = [];
@@ -38,11 +39,12 @@ final class ContractReader
 
         foreach ($method->attrGroups as $group) {
             foreach ($group->attrs as $attribute) {
-                match (ltrim($attribute->name->toString(), '\\')) {
-                    Requires::class => $requires[] = $this->clause($attribute),
-                    Ensures::class => $ensures[] = $this->clause($attribute),
-                    Pure::class => $pure = true,
-                    Throws::class => $throws[] = $this->throwsClause($attribute),
+                // Class names are case-insensitive: PHP instantiates #[...\ENSURES] as Ensures.
+                match (strtolower(ltrim($attribute->name->toString(), '\\'))) {
+                    strtolower(Requires::class) => $requires[] = $this->clause($attribute),
+                    strtolower(Ensures::class) => $ensures[] = $this->clause($attribute),
+                    strtolower(Pure::class) => $pure = true,
+                    strtolower(Throws::class) => $throws[] = $this->throwsClause($attribute),
                     default => null,
                 };
             }

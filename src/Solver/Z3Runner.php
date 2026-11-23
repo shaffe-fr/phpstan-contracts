@@ -92,6 +92,16 @@ final class Z3Runner
      */
     private function parse(string $output, int $checkCount): array
     {
+        // A command that fails is skipped and the script goes on, so a dropped assertion
+        // would leave no trace but a weaker problem. The only expected error is the
+        // `get-value` that follows an `unsat` or `unknown` answer.
+        preg_match_all('/^\(error\b.*$/m', $output, $errors);
+        foreach ($errors[0] as $error) {
+            if (preg_match('/^\(error "line \d+ column \d+: model is not available"\)\s*$/', $error) !== 1) {
+                throw new SolverFailure('Z3 reported an error: ' . substr(trim($error), 0, 400));
+            }
+        }
+
         preg_match_all('/^@@(\d+)\R(.*?)(?=^@@\d+\R|\z)/ms', $output, $blocks, PREG_SET_ORDER);
 
         /** @var array<int, SolverResult> $results */

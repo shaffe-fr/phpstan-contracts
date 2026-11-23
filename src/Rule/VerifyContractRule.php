@@ -31,6 +31,8 @@ use PHPStan\Rules\RuleErrorBuilder;
  */
 final class VerifyContractRule implements Rule
 {
+    private const BODILESS = 'Contracts on abstract and interface methods are not verified, and the methods that implement them do not inherit them: put the contract on each concrete method.';
+
     public function __construct(
         private readonly ContractReader $contracts,
         private readonly MethodEncoder $encoder,
@@ -55,8 +57,11 @@ final class VerifyContractRule implements Rule
 
         try {
             $contract = $this->contracts->read($method);
-            if ($contract->isEmpty() || $method->stmts === null) {
+            if ($contract->isEmpty()) {
                 return [];
+            }
+            if ($method->stmts === null) {
+                return [$this->error(self::BODILESS, 'contracts.unsupported', $method->getStartLine())];
             }
 
             $encoding = $this->encoder->encode($node, $scope, $contract);
@@ -77,16 +82,26 @@ final class VerifyContractRule implements Rule
     private function interpret(Encoding $encoding, array $results, int $methodLine): array
     {
         $cursor = 0;
+        $errors = [];
 
-        if ($results[$cursor++]->verdict === Verdict::Unsat) {
+        $assumptions = $results[$cursor++]->verdict;
+        if ($assumptions === Verdict::Unsat) {
             return [$this->error(
                 'The preconditions are contradictory: no input satisfies the parameter types and #[Requires], so every proof would be vacuous.',
                 'contracts.contradictoryRequires',
                 $methodLine,
             )];
         }
-
-        $errors = [];
+        if ($assumptions === Verdict::Unknown) {
+            $errors[] = $this->error(
+                sprintf(
+                    'Not proven: Z3 answered "unknown" after %d ms for the satisfiability of the parameter types and #[Requires], so every proof of this method may be vacuous.',
+                    $this->timeoutMs,
+                ),
+                'contracts.unknown',
+                $methodLine,
+            );
+        }
 
         foreach ($encoding->obligations as $obligation) {
             $result = $results[$cursor++];
@@ -174,7 +189,7 @@ final class VerifyContractRule implements Rule
             ObligationKind::UnhandledMatch => 'This match expression can throw UnhandledMatchError.',
             ObligationKind::MissingReturn => 'Not every code path returns a value.',
             ObligationKind::InvalidEnumValue => sprintf('`%s` can throw ValueError: the value may not be a backing value of the enum. Use tryFrom() for untrusted input.', $obligation->expression),
-            ObligationKind::InvalidCast => sprintf('`%s` is undefined for NaN, infinities and values outside the int range.', $obligation->expression),
+            ObligationKind::InvalidCast => sprintf('`%s` loses the value for NaN, infinities and values outside the int range: PHP 8.3 and 8.4 wrap it or return 0, and PHP 8.5 also raises a warning.', $obligation->expression),
             ObligationKind::ReturnType => sprintf('The returned value can violate the declared return type `%s`.', $obligation->expression),
             ObligationKind::RequiresViolated => sprintf('The call to %s can violate its precondition #[Requires(\'%s\')].', $callee ?? 'the method', $obligation->expression),
             ObligationKind::UnexpectedThrow => $obligation->allowedWhere === null
