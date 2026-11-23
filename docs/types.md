@@ -40,11 +40,13 @@ A `float` is modelled exactly as an IEEE 754 binary64 number with round-to-neare
 | `< <= > >= == === != !==` | IEEE comparisons: `NAN === NAN` is false, `0.0 === -0.0` is true. |
 | `abs()`, `floor()`, `ceil()`, `sqrt()` | |
 | `is_nan()`, `is_infinite()`, `is_finite()` | The way to exclude `NAN` and infinities in a contract. |
-| `(float) $int`, `(int) $float` | `(int)` truncates toward zero and carries a `contracts.invalidCast` check: `NAN`, infinities and values outside the `int` range are undefined. |
+| `(float) $int`, `(int) $float` | `(int)` truncates toward zero and carries a `contracts.invalidCast` check: for `NAN`, infinities and values outside the `int` range, PHP 8.3 and 8.4 wrap the value or return 0, and PHP 8.5 also raises a warning. |
 
 An `int` mixed with a `float` is converted to a `float` first, as PHP does. `$int === $float` is rejected, because it is always false in PHP.
 
 Not supported: `round()` (its results changed between PHP versions), `min()` and `max()` on floats (the ordering of `NAN` is not modelled), `**`, `%`, `fmod()`, `fdiv()`, trigonometric, exponential and logarithmic functions.
+
+**A `float` must be native.** PHP converts an `int` to a `float` only for a parameter or a property whose native type is `float` or `?float`. A parameter or a property that is `float` in PHPDoc only, such as `mixed $x` with `@param float $x`, keeps an `int` that a caller passes, and PHPStan accepts that call, so it is rejected rather than modelled as a float (see the messages in [Writing contracts](writing-contracts.md#types)).
 
 **A `float` parameter includes `NAN` and the infinities** unless the contract excludes them. That is usually the first thing the prover finds:
 
@@ -393,18 +395,19 @@ Pure enums and backed enums, with `int` or `string` backing values.
 |---|---|
 | `Status::Paid` | |
 | `===`, `!==`, `match ($status)` | A `match` without a `default` must cover every case, or it is reported as `contracts.unhandledMatch`. |
-| `$status->value` | Backed enums only. The value has the type of the backing. |
+| `$status->value` | Backed enums only. The value has the type of the backing. Every backing value must be one PHPStan folds to a literal: `case Huge = PHP_INT_MAX;` is not, so `->value`, `from()` and `tryFrom()` of that enum are rejected, and its cases can still be used. |
 | `$status->name` | A `string`. |
 | `Status::from($value)` | Carries a `contracts.invalidEnumValue` check: it throws `ValueError` for a value that is not a backing value. |
 | `Status::tryFrom($value)` | Returns `?Status`. The argument must be of the backing type. |
 | `self::Paid`, `static::Paid`, `self::from()`, `self::tryFrom()` | Inside the enum. An enum cannot be extended, so `static::` is the enum itself. |
+| `Rank::from($v)` on a pure enum that declares its own static `from()` | An ordinary [call](writing-contracts.md#calls-to-other-methods): only a backed enum has the built-in one. |
 | a constant of the enum, `const DEFAULT = self::Pending;` | Inlined as the case or the scalar it holds. |
 | `$this` in an instance method | One of the cases: `===`, `!==`, `match ($this)`, `$this->value`, `$this->name`, and in contracts. |
 | `in_array($this, [self::Paid, self::Shipped])` | With or without `strict: true`: enum cases compare by identity either way. The list can be a constant, `in_array($this, self::FINAL_STATES)`. |
 
 `$this->isFinal()` and `$other->level()` work when the method is declared in the same file: the call is translated with the body of the method, see [Calls to other methods](writing-contracts.md#calls-to-other-methods).
 
-Not supported: `cases()`.
+Not supported: `cases()`, and a case marked `#[\Deprecated]`, whose access triggers a deprecation from PHP 8.4 on.
 
 Parsing an untrusted value is the usual place for a bug. `from()` throws on anything unknown, and the prover shows the input that does it. `tryFrom()` with a default is proven, and the contract can state each case:
 
@@ -529,6 +532,7 @@ PHP code checks for null and then uses the value. The prover follows the same ch
 | `$x !== null && ...`, `$x === null \|\| ...` | the right operand |
 | `$x !== null ? ... : ...` | the matching branch |
 | `match (true) { $x === null => ..., default => ... }` | the following arms |
+| `match (true) { $x !== null => ..., ... }` | that arm, when the check is its only condition: an arm with several conditions runs when any one holds |
 | `$x = 5;` on a nullable variable | the rest of the path |
 | `implies($x !== null, ...)` in a contract | the conclusion |
 
@@ -642,8 +646,10 @@ public static function daysLeft(?int $deadlineDay, int $today): ?int
 A class can be a parameter, a return type, or a field of another class when all of these hold:
 
 - it is concrete (not an interface, an abstract class or an enum),
-- it has at least one `public readonly` property of a supported type, which can itself be nullable or another data class (a `readonly class` qualifies), and
+- it has at least one `public readonly` property of a supported type, which can itself be nullable or another data class (a `readonly class` qualifies), promoted by the constructor of the class, which is `final` or belongs to a `final` class, and
 - it does not refer to itself.
+
+The constructor rule is about initialization: reading a typed property that no one has set throws an `Error`. A property promoted by the constructor is set before the constructor body runs, and when the class or its constructor is final, no subclass constructor can skip that constructor. A property assigned in the constructor body, or promoted by the constructor of a parent class that the class's own constructor may not call, is left out of the model, with the reason. An object created without its constructor, through `ReflectionClass::newInstanceWithoutConstructor()`, `unserialize()` or a lazy object, is outside the guarantee.
 
 The `public readonly` properties of a supported type are the model of an instance. A readonly property cannot change once it is set, whatever the rest of the object does, so the class may hold other properties too: the proof leaves them out, and **reading one of them is rejected** with the reason. This is what lets a DTO that extends a framework base class be verified, whatever the framework (`Spatie\LaravelData\Data` is one example): its own properties are promoted `public readonly`, and the mutable state of the base class is never read. Reading it is the rejection of `PriceContext::hasNoExtraStateBroken()` in [`examples/RealWorld/PriceContext.php`](../examples/RealWorld/PriceContext.php), whose base class [`DataObject`](../examples/RealWorld/DataObject.php) holds a `protected array $state`:
 
@@ -700,7 +706,7 @@ final readonly class Receipt
 |---|---|
 | `$cart->subtotalCents`, `$cart->coupon->percent` | Nested reads. A nullable object needs a null check or `?->`. |
 | `$cart->coupon?->minimumCents` | |
-| `new Receipt(0, $total, false)` | Positional or named arguments, all of them. Only for classes whose constructor is declared in the same file and does nothing but promote every modelled property. The properties left out of the model keep their default value, or stay uninitialized, and cannot be read. |
+| `new Receipt(0, $total, false)` | Positional or named arguments, all of them. Only for classes whose constructor is declared in the same file, does nothing but promote every modelled property, can be called from the verified method and is not `#[\Deprecated]`, and that have no destructor. The properties left out of the model keep their default value, or stay uninitialized, and cannot be read. |
 | `$this->onHand` in a method of the class, `new self(...)` | `$this` is an implicit parameter of the class, with the same domain as any other. |
 
 A method of the class declared in the same file, such as `$this->available()` or a getter, can be called if the class is `final`, or the method `final` or `private`: see [Calls to other methods](writing-contracts.md#calls-to-other-methods).

@@ -125,7 +125,9 @@ Contracts go through the same translator as the body, so a contract can never me
 - Arithmetic in a contract is unbounded, so no overflow check is generated for it.
 - `$result` refers to the returned value, and parameters refer to their values on entry.
 
-The first check, `@@0`, expects `sat`. It asks whether any input satisfies the parameter types and every `#[Requires]`, and it is the only check that does not look at the body. If the answer is `unsat`, the preconditions contradict each other and every other check would pass for the wrong reason, so the extension reports `contracts.contradictoryRequires`.
+The first check, `@@0`, expects `sat`. It asks whether any input satisfies the parameter types and every `#[Requires]`, and it is the only check that does not look at the body. If the answer is `unsat`, the preconditions contradict each other and every other check would pass for the wrong reason, so the extension reports `contracts.contradictoryRequires`. If the answer is `unknown`, the extension cannot tell, and it reports `contracts.unknown` on the method line next to the results of the other checks, since every proof among them may be vacuous.
+
+Z3 skips a command that it cannot run, prints an error, and goes on. A skipped assertion only makes the problem weaker, but nothing would say so, so any error in the output fails the method with `contracts.solver`. The one expected error is the missing model of the `get-value` that follows an `unsat` or `unknown` answer.
 
 ## Counterexamples
 
@@ -147,13 +149,15 @@ To keep that safe, the value can only be read where a null check has been seen. 
 - when both branches narrow the same variable, the merge narrows it to the `ite` of the two views, which is how `if ($x === null) { $x = 5; }` leaves `$x` known to be non-null;
 - an assignment forgets the view, and fields are forgotten with their object (`dto->field` entries go with `dto`).
 
-The same narrowing runs inside a single expression, for `&&`, `||`, `?:`, `??` and the arms of `match (true)`, and inside `implies()`, where the conclusion is read under the premise.
+The same narrowing runs inside a single expression, for `&&`, `||`, `?:`, `??` and the arms of `match (true)`, and inside `implies()`, where the conclusion is read under the premise. An arm of `match (true)` with several conditions runs when any one of them holds, like `||`, so only an arm with a single condition is narrowed by it; the arms after it are narrowed by every condition being false.
 
 ## Data classes
 
 A readonly data class is a datatype with one constructor whose arguments are its `public readonly` properties, in order, and one accessor per property. Other properties, such as the mutable state of a framework base class, are not part of the datatype, and a read of one is rejected before anything is sent to the solver. `$cart->coupon->percent` is a chain of accessors, `new Receipt(a, b, c)` is the constructor, and the ranges that PHPDoc declares on properties become assumptions on every input of that class and goals on every returned one.
 
-A class whose constructor contains logic cannot be built in a verified method, because the logic could throw and the translation would not see it. Its constructor must also be declared in the analysed file, for the reason given for [calls](#calls): the proof depends on the body of the constructor. The class can still be received as a parameter: an instance only exists if its constructor accepted it, so nothing more than the property types is assumed.
+A class whose constructor contains logic cannot be built in a verified method, because the logic could throw and the translation would not see it. Its constructor must also be declared in the analysed file, for the reason given for [calls](#calls): the proof depends on the body of the constructor. The class can still be received as a parameter: an instance only exists if its constructor accepted it, so nothing more than the property types is assumed. That also needs every modelled property to be set in every instance, which is why only the properties promoted by a constructor that no subclass can skip (the class or the constructor is `final`) are part of the datatype.
+
+The name of each datatype, constructor and accessor is derived from the PHP names so that two different names never meet in the script: `\` becomes `.`, bytes outside `[A-Za-z0-9_]` become `~` and two hex digits, and a class name and a case or property name are joined with `/`. `Order\Status` and `Order_Status` are the sorts `E_Order.Status` and `E_Order_Status`, and `A::B_C` and `A_B::C` the constructors `C_A/B_C` and `C_A_B/C`.
 
 ## Constants, `self` and `$this`
 

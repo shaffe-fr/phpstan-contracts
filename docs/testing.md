@@ -117,7 +117,9 @@ Expectations are per method, not per line, so editing a fixture does not break t
 
 To add a case, add a method to the fixture of the right feature, add its line to the matching test, and run `vendor/bin/phpunit --filter <TestName>`.
 
-The rule tests also cover the failure paths that the examples do not: an invalid contract, a variable that is not defined, a precondition that contradicts itself, an unsupported statement, and a question that Z3 cannot settle within its timeout, which must be reported as `contracts.unknown` and never as a pass.
+The rule tests also cover the failure paths that the examples do not: an invalid contract, a variable that is not defined, a precondition that contradicts itself, an unsupported statement, and a question that Z3 cannot settle within its timeout, which must be reported as `contracts.unknown` and never as a pass, including the satisfiability of the preconditions themselves.
+
+Each fixture that guards a past false proof runs the construct that was proven wrongly, and the test states the rejection or the refutation that PHP's behaviour calls for: a `match (true)` arm with several conditions, two classes whose names differ only by `\` and `_`, a PHPDoc-only `float`, a `yield` in dead code, a `#[\Deprecated]` constant, case or constructor, a constant that turns a float into a string, a property that may be uninitialized, a constructor that is private or comes with a destructor, and a contract on an interface method or a property hook.
 
 ## Counterexamples are replayed
 

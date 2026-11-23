@@ -85,7 +85,7 @@ PHP has no implication operator, so `implies($a, $b)` is provided. It means `!$a
 
 The translator is a whitelist. A construct that is not listed is rejected with a message, never ignored. That is what keeps a verified method pure.
 
-The messages in the tables below are real, with one abbreviation: most messages print a class by its fully qualified name, and a row that shows a short name, such as `Foo` or `CartLimits`, stands for it. `Cannot instantiate Percentage` and `Cannot instantiate Receipt` are printed as shown.
+The messages in the tables below are real, with one abbreviation: most messages print a class by its fully qualified name, and a row that shows a short name, such as `Foo` or `CartLimits`, stands for it. The `Cannot instantiate ...` messages and the enum names that start a message, such as `Flag` or `Limit::tryFrom()`, are printed as shown.
 
 ### Types
 
@@ -94,6 +94,10 @@ The messages in the tables below are real, with one abbreviation: most messages 
 An unsupported type reports `Type list<int> is not supported in verified methods (supported: int, bool, float, string, enums, readonly data classes, and nullable versions of these).` on the parameter, or on the return type.
 
 Variadic and by-reference parameters are rejected. A parameter named `$result` is rejected because the name is reserved for `#[Ensures]`.
+
+A parameter that is `float` in PHPDoc only, such as an untyped `$x` or a `mixed $x` with `@param float $x`, is rejected: PHPStan lets a caller pass an `int` there, and PHP converts an `int` to a `float` by the native type only, so the `int` stays an `int`. The message is `Parameter $x has the PHPDoc type float but the native type mixed, which is what PHP converts its argument to: an int argument stays an int. Declare float in the signature.`
+
+A contract on a method without a body, in an interface or on an abstract method, is rejected: there is nothing to verify, and the methods that implement it do not inherit the contract. The message is `Contracts on abstract and interface methods are not verified, and the methods that implement them do not inherit them: put the contract on each concrete method.` A contract on a property hook is rejected the same way, with `Contracts on property hooks are not verified: move the logic to a method and put the contract there.`
 
 ### Statements
 
@@ -110,6 +114,7 @@ Variadic and by-reference parameters are rejected. A parameter named `$result` i
 | `switch` | `switch is not supported; use match.` |
 | `try` / `catch` | `try/catch is not supported: verified methods must not rely on exceptions.` |
 | `throw` inside an operation or a condition | `throw is only supported as a statement, or as a whole branch of match, ?: or ?? whose value is returned or assigned.` |
+| `yield` or `yield from` anywhere in the body, even where no path reaches it | `Generators are not supported: a yield anywhere in the body, even in unreachable code, makes the method return a Generator.` |
 | `throw $exception`, `throw self::error()` | ``Only `throw new Exception(...)` is supported: the exception must be built where it is thrown.`` |
 | an exception class with its own constructor | `Cannot throw InvalidWebId: its constructor is not the one of Exception or Error, so it can run code that is not verified.` |
 | `$x++`, `--$x` | ``Increment and decrement are not supported; write `$x += 1` or `$x -= 1`.`` |
@@ -152,14 +157,25 @@ Everything in the table in [the contract language](#the-contract-language) works
 | a method call on anything but an enum case or a data object | `Method calls are only supported on enums and data classes, not on a string.` |
 | `new` on a class that is not a plain data class | `Cannot instantiate Percentage: its constructor contains logic, which is not verified.` |
 | `new` on a data class whose constructor is declared in another file | `Cannot instantiate Receipt: its constructor is declared in another file. Only classes whose constructor is in the same file can be built: PHPStan re-analyses a file when the signatures it uses change, not when a body in another file does, so the proof would not be redone.` |
+| `new` on a class whose constructor is private or protected and not accessible from the verified method | `Cannot instantiate Sealed: its constructor is not accessible here.` |
+| `new` on a class whose constructor is marked `#[\Deprecated]` | `Cannot instantiate OldStyle: its constructor is #[\Deprecated], and calling it triggers E_USER_DEPRECATED, which runs the error handler.` |
+| `new` on a class with a destructor, its own or inherited | `Cannot instantiate Noisy: its destructor runs code that is not verified.` |
 | `$this` in a class that is not an enum or a readonly data class | `Object state ($this) is only part of the verified subset in enums and readonly data classes.`, followed by the reason, such as `Property Counter::$count must be public and readonly` |
 | reading a property that is not `public readonly`, or whose type is not supported | `Property Foo::$state must be public and readonly: only immutable data classes are supported.` |
+| reading a `public readonly` property that is not promoted by the constructor | `Property PhpstanContracts\Tests\Fixtures\LazyInit::$x may be uninitialized: only the properties promoted by the constructor are known to be set in every object.` |
+| reading a promoted property of a class that is not final and whose constructor is not final | `Property PhpstanContracts\Tests\Fixtures\OpenPoint::$x may be uninitialized: PhpstanContracts\Tests\Fixtures\OpenPoint is not final and neither is its constructor, so a subclass constructor can skip the one that sets it. Make the class or the constructor final.` |
+| reading a property promoted by the constructor of a parent class, in a class that declares its own constructor | `Property PhpstanContracts\Tests\Fixtures\Origin::$x may be uninitialized: it is promoted by the constructor of PhpstanContracts\Tests\Fixtures\OpenPoint, which the constructor of PhpstanContracts\Tests\Fixtures\Origin does not have to call.` |
+| reading a property that is `float` in PHPDoc only | `Property PhpstanContracts\Tests\Fixtures\MixedMeasure::$amount cannot be read in a verified method: its PHPDoc type is float but its native type is mixed, so an int assigned to it stays an int. Declare float natively.` |
 | `$c->x` in a class that declares a private `$x`, on an instance of a subclass that declares its own `$x` | `From PhpstanContracts\Tests\Fixtures\PropertyShadowParent, $c->x reads the private property PhpstanContracts\Tests\Fixtures\PropertyShadowParent::$x, not PhpstanContracts\Tests\Fixtures\PropertyShadowChild::$x: PHP picks the private property of the calling class. Rename one of the two properties.` |
 | `static::LIMIT` on a class that is not final, for a constant that is not final | `static::LIMIT is late bound: a subclass of CartLimits can override the constant. Use self::LIMIT, or make the class or the constant final.` |
 | `static::` for anything else on a class that is not final, such as `new static()` | `static:: is late bound and CartLimits is not final, so a subclass can change what it refers to; use self:: or make the class final.` |
 | `parent::` | `parent:: is not supported; write the name of the parent class.` |
 | a constant holding an array, or a value that PHPStan cannot fold | `Constant Rules::CODES has type array<int, int>; only constants holding a single int, float, string, bool or enum case are supported.` |
 | a private or protected constant that the class under verification cannot read | `Constant Foo::SECRET is not accessible here.` |
+| a constant or an enum case marked `#[\Deprecated]`, or a constant whose initializer reads one | `Constant PhpstanContracts\Tests\Fixtures\DeprecatedLimits::LIMIT is deprecated: reading it triggers a deprecation notice, which runs the error handler.` and `Enum case PhpstanContracts\Tests\Fixtures\Mode::Legacy is deprecated: ...` |
+| a constant, or a string backing value, whose initializer turns a float into a string, such as `'v' . (0.1 + 0.2)` | `An initializer in PhpstanContracts\Tests\Fixtures\ConstantInitializers converts a float to a string, whose digits depend on the precision ini setting, which is not modelled.` |
+| `from()`, `tryFrom()` or `->value` of a backed enum with a backing value that PHPStan cannot fold, such as `case Huge = PHP_INT_MAX;` | `Limit::tryFrom() is not supported: The backing value of PhpstanContracts\Tests\Fixtures\Limit::Huge cannot be folded to a literal; write it as a literal.` |
+| `from()` or `tryFrom()` on a pure enum that does not declare one | `Flag is not a backed enum, so it has no from().` |
 | `Foo::class` | `Class name constants (::class) are not part of the verified subset.` |
 | `$$name`, `$f()` | `Variable variables ($$name) are forbidden in verified methods.` and `Dynamic function calls are forbidden in verified methods.` |
 | `$obj->$prop` | `Dynamic property access ($obj->$prop) is forbidden in verified methods.` |
@@ -168,7 +184,7 @@ Everything in the table in [the contract language](#the-contract-language) works
 | `in_array()` on anything but a list literal or a constant holding one | `in_array() is only supported on a list literal, such as [self::A, self::B], or a class constant holding one.` |
 | a nullable value used as a number, string or float | `Expected a number (int or float) but got ?int, which may be null here: check it first with `!== null`, `isset()` or `??`.` |
 
-A supported function is the built-in one. As in PHP, an unqualified call such as `abs($x)` in a namespace that declares its own `abs()` calls that function, so it is rejected, in the body and in contracts alike. `\abs($x)` is always the built-in one, and so is an unqualified call when the namespace declares no function of that name. The same holds for the supported constants: an unqualified `PHP_INT_MAX` in a namespace that declares its own `PHP_INT_MAX` reads that constant and is rejected, while `\PHP_INT_MAX` is always the built-in one. Constant names are case-sensitive, except `true`, `false` and `null`.
+A supported function is the built-in one. As in PHP, an unqualified call such as `abs($x)` in a namespace that declares its own `abs()` calls that function, so it is rejected, in the body and in contracts alike. `\abs($x)` is always the built-in one, and so is an unqualified call when the namespace declares no function of that name. The same holds for the supported constants: an unqualified `PHP_INT_MAX` in a namespace that declares its own `PHP_INT_MAX` reads that constant and is rejected, while `\PHP_INT_MAX` is always the built-in one. Constant names are case-sensitive, except `true`, `false` and `null`. The check sees the declarations that PHPStan knows: a file that it neither analyses nor scans, such as when one file is analysed alone, can declare a function or a constant of the namespace without the check seeing it, so the fully qualified form is the one that does not depend on the files analysed (see [what a green run does not guarantee](limits-and-roadmap.md#what-it-does-not-guarantee)).
 
 `min()` and `max()` take exactly two `int` arguments. `match` needs at least one arm, and without a `default` arm it must be exhaustive (see below).
 
@@ -207,6 +223,8 @@ The off-by-one version is refuted at the last id:
 ErpCode.php:36: Postcondition #[Ensures('implies($result !== null, $result < self::RANGE_END)')] can be violated.
 Counterexample: $webId = 1000000 => $result = 99000000 (return at line 39).
 ```
+
+PHPStan folds a constant in its own process, so two initializers are rejected, because a run of the code can see another value or none: one that reads a `#[\Deprecated]` constant or enum case, which from PHP 8.4 on triggers a deprecation and runs the error handler (the attribute is checked whatever version of PHP runs PHPStan), and one that turns a float into a string, such as `'v' . (0.1 + 0.2)`, whose digits depend on the `precision` ini setting. The same holds for reading a `#[\Deprecated]` enum case in the body. PHPStan's result cache does not record the attributes of the enum cases of another file, so adding `#[\Deprecated]` to such a case is only seen once the file that reads it is analysed again.
 
 `self::X` and `ClassName::X` are statically bound, so they are always accepted. `static::X` is accepted when the class is final or the constant is declared `final`. Otherwise a subclass can override the constant, and the access is rejected:
 
@@ -282,7 +300,7 @@ What can be called:
 | `static::helper($x)` | `static::` looks the method up in the called class, where a subclass's own `helper()` wins even over a private one. So the class must be `final`, or the method `final` and not `private`. |
 | arguments | Positional or named. A missing argument takes its default value. An `int` is converted for a parameter whose native type is `float` or `?float`, as PHP does. PHP converts by the native type only, so a parameter without a native type, or whose native type does not match its PHPDoc type, is rejected. Any other mismatch of types is rejected. |
 
-The callee must itself be in the verified subset; when it is not, the reason is given: ``The call to PhpstanContracts\Tests\Fixtures\CallFixture::loops() cannot be verified: Loops are not supported: ...``. Recursion, methods from a trait, methods marked `#[\Deprecated]` (calling one triggers `E_USER_DEPRECATED`, which runs the error handler) and calls inside a contract are rejected.
+The callee must itself be in the verified subset; when it is not, the reason is given: ``The call to PhpstanContracts\Tests\Fixtures\CallFixture::loops() cannot be verified: Loops are not supported: ...``. Recursion, methods from a trait, methods marked `#[\Deprecated]` (calling one triggers `E_USER_DEPRECATED`, which runs the error handler), generators (``PhpstanContracts\Tests\Fixtures\Generators::five() contains a yield, so calling it returns a Generator.``) and calls inside a contract are rejected.
 
 A called method cannot throw yet: ``The call to PhpstanContracts\Tests\Fixtures\ThrowsFixture::guarded() cannot be verified: throw is not supported in a called method yet: ...``.
 
@@ -395,16 +413,16 @@ Each condition is checked **under the path that reaches it**. In `$parts > 0 && 
 | `contracts.unhandledMatch` | A `match` can throw `UnhandledMatchError`. | Add the missing arm or a `default`. |
 | `contracts.missingReturn` | A path ends without returning. | Return on every path. |
 | `contracts.invalidEnumValue` | `from()` can throw `ValueError`. | Use `tryFrom()` for untrusted input. |
-| `contracts.invalidCast` | `(int)` of a float that can be `NAN`, infinite or out of range. | Bound the float, or exclude `NAN` and infinities with `#[Requires]`. |
+| `contracts.invalidCast` | `(int)` of a float that can be `NAN`, infinite or out of range: PHP 8.3 and 8.4 wrap the value or return 0, PHP 8.5 also raises a warning. | Bound the float, or exclude `NAN` and infinities with `#[Requires]`. |
 | `contracts.returnType` | The method can return a value that its declared type excludes. | Fix the computation, or widen the declared type. |
 | `contracts.unexpectedThrow` | A `throw` can be reached where no `#[Throws]` allows it, or where the `#[Throws]` declarations do not allow it; the message then lists the conditions that allow it. | Declare it with its condition, or fix the guard. |
 | `contracts.throwsViolated` | The method can return although the condition of a `#[Throws]` holds. | Fix the guard, or the condition. |
 | `contracts.requiresViolated` | A call to a method of the same file can break one of the callee's `#[Requires]`. | Guard the call, or establish the precondition first. |
 | `contracts.contradictoryRequires` | No input satisfies the parameter types and `#[Requires]`, so every proof would be empty. | Loosen the preconditions. |
-| `contracts.unknown` | Z3 answered `unknown` within `timeoutMs`. Nothing is proven or refuted. | See [when Z3 gives up](#when-z3-gives-up). |
+| `contracts.unknown` | Z3 answered `unknown` within `timeoutMs`. Nothing is proven or refuted. On the method line, it means Z3 could not tell whether any input satisfies the preconditions, so the proofs of the method may be vacuous. | See [when Z3 gives up](#when-z3-gives-up). |
 | `contracts.unsupported` | The method leaves the supported subset. | Rewrite it, or extract the pure rule into a smaller method. |
 | `contracts.invalidContract` | A contract is not a string literal, is not valid PHP, or names a class that cannot be resolved. | Fix the attribute. |
-| `contracts.solver` | Z3 could not be started, timed out as a whole, or answered something unexpected. | Check `z3Binary`. |
+| `contracts.solver` | Z3 could not be started, timed out as a whole, answered something unexpected, or reported an error in the script, which would otherwise drop an assertion in silence. | Check `z3Binary`. An error in the script is a bug of the extension: please report it. |
 
 ## Reading a counterexample
 

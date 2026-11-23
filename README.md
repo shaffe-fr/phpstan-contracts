@@ -135,7 +135,7 @@ final class Pricing
 
 ## It works on your DTOs, not only on numbers
 
-Real signatures take objects. Readonly data classes (the usual DTOs and value objects) can be parameters, return types and nested fields, nullable or not. Their PHPDoc ranges are the domain of the proof. A class may also hold properties the proof does not read, such as the state of a framework base class (`Spatie\LaravelData\Data` is one example): the `public readonly` properties of a supported type are the model, and reading any other property is rejected.
+Real signatures take objects. Readonly data classes (the usual DTOs and value objects, `final` or with a `final` constructor that promotes their properties) can be parameters, return types and nested fields, nullable or not. Their PHPDoc ranges are the domain of the proof. A class may also hold properties the proof does not read, such as the state of a framework base class (`Spatie\LaravelData\Data` is one example): the `public readonly` properties of a supported type are the model, and reading any other property is rejected.
 
 ```php
 final readonly class Cart
