@@ -78,8 +78,9 @@ final class ConstantRuleTest extends RuleFixtureTestCase
     }
 
     /**
-     * A folded value is wrong when reading the constant triggers a deprecation, or when its
-     * initializer turns a float into a string, which depends on the precision setting.
+     * A folded value is wrong when reading the constant triggers a deprecation or converts a
+     * float to an int implicitly, or when its initializer turns a float into a string, which
+     * depends on the precision setting.
      */
     public function testConstantsWhoseFoldedValueCannotBeTrusted(): void
     {
@@ -95,12 +96,21 @@ final class ConstantRuleTest extends RuleFixtureTestCase
                 'concatenatesADivisionInAConstant' => ['contracts.unsupported: An initializer in PhpstanContracts\Tests\Fixtures\ConstantInitializers converts a float to a string'],
                 'searchesAListWithAFloatLabel' => ['contracts.unsupported: An initializer in PhpstanContracts\Tests\Fixtures\ConstantInitializers converts a float to a string'],
                 'concatenatesAnIntInAConstant' => [],
+                'ordersAFloatAndAStringInAConstant' => ['contracts.unsupported: An initializer in PhpstanContracts\Tests\Fixtures\ConstantInitializers converts a float to a string, whose digits depend on the precision ini setting, which is not modelled.'],
+                'comparesAFloatAndAStringWithTheSpaceshipInAConstant' => ['contracts.unsupported: An initializer in PhpstanContracts\Tests\Fixtures\ConstantInitializers converts a float to a string'],
+                'ordersAFloatAndAnIntInAConstant' => [],
+                'comparesAFloatAndAStringForEqualityInAConstant' => [],
+                'masksAFloatInAConstant' => ['contracts.unsupported: An initializer in PhpstanContracts\Tests\Fixtures\ConstantInitializers converts a float to an int implicitly, which runs the error handler unless the float holds an integer in the range of int.'],
+                'indexesWithAFloatInAConstant' => ['contracts.unsupported: An initializer in PhpstanContracts\Tests\Fixtures\ConstantInitializers converts a float to an int implicitly'],
+                'masksAnIntInAConstant' => [],
                 'readsTheValueOfAnEnumWithAFloatLabel' => ['contracts.unsupported: ->value of FloatLabel is not supported: An initializer in PhpstanContracts\Tests\Fixtures\FloatLabel converts a float to a string'],
             ],
             GlobalConstantInitializers::class => [
                 'readsAGlobalConstantThatPrintsAFloat' => ['contracts.unsupported: The initializer of constant PhpstanContracts\Tests\Fixtures\PRINTED converts a float to a string, whose digits depend on the precision ini setting, which is not modelled.'],
                 'concatenatesAGlobalConstantThatPrintsAFloat' => ['contracts.unsupported: The initializer of constant PhpstanContracts\Tests\Fixtures\PRINTED converts a float to a string'],
                 'readsABoolThatComparesAPrintedFloat' => ['contracts.unsupported: The initializer of constant PhpstanContracts\Tests\Fixtures\PRINTS_SHORT converts a float to a string'],
+                'readsABoolThatOrdersAFloatAndAString' => ['contracts.unsupported: The initializer of constant PhpstanContracts\Tests\Fixtures\ORDERS_A_PRINTED_FLOAT converts a float to a string, whose digits depend on the precision ini setting, which is not modelled.'],
+                'readsAGlobalConstantThatMasksAFloat' => [],
                 'readsAConstantDefinedByDefine' => ['contracts.unsupported: The initializer of constant PRINTED_BY_DEFINE converts a float to a string'],
                 'readsTheValueOfAnEnumCaseSetByAGlobalConstant' => ['contracts.unsupported: ->value of GlobalLabel is not supported: The initializer of constant PhpstanContracts\Tests\Fixtures\PRINTED converts a float to a string'],
                 'readsAGlobalIntConstant' => [],

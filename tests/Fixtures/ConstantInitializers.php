@@ -50,6 +50,10 @@ final class GlobalConstantInitializers
 
     public const SHORT = PRINTS_SHORT;
 
+    public const ORDERED = ORDERS_A_PRINTED_FLOAT;
+
+    public const MASKED = MASKS_A_FLOAT;
+
     public const DEFINED = \PRINTED_BY_DEFINE;
 
     public const WEEK = SEVEN;
@@ -74,6 +78,19 @@ final class GlobalConstantInitializers
     public static function readsABoolThatComparesAPrintedFloat(): bool
     {
         return self::SHORT;
+    }
+
+    #[Ensures('$result === true')]
+    public static function readsABoolThatOrdersAFloatAndAString(): bool
+    {
+        return self::ORDERED;
+    }
+
+    // The deprecation of 1.5 | 0 is triggered where MASKS_A_FLOAT is defined, not here.
+    #[Ensures('$result === 1')]
+    public static function readsAGlobalConstantThatMasksAFloat(): int
+    {
+        return self::MASKED;
     }
 
     #[Ensures('$result === "v0.3"')]
@@ -122,6 +139,25 @@ final class ConstantInitializers
     public const LABELS = ['v' . 0.5, 'w'];
 
     public const NUMBERED = 'v' . 3;
+
+    // PHP 8 orders a float and a non-numeric string by printing the float: true at precision 14, false at -1.
+    public const ORDERED = (0.1 + 0.2) < '0.3!';
+
+    public const SORTED = (0.1 + 0.2) <=> '0.3!';
+
+    public const HALF_BELOW_ONE = 0.5 < 1;
+
+    // A printed finite float is a numeric string, so it never equals '0.3!', at any precision.
+    public const EQUAL = (0.1 + 0.2) == '0.3!';
+
+    // From PHP 8.1 on, a fractional float converted to an int implicitly runs the error handler.
+    public const MASKED = 1.5 | 0;
+
+    public const NAMES = ['a', 'b'];
+
+    public const SECOND = self::NAMES[1.5];
+
+    public const MASK = 6 | 1;
 
     #[Ensures('$result === 10')]
     public static function readsADeprecatedConstant(): int
@@ -184,6 +220,48 @@ final class ConstantInitializers
     public static function concatenatesAnIntInAConstant(): string
     {
         return self::NUMBERED;
+    }
+
+    #[Ensures('$result === true')]
+    public static function ordersAFloatAndAStringInAConstant(): bool
+    {
+        return self::ORDERED;
+    }
+
+    #[Ensures('$result === -1')]
+    public static function comparesAFloatAndAStringWithTheSpaceshipInAConstant(): int
+    {
+        return self::SORTED;
+    }
+
+    #[Ensures('$result === true')]
+    public static function ordersAFloatAndAnIntInAConstant(): bool
+    {
+        return self::HALF_BELOW_ONE;
+    }
+
+    #[Ensures('$result === false')]
+    public static function comparesAFloatAndAStringForEqualityInAConstant(): bool
+    {
+        return self::EQUAL;
+    }
+
+    #[Ensures('$result === 1')]
+    public static function masksAFloatInAConstant(): int
+    {
+        return self::MASKED;
+    }
+
+    #[Ensures('$result === "b"')]
+    public static function indexesWithAFloatInAConstant(): string
+    {
+        return self::SECOND;
+    }
+
+    #[Ensures('$result === 7')]
+    public static function masksAnIntInAConstant(): int
+    {
+        return self::MASK;
     }
 
     #[Pure]

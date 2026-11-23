@@ -13,6 +13,10 @@ const PRINTED = 'v' . (0.1 + 0.2);
 
 const PRINTS_SHORT = ('v' . 0.1) === 'v0.1';
 
+const ORDERS_A_PRINTED_FLOAT = (0.1 + 0.2) < '0.3!';
+
+const MASKS_A_FLOAT = 1.5 | 0;
+
 const SEVEN = 7;
 
 const NUMBERED_PREFIX = 'v' . SEVEN;
