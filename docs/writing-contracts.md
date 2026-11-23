@@ -67,6 +67,13 @@ Available in contracts:
 | `$this` in a method of an enum or a readonly data class | `implies($this === StockStatus::InStock, $result)`, `$this->onHand` |
 | property reads on a data class, `new` | `$result->totalCents`, `$cart->coupon->percent` |
 | `in_array($x, [a, b, c])`, `in_array($x, [a, b, c], true)` over a list literal or a class constant holding one | `in_array($this, [self::Administrator, self::Validator])` |
+| `in_array($x, $list, true)` over a `list<T>` (a variable, a property or a call result) | `in_array($sku, $blockedSkus, true)` |
+| `count($list)` | `count($result) <= count($amounts) + 1` |
+| `$list[$i]` with an `int` index; the read must be proven to exist | `count($amounts) > 0 && $amounts[0] >= 0`, `$result[0] >= 0` |
+| `isset($list[$i])`, `$list[$i] ?? $default` | `implies(isset($items[$i]), $result)` |
+| `$shape['key']` with a string literal key of the shape; write the key with double quotes inside the attribute | `$result["net"] + $result["vat"] === $grossCents` |
+| list literals `[]`, `[$a, $b]`, `[...$list, $x]`, and shape literals `['net' => $n, 'vat' => $v]` | `$result === [1, 2]` |
+| `===` and `!==` on two lists of ints, bools, strings or enum cases (or their nullable versions) | `$result === $items` |
 | `implies($premise, $conclusion)`, contracts only | `implies($year % 400 === 0, $result)` |
 
 PHP has no implication operator, so `implies($a, $b)` is provided. It means `!$a || $b`, and the conclusion is read under the premise: `implies($x !== null, $x > 0)` is accepted even when `$x` is nullable.
@@ -89,9 +96,9 @@ The messages in the tables below are real, with one abbreviation: most messages 
 
 ### Types
 
-`int`, `bool`, `float`, `string`, enums, readonly data classes, and a nullable version of each. See [Supported types](types.md) for what each can do.
+`int`, `bool`, `float`, `string`, enums, readonly data classes, `list<T>`, array shapes with string keys, and a nullable version of each. See [Supported types](types.md) for what each can do.
 
-An unsupported type reports `Type list<int> is not supported in verified methods (supported: int, bool, float, string, enums, readonly data classes, and nullable versions of these).` on the parameter, or on the return type.
+An unsupported type reports `Type object is not supported in verified methods (supported: int, bool, float, string, enums, readonly data classes, lists, array shapes with string keys, and nullable versions of these).` on the parameter, or on the return type.
 
 Variadic and by-reference parameters are rejected. A parameter named `$result` is rejected because the name is reserved for `#[Ensures]`.
 
@@ -110,7 +117,7 @@ A contract on a method without a body, in an interface or on an abstract method,
 
 | Rejected | Message |
 |---|---|
-| `while`, `for`, `foreach`, `do` | `Loops are not supported: termination and loop invariants cannot be established.` |
+| `while`, `for`, `foreach`, `do` | `Loops are not supported yet: termination and loop invariants cannot be established. Read a list with count($list), $list[$i] and in_array() instead.` |
 | `switch` | `switch is not supported; use match.` |
 | `try` / `catch` | `try/catch is not supported: verified methods must not rely on exceptions.` |
 | `throw` inside an operation or a condition | `throw is only supported as a statement, or as a whole branch of match, ?: or ?? whose value is returned or assigned.` |
@@ -119,7 +126,15 @@ A contract on a method without a body, in an interface or on an abstract method,
 | an exception class with its own constructor | `Cannot throw InvalidWebId: its constructor is not the one of Exception or Error, so it can run code that is not verified.` |
 | `$x++`, `--$x` | ``Increment and decrement are not supported; write `$x += 1` or `$x -= 1`.`` |
 | `echo`, `global`, `static`, `unset` | `Side effects and global or static state are forbidden in verified methods.` |
-| assignment to a property, array item or variable variable | `Only assignments to local variables are allowed (no property, array or dynamic writes).` |
+| assignment to a property or a variable variable | `Only assignments to local variables are allowed (no property, array or dynamic writes); appending is supported on a list built in the method ($list = []; $list[] = $value), or write $list = [...$list, $value].` |
+| `$list[$i] = $x`, `$list[$i] += $x` | `Only appending to a list ($list[] = $value) is supported: writing $list[$i] can add a key out of order, which turns the list into another kind of array.` |
+| `$shape['key'] = $x` | `Writing to an array shape is not supported: build a new shape literal, such as ['net' => $net, 'vat' => $vat].` |
+| `$a[$i][$j] = $x`, `$a[$i][] = $x` | `Nested writes such as $a[$i][$j] = ... are not supported: only appending to a local list variable ($list[] = $value) is.` |
+| `$items[] = $x` where `$items` is a parameter, or a copy of one | `Appending to $items, a list received from outside the method, is not supported: PHP appends at the array's next free key, which can be past count($items) after an unset() by the caller, so the result may not be a list. Write $items = [...$items, $value] instead, which always builds a list.` |
+| `$l[] = $x` on a variable that is not defined yet | `Appending to $missing, which is not defined at this point, would create an array; start with $missing = [].` |
+| `$shape[] = $x` | `Appending to an array shape is not supported: build a new shape literal.` |
+| `[$a, $b] = $list`, `list($a, $b) = $list` | `Destructuring ([$a, $b] = ...) is not supported: read the elements with $list[0] and $list[1].` |
+| `unset($list[$i])` | `unset() is not supported: removing an element leaves a gap in the keys of a list, which is then no longer a list. Build the list without that element, with a literal or with $list[] = $value.` |
 | a bare `return;` | `A bare return is not supported: verified methods must return a value.` |
 | a variable that changes type | `Variable $x changes type from int to bool.` |
 | `$x = null;` for a variable with no type yet | `Cannot infer a type for $x from null; assign a value of the type it will hold, or give a nullable parameter.` |
@@ -181,9 +196,38 @@ Everything in the table in [the contract language](#the-contract-language) works
 | `Foo::class` | `Class name constants (::class) are not part of the verified subset.` |
 | `$$name`, `$f()` | `Variable variables ($$name) are forbidden in verified methods.` and `Dynamic function calls are forbidden in verified methods.` |
 | `$obj->$prop` | `Dynamic property access ($obj->$prop) is forbidden in verified methods.` |
-| arrays, other than the list of `in_array()` | `Arrays are not supported yet.` |
+| `array`, `array<string, int>`, `non-empty-array<int, int>` as a type | `Type array<string, int> is not supported in verified methods: an array with arbitrary keys is not modelled. Use list<T> for a sequence, or an array shape with string keys such as array{net: int, vat: int}.` |
+| a union element type, `list<float\|string>` | `Type list<float\|string> is not supported in verified methods: its elements have type float\|string, and a list must hold a single supported type (int, bool, float, string, an enum, a readonly data class, an array shape, or a nullable version of these).` |
+| a list of lists, `list<list<int>>` | `Type list<list<int>> is not supported yet: a list of lists is not modelled. Use a list of data classes or of array shapes.` |
+| an optional key, `array{net: int, vat?: int}` | `Type array{net: int, vat?: int} is not supported: the optional key vat may be missing, which is not modelled. Make the key required, with a nullable value if it can be absent.` |
+| a tuple or an int key, `array{int, string}` | `Type array{int, string} is not supported: array shapes are only supported with string keys. Use array{amount: int, label: string}, a list, or a data class.` |
+| the empty shape `array{}` | `Type array{} is not supported: declare list<T> for a list that may be empty.` |
+| a list or a shape of floats as an input | `Type list<float> is not supported for an input: PHP does not convert the values of an array and PHPStan accepts an int for a float in a list, so an element may hold an int. Use int (for example cents) or a list of data classes with a native float property.` |
+| an array literal with int keys, or with string keys that PHP converts to ints, such as `'1'` | `Integer keys, and string keys that PHP converts to integers such as '1', are not supported in array literals: write a list without keys, or use non-numeric string keys.` |
+| a literal mixing keys and no keys, `[1, 'a' => 2]` | `An array literal is either a list without keys, such as [1, 2], or a shape with string keys, such as ['net' => 1]; mixing the two is not supported.` |
+| a duplicate key in a literal | `Key 'net' appears twice in this array literal; PHP keeps the last value. Write it once.` |
+| elements of different types, `[1, 'a']`, `[1, 2.0]` | `The elements of this list have different types (int and string); a list must hold a single type. Convert the elements first, such as (float) $x.` |
+| a nested list literal `[[1], [2]]` | `A list of lists is not supported yet: nested lists are not modelled. Use a list of data classes or of array shapes.` |
+| `[...$shape]`, a spread of anything but a list | `Only a list<T> can be spread in a list literal, not `$shape` (array{net: int, vat: int}): PHP keeps the keys of other arrays, which are not 0..n-1. Spread a list, or build the array with its keys.` |
+| `$list['a']`, `$list[$float]`, `$list[$nullable]` | `The index of a list must be an int, not a string: PHP converts some strings and floats to int keys, which is not modelled.` |
+| `$shape[$k]` with a key that is not a literal | `The key of an array shape must be a string literal naming one of its keys, such as $totals['net'].` |
+| `$shape['gross']` for a key the shape does not have | `array{net: int, vat: int} has no key 'gross'; its keys are 'net' and 'vat'.` |
+| `$shape->net` | `An array shape is read with ['net'], not ->net.` |
+| `$string[0]` | `Reading [...] is only supported on lists and array shapes, not on a string; string offsets are not supported, use str_starts_with() or strlen().` |
+| `[][0]` | `This list is always empty, so reading from it always reads a missing key; append to the list before reading it, or check count() first.` |
+| `$a == $b`, `!=`, `<>` with an array operand | `Arrays compared with == are compared loosely, with type juggling on every element ([1] == [true], ['1e1'] == ['10']); use === on lists, or compare the elements.` |
+| `$a === $b` on two shapes, or on lists of shapes | `Array shapes compared with === also compare the order of their keys and any extra keys, which the type array{...} does not fix; compare the elements instead, such as $a['net'] === $b['net'].` |
+| `$a === $b` on lists of floats | `Lists of floats cannot be compared with ===: PHP first checks whether both are the same array in memory, so [NAN] === [NAN] is false while $a === $a is true for $a = [NAN]. Compare count() and the elements instead, such as count($a) === count($b) && $a[0] === $b[0].` |
+| `$a === $b` on lists of data classes | `Lists of objects cannot be compared with ===: objects are compared by identity; compare the fields of the elements.` |
+| `<`, `<=`, `>`, `>=` on arrays | `Arrays cannot be ordered with <: PHP compares them by count, then key by key, which is not modelled. Compare count($list) or the elements.` |
+| `count()` of a shape, `count($list, COUNT_RECURSIVE)` | `count() of an array shape is not supported: the type array{...} does not rule out extra keys. count() is supported on lists.` and `count() takes exactly one argument here; COUNT_RECURSIVE is not supported. Write count($list).` |
+| `empty($list)`, `if ($list)` | `empty() relies on truthiness; write count($list) === 0.` |
+| `isset()` or `??` through a list element, such as `$lines[$i]['net'] ?? 0` | ``?? on `$lines[$i]['net']` reads through the list element `$lines[$i]`, which is not modelled: PHP treats a missing element in the middle of the chain as unset. Check `isset($lines[$i])` first, or read `$lines[$i]['net']` into a variable.`` |
+| any other array function, such as `array_sum()`, `array_map()`, `sort()`, `implode()`, `is_array()` | `Call to array_sum() is not part of the verified subset: of the array functions, only count() and in_array() are supported.` |
 | `in_array()` without `strict: true` on a string or a nullable value | `in_array() without strict: true compares with ==, which juggles a string; pass true as the third argument.` |
-| `in_array()` on anything but a list literal or a constant holding one | `in_array() is only supported on a list<T>, or on a list literal such as [self::A, self::B] or a class constant holding one.` |
+| `in_array()` on anything but a list, a list literal or a constant holding one | `in_array() is only supported on a list<T>, or on a list literal such as [self::A, self::B] or a class constant holding one.` |
+| `in_array()` on a shape, or on a list of objects or shapes | `in_array() is only supported on a list or a list literal, not on an array shape; compare the values, such as $x === $totals['net'] || $x === $totals['vat'].` and `in_array() on a list of objects compares them by identity with strict: true and property by property without it, which is not modelled; compare a field instead.` |
+| `in_array()` with a needle of another type than the elements | `in_array() needs a needle of the element type of the list: got float for a list<int>. Convert the needle first, such as (float) $x.` |
 | a nullable value used as a number, string or float | `Expected a number (int or float) but got ?int, which may be null here: check it first with `!== null`, `isset()` or `??`.` |
 
 A supported function is the built-in one. As in PHP, an unqualified call such as `abs($x)` in a namespace that declares its own `abs()` calls that function, so it is rejected, in the body and in contracts alike. `\abs($x)` is always the built-in one, and so is an unqualified call when the namespace declares no function of that name. The same holds for the supported constants: an unqualified `PHP_INT_MAX` in a namespace that declares its own `PHP_INT_MAX` reads that constant and is rejected, while `\PHP_INT_MAX` is always the built-in one. Constant names are case-sensitive, except `true`, `false` and `null`. The check sees the declarations that PHPStan knows: a file that it neither analyses nor scans, such as when one file is analysed alone, can declare a function or a constant of the namespace without the check seeing it, so the fully qualified form is the one that does not depend on the files analysed (see [what a green run does not guarantee](limits-and-roadmap.md#what-it-does-not-guarantee)).

@@ -159,6 +159,16 @@ A class whose constructor contains logic cannot be built in a verified method, b
 
 The name of each datatype, constructor and accessor is derived from the PHP names so that two different names never meet in the script: `\` becomes `.`, bytes outside `[A-Za-z0-9_]` become `~` and two hex digits, and a class name and a case or property name are joined with `/`. `Order\Status` and `Order_Status` are the sorts `E_Order.Status` and `E_Order_Status`, and `A::B_C` and `A_B::C` the constructors `C_A/B_C` and `C_A_B/C`. A class is named by its declared name, whatever case the code writes it in, since PHP class names are case-insensitive: `Point` and `point` are one sort.
 
+## Lists and shapes
+
+A `list<T>` is a datatype with a length and an SMT array from `Int` to the element sort: `(declare-datatypes ((List_Int 0)) (((mk_List_Int (List_Int_len Int) (List_Int_items (Array Int Int))))))`. A PHP list has the keys `0..n-1`, so the array is only meaningful below the length, and the translation never reads a cell without proving that its index is below it. `count($l)` is the length, `$l[$i]` is `select` behind a `contracts.undefinedKey` obligation `0 <= i < len`, and `$l[] = $x` is a new version of the list with `len + 1` and a `store` at the old length. A list is a value: appending to a variable leaves any other variable that held the same list alone, which is PHP's copy-on-write.
+
+The domain of an input list is an assumption with a quantifier: a length between 0 and 2^30 (the largest PHP array), at least 1 for a `non-empty-list`, and for every key below the length an element inside its declared range. On a returned list the same formula is a goal, checked as `contracts.returnType`. `in_array($x, $l, true)` is an `exists` over the keys below the length, `===` between two lists is the same length and a `forall` over the keys, and both are written with a pattern on the element so that the solver instantiates them where the list is read. A float element is compared with `fp.eq`, which is why `NAN` is never found and `-0.0` matches `0.0`.
+
+An array shape is a record, like a data class: one constructor, one accessor per key, and the keys in a canonical order, since the order of the keys is not observable through any supported construct.
+
+A list can be long, and Z3 picks lengths freely: a goal on `count()` alone came back with a counterexample of 28224 elements. A counterexample is meant to be read and replayed, so every check asks for **probe terms**, the length of each list that is reachable from the inputs and the result and its first ten elements, and Z3 echoes each probe in the model. When a refuted check has a list longer than ten elements, the extension runs that single check once more with every length bounded by ten, which is sound because that model satisfies everything the first one did. The shorter model is printed when it exists, and the long form `a list of 28224 elements starting with [...]` only otherwise.
+
 ## Constants, `self` and `$this`
 
 None of these adds a theory. `self::` and `static::` are resolved to the declaring class before translation, `static::` only where late binding cannot change the target. A class constant is read from PHPStan's reflection: its initializer is folded to a type, and a type with a single int, float, string, bool or enum case value becomes that literal in the script. No symbol is declared for it.
@@ -198,6 +208,13 @@ After the body and the postconditions, one more check asks whether the returned 
 | `strlen`, `.`, `str_starts_with`, `str_ends_with`, `str_contains` | `str.len`, `str.++`, `str.prefixof`, `str.suffixof`, `str.contains` |
 | an int in `.`, in an interpolation, or in `(string)` | `php_int_to_string`: `str.from_int`, with a `-` in front for a negative value |
 | enum | an algebraic datatype with one constructor per case |
+| `list<T>` | a datatype with a length and an `(Array Int T)`, with a quantified domain for the range of the elements |
+| `count($l)` | the length field |
+| `$l[$i]` | `select` on the items, behind a `contracts.undefinedKey` check `0 <= i < len` |
+| `$l[] = $x`, `[...$l, $x]`, `[a, b]` | `store` at the old length with `len + 1`; a literal is a chain of `store` |
+| `in_array($x, $l, true)` | an `exists` over the keys below the length, with `===` (`fp.eq` for floats) |
+| `$a === $b` on two lists | the same length and a `forall` over the keys below it |
+| `array{net: int, vat: int}`, `$s['net']` | a datatype with one accessor per key, and the accessor |
 | `$enum->value`, `$enum->name` | functions defined by `ite` over the constructors |
 | `Enum::from($v)`, `Enum::tryFrom($v)` | an `ite` over the backing values, with a `contracts.invalidEnumValue` check for `from()`, and a nullable result for `tryFrom()` |
 | `?T` | a datatype `(none \| some T)` |

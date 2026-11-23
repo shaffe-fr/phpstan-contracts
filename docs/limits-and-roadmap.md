@@ -4,7 +4,7 @@
 
 For every input that satisfies the native parameter types, the PHPDoc ranges and every `#[Requires]`, a method that passes (in an enum or a readonly data class, `$this` is one of the inputs):
 
-1. runs without integer overflow, division by zero, unhandled `match`, invalid `Enum::from()` value, unrepresentable `(int)` cast or missing `return`,
+1. runs without integer overflow, division by zero, unhandled `match`, invalid `Enum::from()` value, unrepresentable `(int)` cast, missing `return` or read of a missing list key,
 2. throws an exception only where a `#[Throws]` covers its class and the condition of every `#[Throws]` that covers it holds, and, for a `#[Throws(E::class, when: ...)]` with a condition, throws an `E` whenever the condition holds,
 3. returns a value that its declared return type allows, and
 4. satisfies every `#[Ensures]` when it returns.
@@ -15,6 +15,7 @@ The guarantee is **fail-closed**. A construct the translator does not know is re
 
 - **Most callers are not checked.** A call from a verified method to a method of the same file checks the callee's `#[Requires]` (`contracts.requiresViolated`). Any other call, from ordinary code or from another file, is not checked. PHPDoc ranges are enforced by PHPStan itself at the call sites it analyses, but a precondition expressed only as `#[Requires]` is an assumption of the proof that nobody checks on the caller's side. This is the largest gap, and the first item on the roadmap.
 - **PHPDoc ranges are trusted.** They hold wherever PHPStan can see the caller. A caller whose argument is `mixed`, or code that PHPStan does not analyse, can break them.
+- **PHPDoc array types are trusted.** A `list<int<0, 100>>` or an `array{net: int, vat: int}` is assumed to hold exactly what it declares: a list whose keys are `0..n-1` in order, with every element in range, and a shape that has its keys. PHPStan checks this at the call sites it analyses, but an array that comes from `json_decode()`, a framework or untyped code can break it. A list or a shape of floats is therefore not accepted as an input, because PHPStan allows an `int` where a `float` is declared in an array and PHP does not convert it.
 - **A data class is trusted to hold its declared types.** An instance of a class whose constructor validates its arguments is assumed to hold values of its property types and nothing more. A constructor that throws is never seen by the proof, which is why such a class cannot be built with `new` in a verified method. The same holds for `$this` in a method of such a class.
 - **Contracts are verified on concrete methods only.** A contract on an interface method, an abstract method or a property hook is rejected, and an implementation does not inherit the contract of the method it implements.
 - **Objects are assumed to be built by their constructor.** Only properties promoted by a constructor that no subclass can skip are modelled, so a modelled property is always set. An object created without its constructor, through `ReflectionClass::newInstanceWithoutConstructor()`, `unserialize()` or a lazy object, can lack one, and reading it then throws an `Error` that the proof does not see.
@@ -34,7 +35,7 @@ SMT solvers already reason about integers, bit-vectors, floating point, strings,
 
 | Type or feature | Encoding | What makes it more than a type mapping |
 |---|---|---|
-| `list<int>`, `array<string, int>` and similar | an SMT array plus a length | Operations that do not iterate (length, element access, appending) are fine. Anything that visits every element needs a loop. |
+| general arrays `array<K, V>`, lists of lists, and loops over lists | an SMT array plus a length for lists, which is done | `list<T>` and array shapes are supported, with the operations that do not iterate (`count()`, reads by index, appending, `in_array()`). Arbitrary keys need the exact PHP rules for key conversion (`"1"` becomes `1`) and for ordering. Anything that visits every element needs a loop. |
 | calls to methods of other files, and `new` of classes whose constructor is in another file | an uninterpreted function constrained by the callee's contract | Needs the callee's contract instead of its body, and the call-site check described above. Calls within a file are done, by translating the callee's body, and so is `new` of a class whose constructor is in the same file. |
 | `DateTimeImmutable`, `Money` and other library value objects | a record, as for data classes | The class has methods. The methods would need to be modelled or replaced by contracts. |
 | `substr()`, `strpos()`, `trim()`, `strtolower()`, `sprintf()` | the string theory has most of the primitives | Each PHP function has its own edge cases (negative offsets, locale, multibyte). Each one is a decision to reproduce its semantics exactly. |
@@ -66,7 +67,7 @@ The whitelist exists for this reason. Each item that is added is a deliberate de
 
 ### The practical answer
 
-Most business rules fit a core of amounts, counts, flags, statuses, short strings and small immutable objects. Extracting that core into a method over such values, as shown in [Structuring real code](real-world-examples.md#structuring-real-code-for-verification), covers the rules in the examples. What does not fit, such as a rule that loops over order lines, is the next real frontier, and it needs loops or lists rather than another scalar type.
+Most business rules fit a core of amounts, counts, flags, statuses, short strings and small immutable objects. Extracting that core into a method over such values, as shown in [Structuring real code](real-world-examples.md#structuring-real-code-for-verification), covers the rules in the examples. What does not fit, such as a rule that sums the lines of an order, is the next real frontier: lists are supported, but a rule that visits every element needs loops.
 
 ## Roadmap
 
@@ -74,7 +75,7 @@ These are directions in order of value for the effort, not commitments or dates.
 
 1. **Modular verification.** Check `#[Requires]` at every call site, and let a verified method call verified methods of other files using their contracts. Calls within a file already work, by translating the callee's body, and check the callee's `#[Requires]`. This closes the largest gap above.
 2. **A persistent Z3 process.** One long-lived process per PHPStan worker, reset between methods, to remove most of the process start-up cost that dominates a run for integer, string and data class methods (see [How it works](how-it-works.md#what-runs-where)). The cache of proofs keyed by script hash, which is the complement, is done: see [Cost](getting-started.md#cost).
-3. **Lists and bounded loops**, first as `list<T>` with a length and unrolling with an explicit bound, then with `#[Invariant]`.
+3. **Bounded loops over lists**, as an unrolling with an explicit bound, then with `#[Invariant]`. Lists, array shapes, reads by index, appending and `in_array()` are done; `foreach`, `array_map()`, `array_sum()` and the other array functions are the next step.
 4. **Calls to methods of data classes and enums declared in other files**, through their own contracts, which follows from modular verification. Within a file, `$this->level()` and `$other->level()` already work.
 5. **More string functions**, one at a time, each with its edge cases decided.
 6. **Cross-checking with a second solver** on `unsat` results, to reduce the trust placed in one solver.

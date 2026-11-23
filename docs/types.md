@@ -11,8 +11,10 @@ A verified method can take and return the types below. Anything else is rejected
 | [enums](#enums) | pure and backed | one constructor per case |
 | [nullable](#nullable-values) | `?T`, `T\|null` for any type in this table | a value that is either none or some |
 | [data classes](#readonly-data-classes) | concrete classes with public readonly properties, which may extend a framework base class | a record of the public readonly properties |
+| [lists](#lists) | `list<T>`, `non-empty-list<T>`, with `T` any type of this table except a list | a length and an SMT array of elements |
+| [array shapes](#array-shapes) | `array{net: int, vat: int}`, with string keys | a record of the fields |
 
-Not supported: `array` and `list<T>`, `mixed`, `object`, `callable`, closures, unions of different types (`int|string`, `int|float`), `iterable`, `void`, `never`, interfaces and abstract classes, and classes without any `public readonly` property. A class can have mutable properties as long as the proof does not read them.
+Not supported: arrays with arbitrary keys (`array`, `array<K, V>`), lists of lists, `mixed`, `object`, `callable`, closures, unions of different types (`int|string`, `int|float`), `iterable`, `void`, `never`, interfaces and abstract classes, and classes without any `public readonly` property. A class can have mutable properties as long as the proof does not read them.
 
 A class constant whose value is a single `int`, `float`, `string`, `bool` or enum case, such as `self::OFFSET` or `ErpCode::RANGE_END`, is inlined as that value, in the body and in contracts. `static::` needs a final class or a final constant. See [Class constants, `self` and `$this`](writing-contracts.md#class-constants-self-and-this).
 
@@ -840,3 +842,217 @@ public static function alwaysApplicable(Cart $cart): bool
     return $cart->coupon !== null && $cart->coupon->minimumCents === null;
 }
 ```
+## Lists
+
+A `list<T>` is a PHP array whose keys are `0..n-1` in order. Declare it with `list<T>` or `non-empty-list<T>` in the PHPDoc of a parameter, a return type or a property, next to the native `array`. The element type `T` is any single supported type: `int` (with its range), `bool`, `string`, an enum, a readonly data class, an array shape, `float` (not as an input, see below), or a nullable version of these. The prover sees a length and one element per index.
+
+A range on the elements, such as `list<int<0, 10000000>>`, and `non-empty-list` are assumptions on an input, and something the method must honour on a returned list (`contracts.returnType`). A list is assumed to have at most 2^30 elements, which is the most a PHP array can hold.
+
+| Supported | Notes |
+|---|---|
+| `count($list)` | The length. |
+| `$list[$i]` with an `int` index | The element, with the proof obligation that the key exists: PHP raises a warning and yields `null` for a missing key, so a read that can miss is reported as [`contracts.undefinedKey`](writing-contracts.md#what-is-checked-automatically). The guard `$i >= 0 && $i < count($list)`, an early `return`, or a `#[Requires]` discharges it. |
+| `isset($list[$i])`, `$list[$i] ?? $default` | No warning and no obligation. On a `list<?T>`, a key that holds `null` behaves like a missing key, as in PHP. |
+| `[]`, `[$a, $b]`, `[...$list, $x]`, `[...$first, ...$second]` | A literal whose elements have the same type; `[1, null]` is a `list<?int>`. A spread must be a list. |
+| `$list[] = $x;` on a list built in the method | Copy-on-write, like PHP: another variable that held the same list keeps its elements. |
+| `in_array($x, $list, true)` | One `===` per element: `NAN` is never found and `-0.0` matches `0.0`, as in PHP. Without `strict: true`, the needle must be an `int`, a `float`, a `bool` or an enum case. |
+| `$a === $b`, `!==`, `match ($list)` on lists of `int`, `bool`, `string`, enum cases and their nullable versions | The same count, and identical elements in the same order. |
+| passing a list to a method of the same file, returning it, a list in a property or in an array shape | The element type must be the same on both sides. |
+
+Not supported, each with a message that says what to write instead:
+
+| Rejected | Why |
+|---|---|
+| `foreach` and every loop | Termination cannot be established. Read the list with `count()`, `$list[$i]` and `in_array()`. |
+| `$list[$i] = $x`, `unset($list[$i])`, `[$a, $b] = $list` | A write at an index can create a key out of order, `unset()` leaves a gap, and destructuring is not modelled. Only `$list[] = $x` is. |
+| `$items[] = $x` on a parameter | PHP appends at the next free key, which can be past `count($items)` after an `unset()` by the caller. Write `$items = [...$items, $x]`, which always builds a list. |
+| `list<list<int>>`, `list<float\|string>`, `array<string, int>` | A list of lists, a union element type and arbitrary keys are not modelled. |
+| `list<float>` as an input | PHPStan accepts an `int` where the list declares a `float`, and PHP does not convert it. A list of floats can be built in the method and returned. |
+| `$a == $b`, `$a < $b` on arrays | Loose equality juggles every element (`[1] == [true]`), and ordering compares by count, then key by key. |
+| `$a === $b` on lists of floats, of data classes or of shapes | PHP compares identical arrays by reference first, so `[NAN] === [NAN]` is false, and it compares objects by identity. |
+| `array_sum()`, `array_map()`, `sort()` and the other array functions | Only `count()` and `in_array()` are supported. |
+
+### Real list bugs
+
+An order is a list of line amounts. Reading one of them by index is safe only when the index is a key of the list:
+
+```php
+/**
+ * Amount of the line at $index, or 0 when there is no such line.
+ *
+ * @param list<int<0, 10000000>> $amounts
+ */
+#[Ensures('$result >= 0')]
+public static function lineAmount(array $amounts, int $index): int
+{
+    if ($index >= 0 && $index < count($amounts)) {
+        return $amounts[$index];
+    }
+
+    return 0;
+}
+```
+
+The version above is proven. This one has the usual off-by-one in the guard:
+
+```php
+/**
+ * The off-by-one of the guard: when $index equals count($amounts), the key
+ * does not exist, PHP emits a warning and reads null.
+ *
+ * @param list<int<0, 10000000>> $amounts
+ */
+#[Ensures('$result >= 0')]
+public static function lineAmountBroken(array $amounts, int $index): int
+{
+    if ($index >= 0 && $index <= count($amounts)) {
+        return $amounts[$index];
+    }
+
+    return 0;
+}
+```
+
+```
+OrderLines.php:39: `$amounts[$index]` can read a key that does not exist: PHP raises the warning "Undefined array key" and yields null.
+Guard the read with `$index >= 0 && $index < count($amounts)` or `isset($amounts[$index])`, or state the range with #[Requires].
+Counterexample: $amounts = [], $index = 0.
+```
+
+A `non-empty-list` has a first element, so `$amounts[0]` needs no guard. Without the declaration, or in a contract that reads `$result[0]` from a method that can return `[]`, the read is reported.
+
+Building a list is checked against its declared type. A method that appends an amount without validating it can return a list that its PHPDoc excludes:
+
+```php
+/**
+ * Appends without checking the amount: a negative or too large one ends up in
+ * the list, which the declared element range does not allow.
+ *
+ * @param list<int<0, 10000000>> $amounts
+ * @return list<int<0, 10000000>>
+ */
+#[Ensures('count($result) === count($amounts) + 1')]
+public static function withLineBroken(array $amounts, int $amount): array
+{
+    return [...$amounts, $amount];
+}
+```
+
+```
+OrderLines.php:81: The returned value can violate the declared return type `list<int<0, 10000000>>`.
+Counterexample: $amounts = [], $amount = 10000001 => $result = [10000001] (return at line 83).
+```
+
+The version that appends only a valid amount, and states that the list grows by at most one element, is proven:
+
+```php
+/**
+ * Adds a line when its amount is valid, and keeps the order unchanged otherwise.
+ *
+ * @param list<int<0, 10000000>> $amounts
+ * @return list<int<0, 10000000>>
+ */
+#[Ensures('count($result) <= count($amounts) + 1')]
+#[Ensures('count($result) >= count($amounts)')]
+public static function withLine(array $amounts, int $amount): array
+{
+    if ($amount >= 0 && $amount <= 10000000) {
+        return [...$amounts, $amount];
+    }
+
+    return $amounts;
+}
+```
+
+Searching a list with `in_array($sku, $blockedSkus, true)` is proven against `implies(count($blockedSkus) === 0, !$result)` in [`OrderLines.php`](../examples/RealWorld/OrderLines.php).
+
+A counterexample prints a list as the PHP literal one would write, `[10000001]`. A list longer than ten elements is printed as `a list of 28224 elements starting with [...]`, but the prover first looks for a shorter one, so this form is rare.
+
+## Array shapes
+
+An array shape, `array{net: int, vat: int}`, is a PHP array with these string keys and values of these types. It is the lightweight cousin of a [data class](#readonly-data-classes): a function can return two related numbers without declaring a class. The prover sees a record with one field per key.
+
+| Supported | Notes |
+|---|---|
+| a parameter, a return type or a property of type `array{...}` | A range on a field, such as `array{net: int<0, 100>}`, is an assumption on an input and something the method must honour on a returned shape. |
+| `$shape['net']` with a string literal key of the shape | The value, with no warning, since the type requires the key. Inside an attribute, write the key with double quotes: `$result["net"]`. |
+| `$shape['net'] ?? $default`, `isset($shape['note'])` | For a nullable field. |
+| a literal `['net' => $net, 'vat' => $vat]` | The order of the keys is not observable through any supported construct, so a literal may list them in another order than the type. A literal can be returned, passed to a method of the same file, or put in a property. |
+| a shape inside a list, a list inside a shape, a shape in a data class | Reading through a list element, such as `$lines[$i]['net'] ?? 0`, is rejected: PHP treats a missing element in the middle of the chain as unset. |
+
+| Rejected | Why |
+|---|---|
+| `$shape['gross']` for a key the type does not have, `$shape[$key]` | The key must be a string literal naming one of the keys. |
+| `$shape['net'] = $x`, `$shape[] = $x`, `unset($shape['net'])` | A shape is not modified: build a new literal. |
+| `$a === $b` on two shapes | PHP also compares the order of the keys and any extra keys, which the type does not fix. Compare the fields. |
+| `count($shape)`, `in_array($x, $shape)` | The type does not rule out extra keys. |
+| `array{net: int, vat?: int}`, `array{int, string}`, `array{}` | Optional keys, int keys and the empty shape are not modelled. |
+| `array{rate: float}` as an input | PHPStan accepts an `int` where a field declares a `float`, and PHP does not convert it. Use cents, or a data class with a native `float` property. A shape of floats can be built and returned. |
+| keys such as `'1'` in a literal | PHP converts them to int keys. |
+
+### Real array shape bugs
+
+Splitting a gross amount into a net part and its VAT is a classic way to lose a cent. When the VAT is what is left once the net part is known, the two always add up:
+
+```php
+/**
+ * Splits a gross amount into its net part and its VAT. The VAT is what is left
+ * once the net part is known, so the two parts always add up to the gross amount.
+ *
+ * @param int<0, 100000000> $grossCents
+ * @param int<0, 10000> $rateBasisPoints
+ * @return array{net: int, vat: int}
+ */
+#[Ensures('$result["net"] + $result["vat"] === $grossCents')]
+#[Ensures('$result["vat"] >= 0')]
+public static function split(int $grossCents, int $rateBasisPoints): array
+{
+    $net = intdiv($grossCents * 10000, 10000 + $rateBasisPoints);
+
+    return ['net' => $net, 'vat' => $grossCents - $net];
+}
+```
+
+Computing both parts with a rounded-down division loses the remainder of each:
+
+```php
+/**
+ * Computes both parts with a rounded-down division: each one loses the
+ * remainder of its own division, so a cent can vanish.
+ *
+ * @param int<0, 100000000> $grossCents
+ * @param int<0, 10000> $rateBasisPoints
+ * @return array{net: int, vat: int}
+ */
+#[Ensures('$result["net"] + $result["vat"] === $grossCents')]
+public static function splitBroken(int $grossCents, int $rateBasisPoints): array
+{
+    $net = intdiv($grossCents * 10000, 10000 + $rateBasisPoints);
+    $vat = intdiv($grossCents * $rateBasisPoints, 10000 + $rateBasisPoints);
+
+    return ['net' => $net, 'vat' => $vat];
+}
+```
+
+```
+VatSplit.php:40: Postcondition #[Ensures('$result["net"] + $result["vat"] === $grossCents')] can be violated.
+Counterexample: $grossCents = 2, $rateBasisPoints = 1 => $result = ['net' => 1, 'vat' => 0] (return at line 46).
+```
+
+A shape can also be an input. The share of the VAT in a gross amount needs the amount not to be zero, which is a `#[Requires]` on the fields:
+
+```php
+/**
+ * Share of the VAT in the gross amount, as a percentage rounded down.
+ *
+ * @param array{net: int<0, 100000000>, vat: int<0, 100000000>} $split
+ */
+#[Requires('$split["net"] + $split["vat"] > 0')]
+#[Ensures('$result >= 0 && $result <= 100')]
+public static function vatShare(array $split): int
+{
+    return intdiv($split['vat'] * 100, $split['net'] + $split['vat']);
+}
+```
+
+A counterexample prints a shape as the PHP literal, with its keys in the order of the declared type: `['net' => 1, 'vat' => 0]`.

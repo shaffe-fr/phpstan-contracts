@@ -76,7 +76,7 @@ Because those laws single out one quotient and one remainder, the proof shows th
 
 ### Why not more
 
-Of all the methods of `src/`, one has only scalar parameters and a scalar result: a private helper that tests for a space in a string. The package is a compiler. Its code builds strings, arrays and objects, which is what the verified subset leaves out: no arrays, no calls to methods of other files, a handful of string functions, no bitwise operators. So most of the tests stay, for a reason that depends on what they check:
+Of all the methods of `src/`, one has only scalar parameters and a scalar result: a private helper that tests for a space in a string. The package is a compiler. Its code builds strings, arrays and objects, which is what the verified subset leaves out: no arrays with arbitrary keys, no loops over lists, no calls to methods of other files, a handful of string functions, no bitwise operators. So most of the tests stay, for a reason that depends on what they check:
 
 | Tests | Could a contract replace them? |
 |---|---|
@@ -100,6 +100,8 @@ Two things would let more tests be replaced. Modular verification, the first ite
 - `int` to `float` conversion, which rounds for integers beyond 2^53, and `(int)` of a float, which truncates.
 - Every one of the 256 byte values as a one-character string, and `strlen`, prefix, suffix, containment and concatenation on strings with NUL bytes and non-ASCII bytes.
 - `int` to `string` conversion, on both ends of the `int` range and on random values.
+- Lists, against PHP arrays built from the same random values (ints at both ends of the range, strings with NUL and non-ASCII bytes, floats with `NAN`, both zeros and infinities, nullables, empty lists): `count()`, `$list[$k]` and `$list[] = $x` followed by a read of every key, the copy that an append leaves alone, `isset()` and `??` on elements that hold `null`, `[...$a, ...$b]`, `in_array()` strict and loose, and `===` between two lists. The quantified terms are not reduced by `simplify`, so each expectation is checked as a negated assertion that must be `unsat`.
+- Array shapes, field reads against the PHP array that the literal builds.
 
 The random values come from a fixed seed, so a failure is reproducible.
 
@@ -128,9 +130,9 @@ Each fixture that guards a past false proof runs the construct that was proven w
 1. PHP returns exactly the `$result` that the message announces.
 2. The contract is false in PHP for those values.
 
-The other diagnostics with a counterexample are replayed too. An overflow must make PHP throw a `TypeError`, since the result of an `int` method becomes a float. A `throw` that no `#[Throws]` allows must make PHP throw an exception that the declarations, evaluated in PHP, do not allow. A broken `#[Throws]` must see PHP return the announced value although its condition holds. A broken precondition of a called method is evaluated on the reported inputs, which the fixture passes to the callee under the same names.
+The other diagnostics with a counterexample are replayed too. An overflow must make PHP throw a `TypeError`, since the result of an `int` method becomes a float. A `throw` that no `#[Throws]` allows must make PHP throw an exception that the declarations, evaluated in PHP, do not allow. A broken `#[Throws]` must see PHP return the announced value although its condition holds. A broken precondition of a called method is evaluated on the reported inputs, which the fixture passes to the callee under the same names. A `contracts.undefinedKey` is replayed under an error handler that turns `E_WARNING` into an exception: PHP must raise `Undefined array key` on the reported list and index. The replay runs on the counterexample that is printed, so a list longer than ten elements, which the prover first tries to shorten, would fail the replay instead of passing unnoticed.
 
-This is the check that matters most to a user: a counterexample that does not reproduce would send them after a bug that does not exist. The replay covers integers, floats (including `NAN`), strings (including non-ASCII bytes and strings built from ints), booleans, nullable values and enums, `in_array()`, calls to methods of the same file, and calls an enum instance method on the case that the message gives as `$this`.
+This is the check that matters most to a user: a counterexample that does not reproduce would send them after a bug that does not exist. The replay covers integers, floats (including `NAN`), strings (including non-ASCII bytes and strings built from ints), booleans, nullable values and enums, lists and array shapes (parsed from the printed literal, without `eval`, and compared with the `NAN` rule), `in_array()`, calls to methods of the same file, and calls an enum instance method on the case that the message gives as `$this`.
 
 ## Does the suite catch bugs?
 

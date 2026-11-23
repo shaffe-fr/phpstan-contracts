@@ -33,7 +33,7 @@ A unit test checks a handful of examples. A proof covers every input in the decl
 
 ## What it does not do (yet)
 
-The verified subset is deliberately small. There are no loops, no calls to methods of other files, no arrays and no mutable objects, and the extension only checks that callers respect a method's `#[Requires]` for calls within a file. Floating-point multiplication of two variables is often too slow to decide. See [Limits and roadmap](limits-and-roadmap.md) for the full list and for which limits come from mathematics and which are simply not built yet.
+The verified subset is deliberately small. There are no loops, no calls to methods of other files, no arrays other than lists and array shapes with string keys, and no mutable objects, and the extension only checks that callers respect a method's `#[Requires]` for calls within a file. Floating-point multiplication of two variables is often too slow to decide. See [Limits and roadmap](limits-and-roadmap.md) for the full list and for which limits come from mathematics and which are simply not built yet.
 
 ## Documentation
 
@@ -41,8 +41,8 @@ The verified subset is deliberately small. There are no loops, no calls to metho
 |---|---|
 | [Getting started](getting-started.md) | install Z3 and the extension, run your first proof, configure the timeout |
 | [Writing contracts](writing-contracts.md) | learn the attributes, the contract language, the supported PHP subset and every diagnostic |
-| [Supported types](types.md) | see what each type can do (`float`, `string`, nullables, enums, data classes), with real bugs |
-| [Real-world examples](real-world-examples.md) | see twenty-two business rules proved or refuted, with the bugs the prover found |
+| [Supported types](types.md) | see what each type can do (`float`, `string`, nullables, enums, data classes, lists, array shapes), with real bugs |
+| [Real-world examples](real-world-examples.md) | see twenty-four business rules proved or refuted, with the bugs the prover found |
 | [How it works](how-it-works.md) | understand the SSA translation, the safety obligations and the Z3 protocol |
 | [Limits and roadmap](limits-and-roadmap.md) | know what a green run guarantees, and what is next |
 | [Testing](testing.md) | run the test suite, add a case, and see what each suite guarantees |

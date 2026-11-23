@@ -52,12 +52,12 @@ No new language to learn, no test data to invent, no framework to adopt. Rules a
 
 - **Design by Contract** (Bertrand Meyer, Eiffel): `#[Requires]` is a *precondition*, `#[Ensures]` a *postcondition*. The method and its callers agree on a contract.
 - **Static verification / formal verification**: contracts are checked at analysis time, without running the code. This is the same family as Dafny, Frama-C, SPARK Ada, Liquid Haskell and JML/OpenJML, brought to PHP as a PHPStan extension.
-- **SMT solving**: the method body is translated to SMT-LIB (satisfiability modulo theories: integer arithmetic, IEEE 754 floating point, strings, enumerations and algebraic datatypes for data classes) and sent to the Z3 solver. The extension asks whether the negation of the contract is satisfiable.
+- **SMT solving**: the method body is translated to SMT-LIB (satisfiability modulo theories: integer arithmetic, IEEE 754 floating point, strings, arrays with a length for lists, enumerations and algebraic datatypes for data classes and array shapes) and sent to the Z3 solver. The extension asks whether the negation of the contract is satisfiable.
   - `unsat`: no input violates the contract. The contract is *proven* and nothing is reported.
   - `sat`: the model returned by Z3 is a *counterexample*, shown with the parameter values, the result and the `return` that produced it.
   - `unknown` or timeout: reported as `contracts.unknown`, never treated as a pass.
 - **SSA translation and symbolic execution**: branches, `match` and local variables are put in static single assignment form, so every path is covered at once instead of being sampled.
-- **Verification conditions and safety obligations**: besides your contracts, every arithmetic operation generates proof obligations: no integer overflow, no division by zero, no `UnhandledMatchError`, no missing `return`.
+- **Verification conditions and safety obligations**: besides your contracts, every arithmetic operation generates proof obligations: no integer overflow, no division by zero, no `UnhandledMatchError`, no read of a missing list key, no missing `return`.
 - **Refinement types for parameters**: PHPDoc ranges such as `int<1, 1000>` define the input domain, which acts like a refinement type on the parameter.
 - **Property-based testing, but exhaustive**: a contract is a property like in QuickCheck or Pest's datasets, except that the solver covers the whole domain instead of random samples.
 
@@ -193,9 +193,10 @@ The verified subset is small on purpose, so that the answer is a real proof and 
 - `float`, modelled exactly as IEEE 754: the prover knows that `0.1 + 0.2 !== 0.3`, and that regrouping a sum changes the result
 - `if` / `elseif` / `else`, `match`, early `return`, local variables, null checks that narrow the type, and guards that throw, declared with `#[Throws(E::class, when: '...')]` (a `throw` that nothing declares must be unreachable, as in the `default` arm of an exhaustive `match`)
 - enum and value-object code as it is usually written: `self::Case`, class constants, `$this` in the methods of enums (`match ($this)`) and readonly data classes, and calls to other methods of the same file, such as `$this->level() <= $other->level()` or a static helper whose `#[Requires]` is checked at the call
-- arithmetic, comparisons, `min`, `max`, `abs`, `intdiv`, `in_array` over a list of cases or scalars (`strict: true` for strings), and the common string checks (length, prefix, suffix, containment, concatenation, with an `int` written in decimal in `.`, interpolation and `(string)`)
+- `list<T>` and array shapes such as `array{net: int, vat: int}`, as parameters, results and properties: `count()`, `$list[$i]` with a proof that the key exists (`contracts.undefinedKey`), `$shape['net']`, literals, `[...$list, $x]`, appending to a list built in the method, `===` on lists, and element ranges such as `list<int<0, 100>>` as assumptions on inputs and goals on results
+- arithmetic, comparisons, `min`, `max`, `abs`, `intdiv`, `in_array` over a list of cases or scalars, or over a `list<T>` (`strict: true` for strings), and the common string checks (length, prefix, suffix, containment, concatenation, with an `int` written in decimal in `.`, interpolation and `(string)`)
 
-Not yet: loops, `try`/`catch`, calls to methods of other files and `new` of classes whose constructor is in another file, arrays and lists (other than the list of `in_array()`), mutable state (the state of a framework base class can stay in a data class, but a verified method cannot read it), and `float` or `bool` in a string. Anything outside the subset is reported as `contracts.unsupported` with the reason, never silently skipped. Floating-point multiplication of two variables can be too slow to decide, so money is better kept as integer cents and rates as basis points. See [Supported types](docs/types.md) for what each type can do, and [Limits and roadmap](docs/limits-and-roadmap.md) for what a green run guarantees and what comes next.
+Not yet: loops (so `foreach` and the array functions such as `array_sum()` or `array_map()`), `try`/`catch`, calls to methods of other files and `new` of classes whose constructor is in another file, arrays with arbitrary keys (`array<string, int>`), lists of lists and union element types such as `list<float|string>`, mutable state (the state of a framework base class can stay in a data class, but a verified method cannot read it), and `float` or `bool` in a string. Anything outside the subset is reported as `contracts.unsupported` with the reason, never silently skipped. Floating-point multiplication of two variables can be too slow to decide, so money is better kept as integer cents and rates as basis points. See [Supported types](docs/types.md) for what each type can do, and [Limits and roadmap](docs/limits-and-roadmap.md) for what a green run guarantees and what comes next.
 
 ## Learn more
 
@@ -203,8 +204,8 @@ Not yet: loops, `try`/`catch`, calls to methods of other files and `new` of clas
 |---|---|
 | [Getting started](docs/getting-started.md) | Install, first proof, configuration |
 | [Writing contracts](docs/writing-contracts.md) | The attributes, the contract language, every diagnostic |
-| [Supported types](docs/types.md) | `int`, `float`, `string`, enums, nullables, data classes, with the real bugs found in each |
-| [Real-world examples](docs/real-world-examples.md) | Pagination, VAT, installments, workflows, rate limits, uploads, checkout and more: twenty-two rules, each with the bug the prover found |
+| [Supported types](docs/types.md) | `int`, `float`, `string`, enums, nullables, data classes, lists, array shapes, with the real bugs found in each |
+| [Real-world examples](docs/real-world-examples.md) | Pagination, VAT, installments, workflows, rate limits, uploads, checkout and more: twenty-four rules, each with the bug the prover found |
 | [How it works](docs/how-it-works.md) | From PHP to SMT-LIB to Z3 |
 | [Limits and roadmap](docs/limits-and-roadmap.md) | What is guaranteed, what is next |
 
@@ -216,7 +217,7 @@ php bin/phpstan-contracts-install-z3
 vendor/bin/phpstan analyse
 ```
 
-The run reports 63 errors, all intended: 59 from this extension (the examples that show a refuted rule, an undecided one or a rejected construct) and 4 from PHPStan's own rules on the deliberately broken methods (`argument.type` twice, `return.missing`, `match.unhandled`). It takes about a minute and a half with a cold cache. Every other annotated method is proven.
+The run reports 68 errors, all intended: 63 from this extension (the examples that show a refuted rule, an undecided one or a rejected construct) and 5 from PHPStan's own rules on the deliberately broken methods (`argument.type` twice, `return.missing`, `return.type`, `match.unhandled`). It takes about a minute and a half with a cold cache. Every other annotated method is proven.
 
 ## Status
 

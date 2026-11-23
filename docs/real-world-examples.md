@@ -1,6 +1,6 @@
 # Real-world examples
 
-Twenty-two business rules of the kind found in shops, booking engines and APIs. Each one is real code in [`examples/RealWorld`](../examples/RealWorld), checked by `phpstan analyse` with this extension. Sections 1 to 8 use integers, booleans and enums. [Section 9](#9-the-same-rules-over-richer-types) covers data classes, strings, floats, nullable values, enum methods, class constants, calls, `in_array()` and guards that throw, which the [types page](types.md) shows in detail. The code blocks below are copied from those files with the prose descriptions of the docblocks left out, and the outputs are the actual diagnostics, shown with `--error-format=raw` and shortened paths.
+Twenty-four business rules of the kind found in shops, booking engines and APIs. Each one is real code in [`examples/RealWorld`](../examples/RealWorld), checked by `phpstan analyse` with this extension. Sections 1 to 8 use integers, booleans and enums. [Section 9](#9-the-same-rules-over-richer-types) covers data classes, strings, floats, nullable values, enum methods, class constants, calls, `in_array()`, guards that throw, lists and array shapes, which the [types page](types.md) shows in detail. The code blocks below are copied from those files with the prose descriptions of the docblocks left out, and the outputs are the actual diagnostics, shown with `--error-format=raw` and shortened paths.
 
 Each section follows the same arc: the rule, the contract that states it, what the prover established, and a plausible bug it caught.
 
@@ -16,7 +16,7 @@ Each section follows the same arc: the rule, the contract that states it, what t
 | 6 | Shipping fee | 2 | 1 proven, 1 refuted |
 | 7 | Rate limiting | 3 | 2 proven, 1 refuted (two ways) |
 | 8 | Calendar | 3 | 2 proven, 1 refuted |
-| 9 | Richer types: data classes, strings, floats, nullables, enum parsing, enum methods, class constants, calls, `in_array()`, guards that throw | 56 | 32 proven, 24 refuted |
+| 9 | Richer types: data classes, strings, floats, nullables, enum parsing, enum methods, class constants, calls, `in_array()`, guards that throw, lists, array shapes | 65 | 38 proven, 27 refuted |
 
 ## 1. Pagination
 
@@ -559,7 +559,7 @@ public static function daysInMonth(int $year, int $month): int
 
 ## 9. The same rules over richer types
 
-Real signatures are rarely just integers. The rules below use the types that sections 1 to 8 did not: readonly data classes, strings, floats, nullable values and string-backed enums, and the way enums and value objects are usually written, with `self::`, class constants, `$this`, calls to their own methods, `in_array()` and guards that throw. Each row is a file of `examples/RealWorld`, and the [types page](types.md) shows the code and the diagnostics of every one.
+Real signatures are rarely just integers. The rules below use the types that sections 1 to 8 did not: readonly data classes, strings, floats, nullable values and string-backed enums, and the way enums and value objects are usually written, with `self::`, class constants, `$this`, calls to their own methods, `in_array()`, guards that throw, lists and array shapes. Each row is a file of `examples/RealWorld`, and the [types page](types.md) shows the code and the diagnostics of every one.
 
 | Rule | File | What it exercises | Methods | Result | The bug the prover found |
 |---|---|---|---|---|---|
@@ -577,12 +577,14 @@ Real signatures are rarely just integers. The rules below use the types that sec
 | [Roles that manage each other](writing-contracts.md#calls-to-other-methods) | `UserRole.php` | an enum calling its own method, `in_array()` over cases and over a constant | 5 | 3 proven, 2 refuted | `<` stops a role from managing its own level; the constant of prescribers forgets the validator |
 | [Delivery labels](types.md#string) | `DeliveryLabel.php` | an int in `.`, in an interpolation and in `(string)`; a static helper with a `#[Requires]` checked at the call | 6 | 4 proven, 2 refuted | "Ships in 1 days"; a guard of `>= 1` calls a helper that needs `>= 2` |
 | [A DTO of a data framework](types.md#readonly-data-classes) | `PriceContext.php` | a data class extending a base class with protected mutable state | 2 | 1 proven, 1 refuted | the bulk discount starts at eleven items. A third method, which reads the base state, is rejected with `contracts.unsupported` |
+| [Splitting a gross price into net and VAT](types.md#real-array-shape-bugs) | `VatSplit.php` | an array shape as a result and as an input, `$result["net"]` in a contract | 3 | 2 proven, 1 refuted | two rounded-down divisions lose a cent: 2 cents split at a rate of 1 basis point add up to 1 |
+| [The lines of an order](types.md#real-list-bugs) | `OrderLines.php` | `list<T>`, `count()`, reads by index, `[...$list, $x]`, `in_array()` over a list | 6 | 4 proven, 2 refuted | a guard with `<=` reads the key that does not exist; an appended amount outside the declared range |
 
 Two of them are worth reading first. The checkout shows a rule over an object graph, with a nullable object inside a cart, which is the shape of most real signatures. The float page shows bugs that no unit test with ordinary values finds, such as a regrouped sum that differs in the last bit.
 
 ## Structuring real code for verification
 
-A verified method cannot read an entity or call a repository: it has no mutable objects, no arrays and no calls outside its own file. That is by design, and it suggests a shape for the code: **extract the rule into a small static method that takes scalars, enums, nullable values or small readonly data classes, and keep the glue in the service.**
+A verified method cannot read an entity or call a repository: it has no mutable objects, no loops over arrays and no calls outside its own file. That is by design, and it suggests a shape for the code: **extract the rule into a small static method that takes scalars, enums, nullable values or small readonly data classes, and keep the glue in the service.**
 
 ```php
 // Application code: not verified. It adapts the domain model to the pure rule.
