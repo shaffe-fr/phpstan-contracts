@@ -133,7 +133,7 @@ A contract on a method without a body, in an interface or on an abstract method,
 | `$items[] = $x` where `$items` is a parameter, or a copy of one | `Appending to $items, a list received from outside the method, is not supported: PHP appends at the array's next free key, which can be past count($items) after an unset() by the caller, so the result may not be a list. Write $items = [...$items, $value] instead, which always builds a list.` |
 | `$l[] = $x` on a variable that is not defined yet | `Appending to $missing, which is not defined at this point, would create an array; start with $missing = [].` |
 | `$shape[] = $x` | `Appending to an array shape is not supported: build a new shape literal.` |
-| `[$a, $b] = $list`, `list($a, $b) = $list` | `Destructuring ([$a, $b] = ...) is not supported: read the elements with $list[0] and $list[1].` |
+| `[$a, $b] = $list`, `list($a, $b) = $list` | `Destructuring ([$a, $b] = ...) is not supported: read the elements with $list[0] and $list[1], or with their key, such as $shape['net'].` |
 | `unset($list[$i])` | `unset() is not supported: removing an element leaves a gap in the keys of a list, which is then no longer a list. Build the list without that element, with a literal or with $list[] = $value.` |
 | a bare `return;` | `A bare return is not supported: verified methods must return a value.` |
 | a variable that changes type | `Variable $x changes type from int to bool.` |
@@ -200,16 +200,16 @@ Everything in the table in [the contract language](#the-contract-language) works
 | a union element type, `list<float\|string>` | `Type list<float\|string> is not supported in verified methods: its elements have type float\|string, and a list must hold a single supported type (int, bool, float, string, an enum, a readonly data class, an array shape, or a nullable version of these).` |
 | a list of lists, `list<list<int>>` | `Type list<list<int>> is not supported yet: a list of lists is not modelled. Use a list of data classes or of array shapes.` |
 | an optional key, `array{net: int, vat?: int}` | `Type array{net: int, vat?: int} is not supported: the optional key vat may be missing, which is not modelled. Make the key required, with a nullable value if it can be absent.` |
-| a tuple or an int key, `array{int, string}` | `Type array{int, string} is not supported: array shapes are only supported with string keys. Use array{amount: int, label: string}, a list, or a data class.` |
+| a tuple or an int key, `array{int, string}` | `Type array{int, string} is not supported: array shapes are only supported with string keys. Use array{amount: int, label: string} or a data class.` |
 | the empty shape `array{}` | `Type array{} is not supported: declare list<T> for a list that may be empty.` |
 | a list or a shape of floats as an input | `Type list<float> is not supported for an input: PHP does not convert the values of an array and PHPStan accepts an int for a float in a list, so an element may hold an int. Use int (for example cents) or a list of data classes with a native float property.` |
 | an array literal with int keys, or with string keys that PHP converts to ints, such as `'1'` | `Integer keys, and string keys that PHP converts to integers such as '1', are not supported in array literals: write a list without keys, or use non-numeric string keys.` |
 | a literal mixing keys and no keys, `[1, 'a' => 2]` | `An array literal is either a list without keys, such as [1, 2], or a shape with string keys, such as ['net' => 1]; mixing the two is not supported.` |
 | a duplicate key in a literal | `Key 'net' appears twice in this array literal; PHP keeps the last value. Write it once.` |
-| elements of different types, `[1, 'a']`, `[1, 2.0]` | `The elements of this list have different types (int and string); a list must hold a single type. Convert the elements first, such as (float) $x.` |
+| elements of different types, `[1, 'a']`, `[1, 2.0]` | `The elements of this list have different types (int and string); a list must hold a single type. Convert the elements first, such as (float) $x, or use an array shape with a key per value.` |
 | a nested list literal `[[1], [2]]` | `A list of lists is not supported yet: nested lists are not modelled. Use a list of data classes or of array shapes.` |
 | `[...$shape]`, a spread of anything but a list | `Only a list<T> can be spread in a list literal, not `$shape` (array{net: int, vat: int}): PHP keeps the keys of other arrays, which are not 0..n-1. Spread a list, or build the array with its keys.` |
-| `$list['a']`, `$list[$float]`, `$list[$nullable]` | `The index of a list must be an int, not a string: PHP converts some strings and floats to int keys, which is not modelled.` |
+| `$list['a']`, `$list[$float]`, `$list[$nullable]` | `The index of a list must be an int, not a string: PHP converts some strings and floats to int keys, which is not modelled. Use an int index; for a float, check it and cast it with (int).` |
 | `$shape[$k]` with a key that is not a literal | `The key of an array shape must be a string literal naming one of its keys, such as $totals['net'].` |
 | `$shape['gross']` for a key the shape does not have | `array{net: int, vat: int} has no key 'gross'; its keys are 'net' and 'vat'.` |
 | `$shape->net` | `An array shape is read with ['net'], not ->net.` |
