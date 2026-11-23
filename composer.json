@@ -36,7 +36,10 @@
         "psr-4": {
             "PhpstanContracts\\Examples\\": "examples/",
             "PhpstanContracts\\Tests\\": "tests/"
-        }
+        },
+        "classmap": [
+            "tests/Fixtures/GlobalConstants.php"
+        ]
     },
     "extra": {
         "phpstan": {

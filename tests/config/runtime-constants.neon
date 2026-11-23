@@ -1,0 +1,3 @@
+parameters:
+	bootstrapFiles:
+		- ../Fixtures/RuntimeConstants.php

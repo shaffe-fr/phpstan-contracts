@@ -31,6 +31,82 @@ enum FloatLabel: string
     case Half = 'half';
 }
 
+enum GlobalLabel: string
+{
+    case Printed = PRINTED;
+    case Plain = 'plain';
+}
+
+/**
+ * A global constant is evaluated where it is defined, so its initializer is checked for a
+ * float turned into a string, like the initializer that reads it. The constants are in
+ * GlobalConstants.php and RuntimeConstants.php.
+ */
+final class GlobalConstantInitializers
+{
+    public const LABEL = PRINTED;
+
+    public const SUFFIXED = PRINTED . '';
+
+    public const SHORT = PRINTS_SHORT;
+
+    public const DEFINED = \PRINTED_BY_DEFINE;
+
+    public const WEEK = SEVEN;
+
+    public const PREFIX = NUMBERED_PREFIX;
+
+    public const RUNTIME = DEFINED_AT_RUNTIME;
+
+    #[Ensures('$result === "v0.3"')]
+    public static function readsAGlobalConstantThatPrintsAFloat(): string
+    {
+        return self::LABEL;
+    }
+
+    #[Ensures('$result === "v0.3"')]
+    public static function concatenatesAGlobalConstantThatPrintsAFloat(): string
+    {
+        return self::SUFFIXED;
+    }
+
+    #[Ensures('$result === true')]
+    public static function readsABoolThatComparesAPrintedFloat(): bool
+    {
+        return self::SHORT;
+    }
+
+    #[Ensures('$result === "v0.3"')]
+    public static function readsAConstantDefinedByDefine(): string
+    {
+        return self::DEFINED;
+    }
+
+    #[Pure]
+    public static function readsTheValueOfAnEnumCaseSetByAGlobalConstant(GlobalLabel $label): string
+    {
+        return $label->value;
+    }
+
+    #[Ensures('$result === 7')]
+    public static function readsAGlobalIntConstant(): int
+    {
+        return self::WEEK;
+    }
+
+    #[Ensures('$result === "v7"')]
+    public static function readsAGlobalConstantThatPrintsAnInt(): string
+    {
+        return self::PREFIX;
+    }
+
+    #[Ensures('$result === "v3"')]
+    public static function readsAConstantOnlyKnownAtRuntime(): string
+    {
+        return self::RUNTIME;
+    }
+}
+
 /**
  * PHPStan folds a constant in its own process. The folded value is wrong when reading
  * the constant triggers a deprecation (from PHP 8.4 on, the error handler runs and may

@@ -8,11 +8,22 @@ use PhpstanContracts\Tests\Fixtures\AnnotatedFinal;
 use PhpstanContracts\Tests\Fixtures\ConstantFixture;
 use PhpstanContracts\Tests\Fixtures\ConstantInitializers;
 use PhpstanContracts\Tests\Fixtures\ConstantOutsider;
+use PhpstanContracts\Tests\Fixtures\GlobalConstantInitializers;
 use PhpstanContracts\Tests\Fixtures\LateBinding;
 use PhpstanContracts\Tests\Support\RuleFixtureTestCase;
 
 final class ConstantRuleTest extends RuleFixtureTestCase
 {
+    /**
+     * A bootstrap file of PHPStan defines a constant that only exists at runtime.
+     *
+     * @return list<string>
+     */
+    public static function getAdditionalConfigFiles(): array
+    {
+        return [...parent::getAdditionalConfigFiles(), __DIR__ . '/../config/runtime-constants.neon'];
+    }
+
     public function testClassConstants(): void
     {
         $this->assertOutcomes([
@@ -85,6 +96,16 @@ final class ConstantRuleTest extends RuleFixtureTestCase
                 'searchesAListWithAFloatLabel' => ['contracts.unsupported: An initializer in PhpstanContracts\Tests\Fixtures\ConstantInitializers converts a float to a string'],
                 'concatenatesAnIntInAConstant' => [],
                 'readsTheValueOfAnEnumWithAFloatLabel' => ['contracts.unsupported: ->value of FloatLabel is not supported: An initializer in PhpstanContracts\Tests\Fixtures\FloatLabel converts a float to a string'],
+            ],
+            GlobalConstantInitializers::class => [
+                'readsAGlobalConstantThatPrintsAFloat' => ['contracts.unsupported: The initializer of constant PhpstanContracts\Tests\Fixtures\PRINTED converts a float to a string, whose digits depend on the precision ini setting, which is not modelled.'],
+                'concatenatesAGlobalConstantThatPrintsAFloat' => ['contracts.unsupported: The initializer of constant PhpstanContracts\Tests\Fixtures\PRINTED converts a float to a string'],
+                'readsABoolThatComparesAPrintedFloat' => ['contracts.unsupported: The initializer of constant PhpstanContracts\Tests\Fixtures\PRINTS_SHORT converts a float to a string'],
+                'readsAConstantDefinedByDefine' => ['contracts.unsupported: The initializer of constant PRINTED_BY_DEFINE converts a float to a string'],
+                'readsTheValueOfAnEnumCaseSetByAGlobalConstant' => ['contracts.unsupported: ->value of GlobalLabel is not supported: The initializer of constant PhpstanContracts\Tests\Fixtures\PRINTED converts a float to a string'],
+                'readsAGlobalIntConstant' => [],
+                'readsAGlobalConstantThatPrintsAnInt' => [],
+                'readsAConstantOnlyKnownAtRuntime' => ['contracts.unsupported: The initializer of constant PhpstanContracts\Tests\Fixtures\DEFINED_AT_RUNTIME cannot be checked for a float converted to a string: no file defines it.'],
             ],
         ]);
     }

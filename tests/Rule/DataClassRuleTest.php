@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace PhpstanContracts\Tests\Rule;
 
+use PhpstanContracts\Tests\Fixtures\ClassNameCase;
 use PhpstanContracts\Tests\Fixtures\Construction;
 use PhpstanContracts\Tests\Fixtures\DataClassFixture;
 use PhpstanContracts\Tests\Fixtures\Initialization;
@@ -63,6 +64,17 @@ final class DataClassRuleTest extends RuleFixtureTestCase
                 'isBulk' => [],
                 'buildsAnObjectWithInheritedState' => [],
                 'readsInheritedState' => ['contracts.unsupported: Property PhpstanContracts\Tests\Fixtures\PriceContext::$_additional must be public and readonly'],
+            ],
+        ]);
+    }
+
+    public function testAClassWrittenInAnotherCaseIsTheSameClass(): void
+    {
+        $this->assertOutcomes([
+            ClassNameCase::class => [
+                'sameClassInTwoCases' => [],
+                'buildsTheClassInAnotherCase' => [],
+                'sameClassInTwoCasesBroken' => ['contracts.ensuresViolated: Counterexample: $a = Coordinate(x: '],
             ],
         ]);
     }
