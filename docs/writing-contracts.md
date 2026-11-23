@@ -52,7 +52,7 @@ Available in contracts:
 | int, float, string, bool and `null` literals; `PHP_INT_MAX`, `PHP_INT_MIN`, `NAN`, `INF`, `PHP_FLOAT_*` | `$result <= PHP_INT_MAX`, `$result === "EUR"` |
 | arithmetic `+ - * %`, unary `-` | `$result * 10000 - $net * $rate` |
 | `/` on floats | `$total / 2.0` |
-| `.` between strings and ints, interpolation, `(string)` of an int | `$result === $a . "/" . $b`, `$result === "$days jours"` |
+| `.` between strings and ints, interpolation, `(string)` of an int | `$result === $a . "/" . $b`, `$result === "Ships in $days days"` |
 | `intdiv($a, $b)`, `min($a, $b)`, `max($a, $b)`, `abs($a)` | `abs($result - $x) <= 5000` |
 | `strlen()`, `str_starts_with()`, `str_ends_with()`, `str_contains()` | `strlen($result) <= 20` |
 | `floor()`, `ceil()`, `sqrt()`, `is_nan()`, `is_infinite()`, `is_finite()`, `(int)`, `(float)` | `is_finite($result)` |
@@ -85,7 +85,7 @@ PHP has no implication operator, so `implies($a, $b)` is provided. It means `!$a
 
 The translator is a whitelist. A construct that is not listed is rejected with a message, never ignored. That is what keeps a verified method pure.
 
-The messages in the tables below are real, with one abbreviation: most messages print a class by its fully qualified name, and a row that shows a short name, such as `Foo` or `CartLimits`, stands for it. `Cannot instantiate Percentage` is printed as shown.
+The messages in the tables below are real, with one abbreviation: most messages print a class by its fully qualified name, and a row that shows a short name, such as `Foo` or `CartLimits`, stands for it. `Cannot instantiate Percentage` and `Cannot instantiate Receipt` are printed as shown.
 
 ### Types
 
@@ -138,7 +138,9 @@ Everything in the table in [the contract language](#the-contract-language) works
 | `(string)` of a float, a bool or a nullable value | `(string) of a float is not supported: only ints and strings are converted.` |
 | `min()` or `max()` on floats | `min() and max() are only supported on ints: PHP orders NaN and mixed int/float arguments in a way that is not modelled.` |
 | `round()` and any function other than those listed | `Call to round() is not part of the verified subset: purity cannot be established.` |
-| an unqualified `in_array()` in a namespace that declares its own `in_array()` | `Call to PhpstanContracts\Tests\Fixtures\Shadowing\in_array() is not part of the verified subset: purity cannot be established.` |
+| an unqualified call to a supported function, such as `abs()` or `in_array()`, in a namespace that declares a function of that name | `Call to PhpstanContracts\Tests\Fixtures\Shadowing\abs() is not part of the verified subset: purity cannot be established.` |
+| an unqualified supported constant, such as `PHP_INT_MAX` or `NAN`, in a namespace that declares a constant of that name | `Constant PhpstanContracts\Tests\Fixtures\Shadowing\PHP_INT_MAX is not part of the verified subset: PHP reads it instead of the built-in constant.` |
+| any other constant, including a supported one written in another case, such as `php_int_max` | `Constant php_int_max is not part of the verified subset.` |
 | a call to a method declared in another file | `PhpstanContracts\Tests\Fixtures\Point::sum() is declared in another file. Only methods of the same file can be called: ...` (see [Calls to other methods](#calls-to-other-methods)) |
 | a call that PHP binds at runtime to a method a subclass can override | `PhpstanContracts\Tests\Fixtures\OpenShape::sides() can be overridden: PhpstanContracts\Tests\Fixtures\OpenShape is not final, so a subclass can replace the method. Make the class or the method final, or the method private.` |
 | `static::k()` on a class that is not final, for a method that is not final, private or not | `PhpstanContracts\Tests\Fixtures\ShadowParent::k() can be overridden: PhpstanContracts\Tests\Fixtures\ShadowParent is not final, so a subclass can declare its own k(), which static:: calls instead, even though this one is private. Use self::, or make the class or the method final.` |
@@ -149,8 +151,10 @@ Everything in the table in [the contract language](#the-contract-language) works
 | a method call in a contract | `Method calls are not supported in contract expressions yet.` |
 | a method call on anything but an enum case or a data object | `Method calls are only supported on enums and data classes, not on a string.` |
 | `new` on a class that is not a plain data class | `Cannot instantiate Percentage: its constructor contains logic, which is not verified.` |
+| `new` on a data class whose constructor is declared in another file | `Cannot instantiate Receipt: its constructor is declared in another file. Only classes whose constructor is in the same file can be built: PHPStan re-analyses a file when the signatures it uses change, not when a body in another file does, so the proof would not be redone.` |
 | `$this` in a class that is not an enum or a readonly data class | `Object state ($this) is only part of the verified subset in enums and readonly data classes.`, followed by the reason, such as `Property Counter::$count must be public and readonly` |
 | reading a property that is not `public readonly`, or whose type is not supported | `Property Foo::$state must be public and readonly: only immutable data classes are supported.` |
+| `$c->x` in a class that declares a private `$x`, on an instance of a subclass that declares its own `$x` | `From PhpstanContracts\Tests\Fixtures\PropertyShadowParent, $c->x reads the private property PhpstanContracts\Tests\Fixtures\PropertyShadowParent::$x, not PhpstanContracts\Tests\Fixtures\PropertyShadowChild::$x: PHP picks the private property of the calling class. Rename one of the two properties.` |
 | `static::LIMIT` on a class that is not final, for a constant that is not final | `static::LIMIT is late bound: a subclass of CartLimits can override the constant. Use self::LIMIT, or make the class or the constant final.` |
 | `static::` for anything else on a class that is not final, such as `new static()` | `static:: is late bound and CartLimits is not final, so a subclass can change what it refers to; use self:: or make the class final.` |
 | `parent::` | `parent:: is not supported; write the name of the parent class.` |
@@ -164,9 +168,11 @@ Everything in the table in [the contract language](#the-contract-language) works
 | `in_array()` on anything but a list literal or a constant holding one | `in_array() is only supported on a list literal, such as [self::A, self::B], or a class constant holding one.` |
 | a nullable value used as a number, string or float | `Expected a number (int or float) but got ?int, which may be null here: check it first with `!== null`, `isset()` or `??`.` |
 
+A supported function is the built-in one. As in PHP, an unqualified call such as `abs($x)` in a namespace that declares its own `abs()` calls that function, so it is rejected, in the body and in contracts alike. `\abs($x)` is always the built-in one, and so is an unqualified call when the namespace declares no function of that name. The same holds for the supported constants: an unqualified `PHP_INT_MAX` in a namespace that declares its own `PHP_INT_MAX` reads that constant and is rejected, while `\PHP_INT_MAX` is always the built-in one. Constant names are case-sensitive, except `true`, `false` and `null`.
+
 `min()` and `max()` take exactly two `int` arguments. `match` needs at least one arm, and without a `default` arm it must be exhaustive (see below).
 
-`in_array($x, [a, b, c], true)` is translated as `$x === a || $x === b || $x === c`, which is what PHP computes. Without `true`, PHP compares with `==`, so the needle must be an `int`, a `float`, a `bool` or an enum case, where `==` is exact: `1 == 1.0` is true, as in PHP, and enum cases compare by identity. A string or a nullable needle needs `strict: true`, because `"1e1" == "10"` and `null == 0` are true. As in PHP, an unqualified `in_array()` in a namespace that declares its own `in_array()` function calls that function, so it is rejected; `\in_array()` is always the built-in one. The haystack is a list literal, whose elements can be any supported expression, or a class constant such as `self::VALIDATORS` whose value PHPStan folds to a list of scalars or enum cases.
+`in_array($x, [a, b, c], true)` is translated as `$x === a || $x === b || $x === c`, which is what PHP computes. Without `true`, PHP compares with `==`, so the needle must be an `int`, a `float`, a `bool` or an enum case, where `==` is exact: `1 == 1.0` is true, as in PHP, and enum cases compare by identity. A string or a nullable needle needs `strict: true`, because `"1e1" == "10"` and `null == 0` are true. The haystack is a list literal, whose elements can be any supported expression, or a class constant such as `self::VALIDATORS` whose value PHPStan folds to a list of scalars or enum cases.
 
 Instance methods of any class are fine as long as they never touch `$this`. In an enum or a readonly data class, `$this` is supported, see below. A method that reads `$this->state` on a class with mutable state is rejected.
 
@@ -280,7 +286,7 @@ The callee must itself be in the verified subset; when it is not, the reason is 
 
 A called method cannot throw yet: ``The call to PhpstanContracts\Tests\Fixtures\ThrowsFixture::guarded() cannot be verified: throw is not supported in a called method yet: ...``.
 
-**Why the same file.** PHPStan's result cache re-analyses a file when it changes, and the files that depend on it only when a signature they use changes. A proof that read the body of a method in another file would not be redone when that body changes, and could stay green for code that is now wrong. Calls to methods of other files need modular verification, where the caller relies on the callee's contract, which is on the [roadmap](limits-and-roadmap.md#roadmap).
+**Why the same file.** PHPStan's result cache re-analyses a file when it changes, and the files that depend on it only when a signature they use changes. A proof that read the body of a method in another file would not be redone when that body changes, and could stay green for code that is now wrong. The same holds for `new X(...)`, whose proof relies on the body of the constructor being empty: X's constructor must be declared in the same file. Calls to methods of other files need modular verification, where the caller relies on the callee's contract, which is on the [roadmap](limits-and-roadmap.md#roadmap).
 
 ## Exceptions
 

@@ -195,7 +195,7 @@ The verified subset is small on purpose, so that the answer is a real proof and 
 - enum and value-object code as it is usually written: `self::Case`, class constants, `$this` in the methods of enums (`match ($this)`) and readonly data classes, and calls to other methods of the same file, such as `$this->level() <= $other->level()` or a static helper whose `#[Requires]` is checked at the call
 - arithmetic, comparisons, `min`, `max`, `abs`, `intdiv`, `in_array` over a list of cases or scalars (`strict: true` for strings), and the common string checks (length, prefix, suffix, containment, concatenation, with an `int` written in decimal in `.`, interpolation and `(string)`)
 
-Not yet: loops, `try`/`catch`, calls to methods of other files, arrays and lists (other than the list of `in_array()`), mutable state (the state of a framework base class can stay in a data class, but a verified method cannot read it), and `float` or `bool` in a string. Anything outside the subset is reported as `contracts.unsupported` with the reason, never silently skipped. Floating-point multiplication of two variables can be too slow to decide, so money is better kept as integer cents and rates as basis points. See [Supported types](docs/types.md) for what each type can do, and [Limits and roadmap](docs/limits-and-roadmap.md) for what a green run guarantees and what comes next.
+Not yet: loops, `try`/`catch`, calls to methods of other files and `new` of classes whose constructor is in another file, arrays and lists (other than the list of `in_array()`), mutable state (the state of a framework base class can stay in a data class, but a verified method cannot read it), and `float` or `bool` in a string. Anything outside the subset is reported as `contracts.unsupported` with the reason, never silently skipped. Floating-point multiplication of two variables can be too slow to decide, so money is better kept as integer cents and rates as basis points. See [Supported types](docs/types.md) for what each type can do, and [Limits and roadmap](docs/limits-and-roadmap.md) for what a green run guarantees and what comes next.
 
 ## Learn more
 
@@ -216,7 +216,7 @@ php bin/phpstan-contracts-install-z3
 vendor/bin/phpstan analyse
 ```
 
-The run reports 62 errors, all intended: 58 from this extension (the examples that show a refuted rule, an undecided one or a rejected construct) and 4 from PHPStan's own rules on the deliberately broken methods (`argument.type` twice, `return.missing`, `match.unhandled`). It takes about a minute and a half with a cold cache. Every other annotated method is proven.
+The run reports 63 errors, all intended: 59 from this extension (the examples that show a refuted rule, an undecided one or a rejected construct) and 4 from PHPStan's own rules on the deliberately broken methods (`argument.type` twice, `return.missing`, `match.unhandled`). It takes about a minute and a half with a cold cache. Every other annotated method is proven.
 
 ## Status
 

@@ -527,7 +527,7 @@ final class ExpressionTranslator
     }
 
     /**
-     * `"$days jours"`: the parts, each converted to a string, concatenated.
+     * `"Ships in $days days"`: the parts, each converted to a string, concatenated.
      *
      * @param array<string, Term> $env
      */

@@ -201,7 +201,7 @@ A PHP string is a sequence of bytes, and the prover models it as exactly that: e
 | string literals | Including non-ASCII ones, which become their UTF-8 bytes. |
 | `===`, `!==` | |
 | `$a . $b`, `.=` | Between strings and ints. An int becomes its decimal digits, with a `-` when it is negative, which is what PHP prints. |
-| `"$days jours"`, `"Order #{$id}"`, `"($point->x, $point->y)"` | Interpolation of strings and ints, with the same conversion. |
+| `"Ships in $days days"`, `"Order #{$id}"`, `"($point->x, $point->y)"` | Interpolation of strings and ints, with the same conversion. |
 | `(string) $n` | On an int or a string. |
 | `strlen()` | |
 | `str_starts_with()`, `str_ends_with()`, `str_contains()` | The needle may be empty. |
@@ -700,12 +700,12 @@ final readonly class Receipt
 |---|---|
 | `$cart->subtotalCents`, `$cart->coupon->percent` | Nested reads. A nullable object needs a null check or `?->`. |
 | `$cart->coupon?->minimumCents` | |
-| `new Receipt(0, $total, false)` | Positional or named arguments, all of them. Only for classes whose constructor does nothing but promote every modelled property. The properties left out of the model keep their default value, or stay uninitialized, and cannot be read. |
+| `new Receipt(0, $total, false)` | Positional or named arguments, all of them. Only for classes whose constructor is declared in the same file and does nothing but promote every modelled property. The properties left out of the model keep their default value, or stay uninitialized, and cannot be read. |
 | `$this->onHand` in a method of the class, `new self(...)` | `$this` is an implicit parameter of the class, with the same domain as any other. |
 
 A method of the class declared in the same file, such as `$this->available()` or a getter, can be called if the class is `final`, or the method `final` or `private`: see [Calls to other methods](writing-contracts.md#calls-to-other-methods).
 
-Not supported: calling a method declared in another file, reading a property that is left out of the model, `$a === $b` and `$a == $b` between objects (identity is not modelled, compare the fields), writing to a property, and `instanceof`.
+Not supported: calling a method declared in another file, building a class whose constructor is declared in another file, reading a property that is left out of the model, reading `$c->x` from a class that declares a private `$x` when `$c` is an instance of a subclass (PHP reads the private property of the calling class), `$a === $b` and `$a == $b` between objects (identity is not modelled, compare the fields), writing to a property, and `instanceof`.
 
 A data class can carry its own rules. `$this` is a record of its properties, read like a parameter:
 
@@ -730,6 +730,12 @@ A constructor that validates its arguments cannot be modelled, so the class can 
 ```
 Rejected.php:121: Cannot instantiate Percentage: its constructor contains logic, which is not verified.
 Rejected.php:128: Property PhpstanContracts\Examples\Counter::$count must be public and readonly: only immutable data classes are supported.
+```
+
+`new` also needs the constructor in the file that builds the object. PHPStan re-analyses a file when the signatures it uses change, not when the body of a constructor in another file does, so a proof that relied on an empty constructor elsewhere could stay green after that constructor gains a check. That is why `Receipt` is declared in `Checkout.php`, next to the methods that build it. A class of another file can still be received as a parameter, returned and read:
+
+```
+Rejected.php:175: Cannot instantiate Receipt: its constructor is declared in another file. Only classes whose constructor is in the same file can be built: PHPStan re-analyses a file when the signatures it uses change, not when a body in another file does, so the proof would not be redone.
 ```
 
 ### Data classes and the return type
