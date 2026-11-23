@@ -128,6 +128,9 @@ final class Encoding
     public function define(string $hint, Term $value): Term
     {
         if ($value->atomic) {
+            // `none_Opt_List_Int` is an atom whose datatype nothing else may have declared.
+            $this->registerSort($value->sort);
+
             return $value;
         }
 
