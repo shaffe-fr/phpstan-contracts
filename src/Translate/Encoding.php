@@ -63,7 +63,11 @@ final class Encoding
     {
         $registered = $this->datatypes[$sort->smt] ?? null;
         if ($registered !== null) {
-            if ($registered->enum?->className !== $sort->enum?->className || $registered->record?->className !== $sort->record?->className) {
+            if (
+                $registered->enum?->className !== $sort->enum?->className
+                || $registered->record?->className !== $sort->record?->className
+                || $registered->shape?->keys() !== $sort->shape?->keys()
+            ) {
                 throw new LogicException(sprintf('Two classes share the SMT sort %s.', $sort->smt));
             }
 

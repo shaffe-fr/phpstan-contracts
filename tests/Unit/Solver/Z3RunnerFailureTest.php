@@ -59,7 +59,7 @@ final class Z3RunnerFailureTest extends TestCase
             $runner->run("(echo \"@@0\")\n(assert (> undeclared 0))\n(check-sat)\n", 1);
             self::fail('A line that Z3 drops from the problem must not turn into an answer.');
         } catch (SolverFailure $failure) {
-            self::assertStringContainsString('Z3 rejected a line of the script', $failure->getMessage());
+            self::assertStringContainsString('Z3 reported an error', $failure->getMessage());
             self::assertStringContainsString('undeclared', $failure->getMessage());
         }
     }
