@@ -608,6 +608,7 @@ final class ExpressionTranslator
      */
     private function coalesce(BinaryOp\Coalesce $expr, array $env, Term $pc, bool $tail): Term
     {
+        $this->rejectQuietListChain($expr->left, $env, $pc, '??');
         $read = $expr->left instanceof Expr\ArrayDimFetch && $expr->left->dim !== null ? $expr->left : null;
         $base = $read === null ? null : $this->translate($read->var, $env, $pc);
         if ($read !== null && $base !== null && $base->sort->isList()) {
@@ -1771,12 +1772,39 @@ final class ExpressionTranslator
     }
 
     /**
+     * PHP reads the whole operand of `??` and `isset()` without a warning, so a list
+     * element in the middle of the chain (`$lines[$i]['net'] ?? 0`) is quietly missing
+     * rather than a read of a missing key. Only the last link is modelled.
+     *
+     * @param array<string, Term> $env
+     */
+    private function rejectQuietListChain(Expr $operand, array $env, Term $pc, string $construct): void
+    {
+        $node = $operand instanceof Expr\ArrayDimFetch || $operand instanceof PropertyFetch || $operand instanceof NullsafePropertyFetch
+            ? $operand->var
+            : null;
+        while ($node instanceof Expr\ArrayDimFetch || $node instanceof PropertyFetch || $node instanceof NullsafePropertyFetch) {
+            if ($node instanceof Expr\ArrayDimFetch && $node->dim !== null && $this->translate($node->var, $env, $pc)->sort->isList()) {
+                throw $this->reject($operand, sprintf(
+                    '%s on `%s` reads through the list element `%s`, which is not modelled: PHP treats a missing element in the middle of the chain as unset. Check `isset(%s)` first, or read `%s` into a variable.',
+                    $construct,
+                    $this->printer->prettyPrintExpr($operand),
+                    $this->printer->prettyPrintExpr($node),
+                    $this->printer->prettyPrintExpr($node),
+                    $this->printer->prettyPrintExpr($node),
+                ));
+            }
+            $node = $node->var;
+        }
+    }
+    /**
      * @param array<string, Term> $env
      */
     private function issetExpression(Isset_ $expr, array $env, Term $pc): Term
     {
         $checks = [];
         foreach ($expr->vars as $variable) {
+            $this->rejectQuietListChain($variable, $env, $pc, 'isset()');
             $read = $variable instanceof Expr\ArrayDimFetch && $variable->dim !== null ? $variable : null;
             $base = $read === null ? null : $this->translate($read->var, $env, $pc);
             if ($read !== null && $base !== null && $base->sort->isList()) {

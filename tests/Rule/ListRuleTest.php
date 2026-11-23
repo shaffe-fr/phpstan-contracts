@@ -101,6 +101,10 @@ final class ListRuleTest extends RuleFixtureTestCase
                 'searchesAListVariable' => ['contracts.unsupported: in_array() is only supported on a list literal'],
                 'issetWithAStringIndex' => ['contracts.unsupported: The index of a list must be an int, not a string'],
                 'coalescesWithTheWrongDefaultType' => ['contracts.unsupported: The right side of ?? is a string but the left side is a int.'],
+                'coalescesAShapeKeyOfAListElement' => ['contracts.unsupported: ?? on `$lines[$i][\'net\']` reads through the list element `$lines[$i]`'],
+                'issetsAShapeKeyOfAListElement' => ['contracts.unsupported: isset() on `$lines[$i][\'net\']` reads through the list element `$lines[$i]`'],
+                'coalescesAPropertyOfAListElement' => ['contracts.unsupported: ?? on `$items[$i]->quantity` reads through the list element `$items[$i]`'],
+                'issetsAPropertyOfAListElement' => ['contracts.unsupported: isset() on `$items[$i]->quantity` reads through the list element `$items[$i]`'],
             ],
         ]);
     }

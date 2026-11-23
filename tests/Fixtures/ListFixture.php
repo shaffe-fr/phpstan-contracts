@@ -861,4 +861,39 @@ final class ListFixture
     {
         return $items[0] ?? 'none';
     }
+    /**
+     * @param list<array{net: int<0, 100>}> $lines
+     */
+    #[Pure]
+    public static function coalescesAShapeKeyOfAListElement(array $lines, int $i): int
+    {
+        return $lines[$i]['net'] ?? -1;
+    }
+
+    /**
+     * @param list<array{net: int<0, 100>}> $lines
+     */
+    #[Pure]
+    public static function issetsAShapeKeyOfAListElement(array $lines, int $i): bool
+    {
+        return isset($lines[$i]['net']);
+    }
+
+    /**
+     * @param list<PriceContext> $items
+     */
+    #[Pure]
+    public static function coalescesAPropertyOfAListElement(array $items, int $i): int
+    {
+        return $items[$i]->quantity ?? -1;
+    }
+
+    /**
+     * @param list<PriceContext> $items
+     */
+    #[Pure]
+    public static function issetsAPropertyOfAListElement(array $items, int $i): bool
+    {
+        return isset($items[$i]->quantity);
+    }
 }
