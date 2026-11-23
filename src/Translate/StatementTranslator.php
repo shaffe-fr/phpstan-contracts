@@ -26,7 +26,17 @@ use PhpParser\NodeVisitorAbstract;
  */
 final class StatementTranslator
 {
-    private const LOCAL_WRITES_ONLY = 'Only assignments to local variables are allowed (no property, array or dynamic writes); appending is supported on a local list variable ($list[] = $value).';
+    private const LOCAL_WRITES_ONLY = 'Only assignments to local variables are allowed (no property, array or dynamic writes); appending is supported on a list built in the method ($list = []; $list[] = $value), or write $list = [...$list, $value].';
+
+    /**
+     * The SMT constants that hold a list built in this method: a literal, `[]`, a spread or an
+     * append to such a list, and the copies and merges of those. Only the next free key of such a
+     * list is known to be `count($list)`; PHP appends at the next free key of the array, which a
+     * caller's `unset()` can leave past `count()` in a list received from outside.
+     *
+     * @var array<string, true>
+     */
+    private array $built = [];
 
     public function __construct(
         private readonly ExpressionTranslator $expressions,
@@ -156,7 +166,26 @@ final class StatementTranslator
             throw $this->expressions->reject($at, self::LOCAL_WRITES_ONLY);
         }
 
-        return $this->bind($target->name, $this->valueOf($value, $state, $at), $state, $at);
+        return $this->bind($target->name, $this->valueOf($value, $state, $at), $state, $at, $this->isBuilt($value, $state));
+    }
+
+    /**
+     * Whether the value of an expression is a list built here.
+     */
+    private function isBuilt(Expr $value, State $state): bool
+    {
+        return match (true) {
+            $value instanceof Expr\Array_ => true,
+            $value instanceof Variable => is_string($value->name) && isset($state->view()[$value->name]) && $this->isBuiltTerm($state->view()[$value->name]),
+            $value instanceof Expr\Ternary => $value->if !== null && $this->isBuilt($value->if, $state) && $this->isBuilt($value->else, $state),
+            $value instanceof BinaryOp\Coalesce => $this->isBuilt($value->left, $state) && $this->isBuilt($value->right, $state),
+            default => false,
+        };
+    }
+
+    private function isBuiltTerm(Term $term): bool
+    {
+        return isset($this->built[$term->smt]);
     }
 
     /**
@@ -174,13 +203,17 @@ final class StatementTranslator
         $element = $this->valueOf($value, $state, $at);
         $appended = match (true) {
             $list->sort->isEmptyList() => $this->firstElement($name, $element, $at),
+            $list->sort->isList() && !$this->isBuiltTerm($list) => throw $this->expressions->reject($at, sprintf(
+                'Appending to $%1$s, a list received from outside the method, is not supported: PHP appends at the array\'s next free key, which can be past count($%1$s) after an unset() by the caller, so the result may not be a list. Write $%1$s = [...$%1$s, $value] instead, which always builds a list.',
+                $name,
+            )),
             $list->sort->isList() => $this->appendTo($list, $element, $at),
             $list->sort->isShape() => throw $this->expressions->reject($at, 'Appending to an array shape is not supported: build a new shape literal.'),
             $list->sort->isNullable() && $list->sort->inner?->isList() === true => throw $this->expressions->reject($at, sprintf('Appending to $%1$s, which may be null here, would create a list; check it first with `!== null`, or start with $%1$s = [].', $name)),
             default => throw $this->expressions->reject($at, sprintf('Appending to $%s is only supported on a list, not on a %s.', $name, $list->sort->describe())),
         };
 
-        return $this->bind($name, $appended, $state, $at);
+        return $this->bind($name, $appended, $state, $at, true);
     }
 
     /**
@@ -220,7 +253,7 @@ final class StatementTranslator
     /**
      * Gives a local variable its new value.
      */
-    private function bind(string $name, Term $term, State $state, Expr $at): State
+    private function bind(string $name, Term $term, State $state, Expr $at, bool $built = false): State
     {
         $previous = $state->variables[$name] ?? null;
 
@@ -258,8 +291,15 @@ final class StatementTranslator
         $narrowedValue = $previous !== null && $previous->sort->isNullable() && !$term->sort->isNullable() && !$term->sort->isNull()
             ? $this->encoding->define($name . '_value', $term)
             : null;
+        $defined = $this->encoding->define($name, $stored);
+        if ($built) {
+            $this->built[$defined->smt] = true;
+            if ($narrowedValue !== null) {
+                $this->built[$narrowedValue->smt] = true;
+            }
+        }
 
-        return $this->stopThrownPaths($state->withVariable($name, $this->encoding->define($name, $stored), $narrowedValue));
+        return $this->stopThrownPaths($state->withVariable($name, $defined, $narrowedValue));
     }
 
     /**
@@ -396,6 +436,7 @@ final class StatementTranslator
             if ($elseValue === null) {
                 continue;
             }
+            $built = $this->isBuiltTerm($thenValue) && $this->isBuiltTerm($elseValue);
             if (!$thenValue->sort->equals($elseValue->sort)) {
                 // `[]` takes the type of the list in the other branch.
                 if ($thenValue->sort->isEmptyList() && $this->expressions->canCoerce($thenValue->sort, $elseValue->sort)) {
@@ -410,6 +451,9 @@ final class StatementTranslator
             $variables[$name] = $thenValue->smt === $elseValue->smt
                 ? $thenValue
                 : $this->encoding->define($name, Smt::ite($condition, $thenValue, $elseValue));
+            if ($built) {
+                $this->built[$variables[$name]->smt] = true;
+            }
         }
 
         $narrowed = [];

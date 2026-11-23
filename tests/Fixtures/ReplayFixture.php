@@ -273,9 +273,7 @@ final class ReplayFixture
     #[Ensures('count($result) === count($items) + 2')]
     public static function appendsOnlyOnce(array $items, int $item): array
     {
-        $items[] = $item;
-
-        return $items;
+        return [...$items, $item];
     }
 
     /**

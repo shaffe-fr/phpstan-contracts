@@ -11,6 +11,7 @@ use PhpstanContracts\Smt\Sort;
 use PhpstanContracts\Smt\Term;
 use PhpstanContracts\Solver\ScriptRenderer;
 use PhpstanContracts\Translate\Encoding;
+use PhpstanContracts\Translate\ListConcat;
 use PhpstanContracts\Tests\Support\RequiresZ3;
 use PhpstanContracts\Tests\Support\Z3Evaluator;
 use PHPUnit\Framework\TestCase;
@@ -431,6 +432,83 @@ final class SemanticsTest extends TestCase
         }
     }
 
+    /**
+     * `[...$a, ...$b]`, `[...$a, $x]` and `[$x, ...$a]` against PHP: the spread renumbers the keys
+     * from 0, and the axioms of ListConcat must pin down every cell below the length, whatever
+     * the junk beyond the length of the two lists.
+     */
+    public function testSpreadOfListsMatchesPhpArrays(): void
+    {
+        $pools = [
+            'int' => [Sort::int(), [PHP_INT_MIN, PHP_INT_MAX, -1, 0, 1, 42]],
+            'string' => [Sort::string(), ['', "a\0b", "\xC3\xA9", 'EUR', "\xFF", '0']],
+            'float' => [Sort::float(), [0.0, -0.0, NAN, INF, -INF, 1.5]],
+            'nullable int' => [Sort::nullable(Sort::int()), [null, 0, PHP_INT_MAX, -5]],
+        ];
+        mt_srand(17);
+        foreach ($pools as $name => [$elementSort, $pool]) {
+            $listSort = Sort::list($elementSort);
+            $encoding = new Encoding();
+            $encoding->registerSort($listSort);
+            $claims = [];
+            $pairs = [[[], []], [array_slice($pool, 0, 2), []], [[], array_slice($pool, 0, 2)]];
+            for ($i = 0; $i < 8; ++$i) {
+                $pairs[] = [$this->randomList($pool), $this->randomList($pool)];
+            }
+            foreach ($pairs as [$first, $second]) {
+                $x = $pool[mt_rand(0, count($pool) - 1)];
+                $single = $this->valueTerm($elementSort, $x);
+                $a = $this->definedList($encoding, $elementSort, $first);
+                $b = $this->definedList($encoding, $elementSort, $second);
+                $cases = [
+                    [ListConcat::concat($encoding, $a, $b), [...$first, ...$second]],
+                    [$encoding->define('list', Smt::listAppend($a, $single)), [...$first, $x]],
+                    [ListConcat::concat($encoding, $encoding->define('list', Smt::listLiteral($listSort, [$single], $encoding->fresh('base', $listSort))), $a), [$x, ...$first]],
+                ];
+                foreach ($cases as [$term, $php]) {
+                    $claims[] = sprintf('(= %s %d)', Smt::listLength($term)->smt, count($php));
+                    foreach ($php as $key => $value) {
+                        $claims[] = sprintf('(= %s %s)', Smt::listItem($term, Smt::int($key))->smt, $this->valueTerm($elementSort, $value)->smt);
+                    }
+                }
+            }
+            $declarations = [...(new ScriptRenderer())->declarations($encoding), ...$encoding->commands()];
+            $failed = [];
+            foreach ($this->z3->holds($claims, $declarations) as $position => $holds) {
+                if (!$holds) {
+                    $failed[] = $claims[$position];
+                }
+            }
+            self::assertSame([], array_slice($failed, 0, 3), sprintf('%d of %d claims about spread lists of %s differ from PHP.', count($failed), count($claims), $name));
+        }
+    }
+    /**
+     * @param list<mixed> $values
+     */
+    private function definedList(Encoding $encoding, Sort $elementSort, array $values): Term
+    {
+        $elements = [];
+        foreach ($values as $value) {
+            $elements[] = $this->valueTerm($elementSort, $value);
+        }
+        $listSort = Sort::list($elementSort);
+
+        return $encoding->define('list', Smt::listLiteral($listSort, $elements, $encoding->fresh('base', $listSort)));
+    }
+    /**
+     * @param list<mixed> $pool
+     *
+     * @return list<mixed>
+     */
+    private function randomList(array $pool): array
+    {
+        $list = [];
+        for ($k = mt_rand(0, 5); $k > 0; --$k) {
+            $list[] = $pool[mt_rand(0, count($pool) - 1)];
+        }
+
+        return $list;
+    }
     /**
      * @param array<string, mixed> $values
      */

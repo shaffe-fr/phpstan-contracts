@@ -55,11 +55,11 @@ final class ListFixture
     #[Ensures('count($result) === count($items) + ($flag ? 1 : 0)')]
     public static function appendsInABranch(array $items, bool $flag): array
     {
+        $list = [...$items];
         if ($flag) {
-            $items[] = 1;
+            $list[] = 1;
         }
-
-        return $items;
+        return $list;
     }
 
     /**
@@ -110,9 +110,9 @@ final class ListFixture
     #[Ensures('count($result) === count($items) + 1')]
     public static function appendsAValidValue(array $items, int $item): array
     {
-        $items[] = $item;
-
-        return $items;
+        $list = [...$items];
+        $list[] = $item;
+        return $list;
     }
 
     /**
@@ -122,9 +122,9 @@ final class ListFixture
     #[Pure]
     public static function appendsAnUncheckedValue(array $items, int $item): array
     {
-        $items[] = $item;
-
-        return $items;
+        $list = [...$items];
+        $list[] = $item;
+        return $list;
     }
 
     /**
@@ -258,16 +258,26 @@ final class ListFixture
     }
 
     /**
-     * @param list<int> $items
      * @return list<int>
      */
-    #[Ensures('count($result) === count($items)')]
-    public static function appendingLeavesTheOtherCopyAlone(array $items): array
+    #[Ensures('count($result) === 1 && $result[0] === $item')]
+    public static function appendingLeavesTheOtherCopyAlone(int $item): array
     {
-        $copy = $items;
-        $items[] = 1;
+        $first = [$item];
+        $second = $first;
+        $second[] = 2;
+        return $first;
+    }
 
-        return $copy;
+    /**
+     * @return list<int>
+     */
+    #[Ensures('count($result) === 3')]
+    public static function appendsToAMergeOfBuiltLists(bool $flag): array
+    {
+        $list = $flag ? [1, 2] : [3, 4];
+        $list[] = 5;
+        return $list;
     }
 
     /**
@@ -278,8 +288,187 @@ final class ListFixture
     public static function appendsToAParameter(array $items, int $item): array
     {
         $items[] = $item;
-
         return $items;
+    }
+
+    /**
+     * @param list<int> $items
+     */
+    #[Pure]
+    public static function appendsToACopyOfAParameter(array $items): int
+    {
+        $copy = $items;
+        $copy[] = 1;
+        return 0;
+    }
+
+    #[Pure]
+    public static function appendsToAListFromAProperty(ListHolder $holder): int
+    {
+        $values = $holder->values;
+        $values[] = 1;
+        return 0;
+    }
+
+    /**
+     * @param list<int> $items
+     */
+    #[Pure]
+    public static function appendsToAMergeWithAParameter(array $items, bool $flag): int
+    {
+        $list = $flag ? $items : [];
+        $list[] = 1;
+        return 0;
+    }
+
+    /**
+     * @param list<int> $items
+     * @return list<int>
+     */
+    #[Ensures('count($result) === count($items) + 1 && $result[count($items)] === $item')]
+    public static function spreadsAnItemAfterTheList(array $items, int $item): array
+    {
+        return [...$items, $item];
+    }
+
+    /**
+     * @param list<int> $items
+     * @return list<int>
+     */
+    #[Ensures('count($result) === count($items) + 1 && $result[0] === $item && implies($i >= 0 && $i < count($items), $result[$i + 1] === $items[$i])')]
+    public static function spreadsAnItemBeforeTheList(array $items, int $item, int $i): array
+    {
+        return [$item, ...$items];
+    }
+
+    /**
+     * @param list<int> $first
+     * @param list<int> $second
+     * @return list<int>
+     */
+    #[Ensures('count($result) === count($first) + count($second) && implies($i >= 0 && $i < count($second), $result[count($first) + $i] === $second[$i]) && implies($i >= 0 && $i < count($first), $result[$i] === $first[$i])')]
+    public static function concatenatesTwoLists(array $first, array $second, int $i): array
+    {
+        return [...$first, ...$second];
+    }
+
+    /**
+     * @param list<int> $items
+     * @return list<int>
+     */
+    #[Ensures('count($result) === count($items)')]
+    public static function spreadsOneTooMany(array $items, int $item): array
+    {
+        return [...$items, $item];
+    }
+
+    /**
+     * @param list<int<0, 100>> $items
+     * @param int<0, 100> $item
+     * @return list<int<0, 100>>
+     */
+    #[Ensures('count($result) === count($items) + 1')]
+    public static function spreadsAValidValue(array $items, int $item): array
+    {
+        return [...$items, $item];
+    }
+
+    /**
+     * @param list<int<0, 100>> $items
+     * @return list<int<0, 100>>
+     */
+    #[Pure]
+    public static function spreadsAnUncheckedValue(array $items, int $item): array
+    {
+        return [...$items, $item];
+    }
+
+    /**
+     * @param list<int> $items
+     * @return list<int>
+     */
+    #[Ensures('count($result) === count($items) + 1')]
+    public static function appendsAfterASpreadAndLeavesTheParameterAlone(array $items, int $item): array
+    {
+        $copy = [...$items];
+        $copy[] = $item;
+        return $copy;
+    }
+
+    /**
+     * @param list<int> $items
+     * @return list<int>
+     */
+    #[Ensures('count($result) === count($items)')]
+    public static function appendsToASingleSpreadCopy(array $items): array
+    {
+        $copy = [...$items];
+        $items[] = 1;
+        return $copy;
+    }
+
+    /**
+     * @param array{net: int, vat: int} $shape
+     */
+    #[Pure]
+    public static function spreadsAShape(array $shape): int
+    {
+        $list = [...$shape];
+        return 0;
+    }
+
+    #[Pure]
+    public static function spreadsAnInt(int $n): int
+    {
+        $list = [...$n];
+        return 0;
+    }
+
+    /**
+     * @param list<int>|null $items
+     */
+    #[Pure]
+    public static function spreadsANullableList(?array $items): int
+    {
+        $list = [...$items];
+        return 0;
+    }
+
+    /**
+     * @param list<int> $items
+     */
+    #[Pure]
+    public static function spreadsWithAKey(array $items): int
+    {
+        $list = ['a' => 1, ...$items];
+        return 0;
+    }
+
+    /**
+     * @param list<string> $items
+     */
+    #[Pure]
+    public static function spreadsAStringAmongInts(array $items): int
+    {
+        $list = [...$items, 1];
+        return 0;
+    }
+
+    #[Pure]
+    public static function spreadsOnlyAnEmptyList(): int
+    {
+        $list = [...[]];
+        return 0;
+    }
+
+    /**
+     * @param array<string, int> $items
+     */
+    #[Pure]
+    public static function spreadsAnAssociativeArray(array $items): int
+    {
+        $list = [...$items];
+        return 0;
     }
 
     /**

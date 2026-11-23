@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace PhpstanContracts\Translate;
 
+use LogicException;
 use PhpstanContracts\Exception\VerificationRejected;
 use PhpstanContracts\Smt\EnumSort;
 use PhpstanContracts\Smt\ShapeSort;
@@ -2018,13 +2019,22 @@ final class ExpressionTranslator
     private function arrayLiteral(Expr\Array_ $expr, array $env, Term $pc): Term
     {
         $keyed = 0;
+        $spreads = false;
         foreach ($expr->items as $item) {
-            if ($item->unpack || $item->byRef) {
-                throw $this->reject($expr, 'Spreads and references in array literals are not supported: list the elements, such as [$a, $b], or append them with $list[] = $value.');
+            if ($item->byRef) {
+                throw $this->reject($expr, 'References in array literals are not supported: list the values, such as [$a, $b].');
             }
+            $spreads = $spreads || $item->unpack;
             if ($item->key !== null) {
                 ++$keyed;
             }
+        }
+        if ($spreads) {
+            if ($keyed > 0) {
+                throw $this->reject($expr, 'A spread is only supported in a list literal without keys, such as [...$items, $x]: PHP keeps the string keys of a spread array, which this literal would mix with the keys written.');
+            }
+
+            return $this->spreadLiteral($expr, $env, $pc);
         }
         if ($keyed > 0 && $keyed < count($expr->items)) {
             throw $this->reject($expr, 'An array literal is either a list without keys, such as [1, 2], or a shape with string keys, such as [\'net\' => 1]; mixing the two is not supported.');
@@ -2068,6 +2078,87 @@ final class ExpressionTranslator
         return $sort->containsNull() ? $term : $this->encoding->define('shape', $term);
     }
 
+    /**
+     * `[...$a, $x, ...$b]`: PHP renumbers the keys of a spread list from 0, so the literal is
+     * exactly the list of the elements in order, whatever the next free key of the lists
+     * spread. Only lists can be spread: the keys of any other array are kept.
+     *
+     * @param array<string, Term> $env
+     */
+    private function spreadLiteral(Expr\Array_ $expr, array $env, Term $pc): Term
+    {
+        $segments = [];
+        $element = null;
+        foreach ($expr->items as $item) {
+            $value = $this->translate($item->value, $env, $pc);
+            if ($value->sort->isNever()) {
+                throw $this->reject($item->value, 'A value that always throws cannot be stored in an array literal; write a throw statement.');
+            }
+            if ($item->unpack) {
+                if ($value->sort->isList()) {
+                    if ($element !== null && !$element->equals($value->sort->element ?? $element)) {
+                        throw $this->reject($expr, sprintf('The lists spread here have different element types (%s and %s); a list must hold a single type.', $element->describe(), $value->sort->element?->describe() ?? '?'));
+                    }
+                    $element = $value->sort->element;
+                } elseif (!$value->sort->isEmptyList()) {
+                    throw $this->reject($item->value, sprintf(
+                        'Only a list<T> can be spread in a list literal, not `%s` (%s): PHP keeps the keys of other arrays, which are not 0..n-1. Spread a list, or build the array with its keys.',
+                        $this->printer->prettyPrintExpr($item->value),
+                        $value->sort->describe(),
+                    ));
+                }
+            } elseif ($value->sort->isList() || $value->sort->isEmptyList() || ($value->sort->isNullable() && $value->sort->inner?->isList() === true)) {
+                throw $this->reject($expr, 'A list of lists is not supported yet: nested lists are not modelled. Use a list of data classes or of array shapes.');
+            } elseif ($value->sort->containsNull() && !$value->sort->isNull()) {
+                throw $this->reject($item->value, sprintf('A %s with a null value cannot be an element of a list: build it from values that have the type it will hold.', $value->sort->describe()));
+            }
+            $segments[] = [$value, $item->unpack];
+        }
+        if ($element === null) {
+            throw $this->reject($expr, 'Spreading only [] gives no element type; spread a list<T>, such as [...$items, $x].');
+        }
+
+        $list = Sort::list($element);
+        $this->encoding->registerSort($element);
+        $result = $firstSpread = null;
+        foreach ($segments as [$value, $spread]) {
+            if ($spread) {
+                if ($value->sort->isEmptyList()) {
+                    continue;
+                }
+                if ($result === null) {
+                    $result = $firstSpread = $value;
+                } else {
+                    $result = ListConcat::concat($this->encoding, $result, $value);
+                }
+                continue;
+            }
+            if (!$this->canCoerce($value->sort, $element)) {
+                throw $this->reject($expr, sprintf(
+                    'The elements of this list have different types (%s and %s); a list must hold a single type. Convert the elements first, such as (float) $x.',
+                    $element->describe(),
+                    $value->sort->describe(),
+                ));
+            }
+            $single = $this->coerce($expr, $value, $element);
+            $result = $this->encoding->define('list', $result === null
+                ? Smt::listLiteral($list, [$single], $this->encoding->fresh('base', $list))
+                : Smt::listAppend($result, $single));
+        }
+
+        if ($result === null) {
+            throw new LogicException('A spread literal has at least one list.');
+        }
+        if ($result->smt === $firstSpread?->smt) {
+            // `[...$a]` is a new array: it is not the value of `$a`, whose next free key may differ.
+            $copy = $this->encoding->fresh('list', $list);
+            $this->encoding->assert(Smt::eq($copy, $result));
+
+            return $copy;
+        }
+
+        return $result;
+    }
     /**
      * `[a, b]`, a list whose elements have one type (`null` makes it nullable), and `[]`, which
      * has no element type until it meets the one of a variable, a return type or the other
