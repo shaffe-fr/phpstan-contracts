@@ -13,6 +13,25 @@ use RuntimeException;
 final class SExpr
 {
     /**
+     * The text of an expression as Smt writes terms: atoms and lists separated by single
+     * spaces. Z3 echoes a term it is asked for verbatim, so this is how a probe is found
+     * again in the answer.
+     *
+     * @param string|array<mixed> $expression
+     */
+    public static function render(string|array $expression): string
+    {
+        if (is_string($expression)) {
+            return $expression;
+        }
+
+        return '(' . implode(' ', array_map(
+            static fn (mixed $part): string => self::render(is_string($part) || is_array($part) ? $part : ''),
+            $expression,
+        )) . ')';
+    }
+
+    /**
      * @return list<string|list<mixed>>
      */
     public static function parse(string $text): array

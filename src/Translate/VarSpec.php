@@ -13,7 +13,8 @@ use PhpstanContracts\Smt\Sort;
 final readonly class VarSpec
 {
     /**
-     * @param array<string, VarSpec> $fields record fields by name
+     * @param array<string, VarSpec> $fields record fields by name, or the fields of an array shape by key in canonical order
+     * @param VarSpec|null $element the element of a list
      */
     public function __construct(
         public Sort $sort,
@@ -23,6 +24,7 @@ final readonly class VarSpec
         public array $fields = [],
         public bool $nonEmpty = false,
         public string $description = '',
+        public ?VarSpec $element = null,
     ) {
     }
 }

@@ -22,12 +22,13 @@ final class Z3Evaluator
 
     /**
      * @param list<string> $terms closed SMT-LIB terms
+     * @param list<string> $declarations datatype declarations the terms need, as ScriptRenderer::declarations() writes them
      * @return list<string|list<mixed>> the simplified value of each term, in order
      */
-    public function evaluate(array $terms): array
+    public function evaluate(array $terms, array $declarations = []): array
     {
         $prelude = (new ReflectionClassConstant(ScriptRenderer::class, 'PRELUDE'))->getValue();
-        $script = $prelude . "\n" . implode("\n", array_map(static fn (string $term): string => '(simplify ' . $term . ')', $terms)) . "\n";
+        $script = implode("\n", $declarations) . "\n" . $prelude . "\n" . implode("\n", array_map(static fn (string $term): string => '(simplify ' . $term . ')', $terms)) . "\n";
 
         $process = new Process([$this->binary, '-in', '-smt2']);
         $process->setInput($script);

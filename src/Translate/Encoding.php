@@ -85,6 +85,18 @@ final class Encoding
                     }
                 }
                 break;
+            case SortKind::List:
+                if ($sort->element !== null) {
+                    $this->registerSort($sort->element);
+                }
+                break;
+            case SortKind::Shape:
+                if ($sort->shape !== null) {
+                    foreach ($sort->shape->fields as $field) {
+                        $this->registerSort($field);
+                    }
+                }
+                break;
             default:
                 return;
         }
@@ -102,6 +114,9 @@ final class Encoding
 
     public function fresh(string $hint, Sort $sort): Term
     {
+        if ($sort->containsNull()) {
+            throw new LogicException('A value whose type contains the null literal type cannot be declared: ' . $sort->describe());
+        }
         $this->registerSort($sort);
 
         $name = preg_replace('/[^A-Za-z0-9_]/', '_', $hint) . '@' . ++$this->counter;
@@ -217,6 +232,25 @@ final class Encoding
     public function enumFunctions(): array
     {
         return array_values($this->enumFunctions);
+    }
+
+    /**
+     * The terms to ask Z3 for after a satisfiable check: the observed symbols, then the
+     * probes that read the lists inside them, since the model of a list is not
+     * something to interpret (see {@see ProbePlanner}).
+     *
+     * @return list<string>
+     */
+    public function observedTerms(): array
+    {
+        $planner = new ProbePlanner();
+        $terms = [];
+        foreach ($this->observedSymbols() as $symbol) {
+            $terms[] = $symbol->smtName;
+            array_push($terms, ...$planner->probes($symbol->smtName, $symbol->sort));
+        }
+
+        return $terms;
     }
 
     /**

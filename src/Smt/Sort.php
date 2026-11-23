@@ -12,6 +12,10 @@ final readonly class Sort
         public ?EnumSort $enum = null,
         public ?Sort $inner = null,
         public ?RecordSort $record = null,
+        public ?Sort $element = null,
+        public ?ShapeSort $shape = null,
+        /** @var list<string>|null for a shape, its keys in the order of the declared type it comes from */
+        public ?array $displayOrder = null,
     ) {
     }
 
@@ -60,6 +64,24 @@ final readonly class Sort
         return new self(SortKind::Record, $record->smtName, record: $record);
     }
 
+    public static function list(self $element): self
+    {
+        return new self(SortKind::List, 'List_' . $element->smt, element: $element);
+    }
+
+    /**
+     * @param list<string>|null $displayOrder
+     */
+    public static function shape(ShapeSort $shape, ?array $displayOrder = null): self
+    {
+        return new self(SortKind::Shape, $shape->smtName, shape: $shape, displayOrder: $displayOrder);
+    }
+
+    public static function emptyList(): self
+    {
+        return new self(SortKind::EmptyList, 'EmptyList');
+    }
+
     public function isInt(): bool
     {
         return $this->kind === SortKind::Int;
@@ -95,6 +117,45 @@ final readonly class Sort
         return $this->kind === SortKind::Never;
     }
 
+    public function isShape(): bool
+    {
+        return $this->kind === SortKind::Shape;
+    }
+
+    public function isList(): bool
+    {
+        return $this->kind === SortKind::List;
+    }
+
+    public function isEmptyList(): bool
+    {
+        return $this->kind === SortKind::EmptyList;
+    }
+
+    /**
+     * Whether a value of this sort is an array, or a nullable one.
+     */
+    public function isArrayLike(): bool
+    {
+        $sort = $this->isNullable() && $this->inner !== null ? $this->inner : $this;
+
+        return $sort->isShape() || $sort->isList() || $sort->isEmptyList();
+    }
+
+    /**
+     * Whether the `null` literal type is part of this sort, which no SMT datatype can hold.
+     */
+    public function containsNull(): bool
+    {
+        return match ($this->kind) {
+            SortKind::Null => true,
+            SortKind::Nullable => $this->inner?->containsNull() ?? false,
+            SortKind::List => $this->element?->containsNull() ?? false,
+            SortKind::Shape => array_reduce($this->shape->fields ?? [], static fn (bool $found, self $field): bool => $found || $field->containsNull(), false),
+            default => false,
+        };
+    }
+
     public function isNumeric(): bool
     {
         return $this->kind === SortKind::Int || $this->kind === SortKind::Float;
@@ -117,6 +178,9 @@ final readonly class Sort
             SortKind::Enum => $this->enum?->shortName() ?? $this->smt,
             SortKind::Record => $this->record?->shortName() ?? $this->smt,
             SortKind::Nullable => '?' . ($this->inner?->describe() ?? ''),
+            SortKind::List => 'list<' . ($this->element?->describe() ?? '') . '>',
+            SortKind::Shape => $this->shape?->describe($this->displayOrder) ?? $this->smt,
+            SortKind::EmptyList => 'array{}',
         };
     }
 }

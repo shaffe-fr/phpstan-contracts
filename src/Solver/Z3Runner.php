@@ -135,10 +135,11 @@ final class Z3Runner
         $pairs = $expressions[0] ?? [];
         if (is_array($pairs)) {
             foreach ($pairs as $pair) {
-                if (is_array($pair) && count($pair) === 2 && is_string($pair[0])) {
+                if (is_array($pair) && count($pair) === 2 && (is_string($pair[0]) || is_array($pair[0]))) {
                     /** @var string|list<mixed> $value */
                     $value = $pair[1];
-                    $values[$pair[0]] = $value;
+                    // A probe term such as (select (List_Int_items l@1) 0) is keyed by its text.
+                    $values[SExpr::render($pair[0])] = $value;
                 }
             }
         }

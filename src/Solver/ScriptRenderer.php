@@ -41,14 +41,7 @@ final class ScriptRenderer
 
     public function render(Encoding $encoding): string
     {
-        $lines = ['(set-option :produce-models true)'];
-
-        foreach ($encoding->datatypes() as $sort) {
-            $lines[] = $this->datatypeDeclaration($sort);
-        }
-        foreach ($encoding->enumFunctions() as [$enum, $function]) {
-            $lines[] = $this->enumFunction($enum, $function);
-        }
+        $lines = ['(set-option :produce-models true)', ...$this->declarations($encoding)];
 
         $lines[] = self::PRELUDE;
 
@@ -60,10 +53,7 @@ final class ScriptRenderer
         array_push($lines, sprintf('(echo "@@%d")', $index++), '(check-sat)');
         array_push($lines, ...array_slice($commands, $boundary));
 
-        $observed = implode(' ', array_map(
-            static fn ($symbol): string => $symbol->smtName,
-            $encoding->observedSymbols(),
-        ));
+        $observed = implode(' ', $encoding->observedTerms());
 
         foreach ($encoding->obligations as $obligation) {
             $violation = Smt::all($obligation->pathCondition, Smt::not($obligation->goal));
@@ -85,6 +75,24 @@ final class ScriptRenderer
         }
 
         return implode("\n", $lines) . "\n";
+    }
+
+    /**
+     * The datatypes of the encoding, then the functions on its enums.
+     *
+     * @return list<string>
+     */
+    public function declarations(Encoding $encoding): array
+    {
+        $lines = [];
+        foreach ($encoding->datatypes() as $sort) {
+            $lines[] = $this->datatypeDeclaration($sort);
+        }
+        foreach ($encoding->enumFunctions() as [$enum, $function]) {
+            $lines[] = $this->enumFunction($enum, $function);
+        }
+
+        return $lines;
     }
 
     /**
@@ -131,6 +139,27 @@ final class ScriptRenderer
                 '(declare-datatypes ((%s 0)) (((%s %s))))',
                 $sort->smt,
                 $sort->record->constructorName(),
+                implode(' ', $fields),
+            );
+        }
+
+        if ($sort->kind === SortKind::List && $sort->element !== null) {
+            return sprintf(
+                '(declare-datatypes ((%1$s 0)) (((mk_%1$s (%1$s_len Int) (%1$s_items (Array Int %2$s))))))',
+                $sort->smt,
+                $sort->element->smt,
+            );
+        }
+        if ($sort->kind === SortKind::Shape && $sort->shape !== null) {
+            $fields = [];
+            foreach (array_values($sort->shape->fields) as $position => $fieldSort) {
+                $fields[] = sprintf('(%s %s)', $sort->shape->accessorAt($position), $fieldSort->smt);
+            }
+
+            return sprintf(
+                '(declare-datatypes ((%s 0)) (((%s %s))))',
+                $sort->smt,
+                $sort->shape->constructorName(),
                 implode(' ', $fields),
             );
         }

@@ -18,7 +18,7 @@ final class CounterexampleFormatter
     public function format(Encoding $encoding, array $values, bool $withResult): string
     {
         $inputs = array_map(
-            fn ($input): string => sprintf('$%s = %s', $input->phpName, $this->values->format($input->sort, $values[$input->smtName] ?? null)),
+            fn ($input): string => sprintf('$%s = %s', $input->phpName, $this->values->format($input->sort, $values[$input->smtName] ?? null, $input->smtName, $values)),
             $encoding->inputs,
         );
 
@@ -28,7 +28,7 @@ final class CounterexampleFormatter
             return $text;
         }
 
-        $text .= sprintf(' => $result = %s', $this->values->format($encoding->result->sort, $values[$encoding->result->smtName] ?? null));
+        $text .= sprintf(' => $result = %s', $this->values->format($encoding->result->sort, $values[$encoding->result->smtName] ?? null, $encoding->result->smtName, $values));
 
         foreach ($encoding->returnMarkers as $marker) {
             if (($values[$marker->smtName] ?? null) === 'true') {
