@@ -92,7 +92,7 @@ final class MethodEncoder
                 throw new VerificationRejected('The parameter name $result is reserved for #[Ensures].', $param->getStartLine(), 'contracts.invalidContract');
             }
 
-            $spec = $this->types->map($scope->getVariableType($name), $param->getStartLine());
+            $spec = $this->types->map($scope->getVariableType($name), $param->getStartLine(), true);
             $this->rejectPhpDocFloat($node, $name, $spec->sort, $param->getStartLine());
             $term = $encoding->declareInput($name, $spec->sort);
             $encoding->assert($this->domains->constraint($spec, $term, true));

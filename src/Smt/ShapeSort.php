@@ -21,11 +21,12 @@ final readonly class ShapeSort
      */
     public function __construct(public array $fields)
     {
-        $canonical = [];
+        // Length-prefixed hex keys: injective for any byte string (json_encode fails on invalid UTF-8).
+        $canonical = '';
         foreach ($fields as $key => $sort) {
-            $canonical[] = [(string) $key, $sort->smt];
+            $canonical .= bin2hex((string) $key) . ':' . $sort->smt . ';';
         }
-        $this->smtName = 'Shape_' . substr(sha1((string) json_encode($canonical)), 0, 10);
+        $this->smtName = 'Shape_' . substr(sha1($canonical), 0, 10);
     }
 
     /**

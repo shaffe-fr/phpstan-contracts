@@ -98,6 +98,22 @@ final class ShapeSortTest extends TestCase
         self::assertTrue(Smt::shapeField($variable, 'net')->sort->isInt());
     }
 
+    public function testKeysThatAreNotValidUtf8GiveDistinctSorts(): void
+    {
+        $first = Sort::shape(ShapeSort::of(["\xff" => Sort::int()]));
+        $second = Sort::shape(ShapeSort::of(["\xfe" => Sort::int()]));
+        self::assertFalse($first->equals($second));
+        self::assertNotSame($first->smt, $second->smt);
+        self::assertTrue($first->equals(Sort::shape(ShapeSort::of(["\xff" => Sort::int()]))));
+    }
+
+    public function testTheSameKeyWithAnotherFieldSortIsAnotherSortEvenForNonUtf8Keys(): void
+    {
+        $int = Sort::shape(ShapeSort::of(["\xff" => Sort::int()]));
+        $string = Sort::shape(ShapeSort::of(["\xff" => Sort::string()]));
+        self::assertFalse($int->equals($string));
+    }
+
     public function testReadingAKeyThatTheShapeDoesNotHaveIsAProgrammingError(): void
     {
         $this->expectException(LogicException::class);

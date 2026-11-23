@@ -70,6 +70,11 @@ final class ArrayShapeRuleTest extends RuleFixtureTestCase
                 'arbitraryKeys' => ['contracts.unsupported: Type array<string, int> is not supported in verified methods: an array with arbitrary keys is not modelled.'],
                 'aUnionOfShapes' => ['contracts.unsupported: Type array{net: int}|array{vat: int} is not supported in verified methods (supported:'],
                 'aUnionFieldType' => ['contracts.unsupported: Type float|string is not supported in verified methods'],
+                'aFloatFieldInAnInput' => ['contracts.unsupported: Type array{rate: float} is not supported for an input: PHP does not convert the values of an array'],
+                'aNullableFloatFieldInAnInput' => ['contracts.unsupported: Type array{rate: float|null} is not supported for an input'],
+                'readsAFloatShapePropertyOfADataClass' => ['contracts.unsupported: Property PhpstanContracts\\Tests\\Fixtures\\FloatShapeHolder::$rates cannot be read in a verified method: Type array{rate: float} is not supported for an input'],
+                'aFloatFieldBuiltInTheBody' => [],
+                'shapesWithDistinctNonUtf8KeysAreDistinctTypes' => ['contracts.unsupported: Branches have different types'],
             ],
         ]);
     }

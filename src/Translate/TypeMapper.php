@@ -50,13 +50,18 @@ final class TypeMapper
     ) {
     }
 
-    public function map(Type $type, int $line): VarSpec
+    /**
+     * @param bool $input true when the type describes a value the caller supplies (a parameter or a
+     *                    data class property): PHP never converts the values of an array, so a `float`
+     *                    field of a shape may hold an int there.
+     */
+    public function map(Type $type, int $line, bool $input = false): VarSpec
     {
         // typeOnly() would print an array shape as array<string, int>, without its keys.
         $description = $type->describe(TypeCombinator::removeNull($type)->isArray()->yes() ? VerbosityLevel::value() : VerbosityLevel::typeOnly());
 
         if (TypeCombinator::containsNull($type) && !$type->isNull()->yes()) {
-            $inner = $this->map(TypeCombinator::removeNull($type), $line);
+            $inner = $this->map(TypeCombinator::removeNull($type), $line, $input);
 
             return new VarSpec(Sort::nullable($inner->sort), inner: $inner, description: $description);
         }
@@ -86,7 +91,7 @@ final class TypeMapper
         }
 
         if ($type->isArray()->yes()) {
-            return $this->mapArray($type, $description, $line);
+            return $this->mapArray($type, $description, $line, $input);
         }
 
         $classNames = $type->getObjectClassNames();
@@ -112,7 +117,7 @@ final class TypeMapper
      * An `array{a: T, b: U}` with required string keys is a shape; every other array type
      * is rejected with what to write instead.
      */
-    private function mapArray(Type $type, string $description, int $line): VarSpec
+    private function mapArray(Type $type, string $description, int $line, bool $input): VarSpec
     {
         $constants = $type->getConstantArrays();
         if (count($constants) > 1) {
@@ -155,7 +160,14 @@ final class TypeMapper
 
         $specs = [];
         foreach ($array->getValueTypes() as $position => $valueType) {
-            $specs[$names[$position]] = $this->map($valueType, $line);
+            $spec = $this->map($valueType, $line, $input);
+            if ($input && ($spec->sort->isFloat() || ($spec->sort->isNullable() && $spec->inner?->sort->isFloat() === true))) {
+                throw new VerificationRejected(
+                    sprintf('Type %s is not supported for an input: PHP does not convert the values of an array and PHPStan accepts an int for a float in an array shape, so the field %s may hold an int. Use int (for example cents) or a data class with a native float property.', $description, $names[$position]),
+                    $line,
+                );
+            }
+            $specs[$names[$position]] = $spec;
         }
         $declared = array_map(strval(...), array_keys($specs));
         uksort($specs, static fn (int|string $a, int|string $b): int => strcmp((string) $a, (string) $b));
@@ -231,7 +243,7 @@ final class TypeMapper
                 $declared = $class->getNativeProperty($property->getName());
                 $fieldType = $declared->getReadableType();
                 try {
-                    $fieldSpec = $this->map($fieldType, $line);
+                    $fieldSpec = $this->map($fieldType, $line, true);
                     if (self::holdsFloat($fieldSpec->sort) && !$this->convertsToFloat($declared->getNativeType())) {
                         $unmodelled[$property->getName()] = sprintf(
                             'Property %s cannot be read in a verified method: its PHPDoc type is %s but its native type is %s, so an int assigned to it stays an int. Declare float natively.',

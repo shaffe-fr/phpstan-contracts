@@ -532,4 +532,45 @@ final class ArrayShapeFixture
     {
         return 1;
     }
+
+    /**
+     * @param array{rate: float} $quote
+     */
+    #[Pure]
+    public static function aFloatFieldInAnInput(array $quote): int
+    {
+        return 1;
+    }
+
+    /**
+     * @param array{rate: ?float} $quote
+     */
+    #[Pure]
+    public static function aNullableFloatFieldInAnInput(array $quote): int
+    {
+        return 1;
+    }
+
+    #[Pure]
+    public static function readsAFloatShapePropertyOfADataClass(FloatShapeHolder $holder): int
+    {
+        return count([$holder->rates['rate']]);
+    }
+
+    /**
+     * @return array{rate: float}
+     */
+    #[Ensures('$result["rate"] === 1.5')]
+    public static function aFloatFieldBuiltInTheBody(): array
+    {
+        return ['rate' => 1.5];
+    }
+
+    #[Ensures('$result === 1')]
+    public static function shapesWithDistinctNonUtf8KeysAreDistinctTypes(bool $condition): int
+    {
+        $shape = $condition ? ["\xff" => 1] : ["\xfe" => 1];
+
+        return $shape["\xff"];
+    }
 }
