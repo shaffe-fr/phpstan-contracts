@@ -10,7 +10,7 @@ A verified method can take and return the types below. Anything else is rejected
 | [`string`](#string) | `string`, `non-empty-string` | strings of bytes |
 | [enums](#enums) | pure and backed | one constructor per case |
 | [nullable](#nullable-values) | `?T`, `T\|null` for any type in this table | a value that is either none or some |
-| [data classes](#readonly-data-classes) | concrete classes with public readonly properties, including DTOs of `spatie/laravel-data` | a record of the public readonly properties |
+| [data classes](#readonly-data-classes) | concrete classes with public readonly properties, which may extend a framework base class | a record of the public readonly properties |
 
 Not supported: `array` and `list<T>`, `mixed`, `object`, `callable`, closures, unions of different types (`int|string`, `int|float`), `iterable`, `void`, `never`, interfaces and abstract classes, and classes without any `public readonly` property. A class can have mutable properties as long as the proof does not read them.
 
@@ -213,17 +213,19 @@ Not supported: `==` and `!=` on strings (PHP compares two numeric strings as num
 A label built from a count is the usual place for the conversion. The version that forgets the singular is refuted:
 
 ```php
-/** @param int<1, 30> $days */
-#[Ensures('implies($days === 1, $result === "1 jour")')]
+/**
+ * @param int<1, 60> $days
+ */
+#[Ensures('implies($days === 1, $result === "Ships in 1 day")')]
 public static function inStockDelayBroken(int $days): string
 {
-    return $days . ' jours';
+    return "Ships in $days days";
 }
 ```
 
 ```
-IntToStringFixture.php:25: Postcondition #[Ensures('implies($days === 1, $result === "1 jour")')] can be violated.
-Counterexample: $days = 1 => $result = '1 jours' (return at line 28).
+DeliveryLabel.php:30: Postcondition #[Ensures('implies($days === 1, $result === "Ships in 1 day")')] can be violated.
+Counterexample: $days = 1 => $result = 'Ships in 1 days' (return at line 33).
 ```
 
 In a contract, the attribute argument is a single-quoted PHP string, so write string literals with double quotes: `#[Ensures('$result === "EUR"')]`.
@@ -643,11 +645,10 @@ A class can be a parameter, a return type, or a field of another class when all 
 - it has at least one `public readonly` property of a supported type, which can itself be nullable or another data class (a `readonly class` qualifies), and
 - it does not refer to itself.
 
-The `public readonly` properties of a supported type are the model of an instance. A readonly property cannot change once it is set, whatever the rest of the object does, so the class may hold other properties too: the proof leaves them out, and **reading one of them is rejected** with the reason. This is what lets a DTO that extends `Spatie\LaravelData\Data` be verified: its own properties are promoted `public readonly`, and the `protected` state that the base class brings in through its traits, such as `$_additional`, is never read.
+The `public readonly` properties of a supported type are the model of an instance. A readonly property cannot change once it is set, whatever the rest of the object does, so the class may hold other properties too: the proof leaves them out, and **reading one of them is rejected** with the reason. This is what lets a DTO that extends a framework base class be verified, whatever the framework (`Spatie\LaravelData\Data` is one example): its own properties are promoted `public readonly`, and the mutable state of the base class is never read. Reading it is the rejection of `PriceContext::hasNoExtraStateBroken()` in [`examples/RealWorld/PriceContext.php`](../examples/RealWorld/PriceContext.php), whose base class [`DataObject`](../examples/RealWorld/DataObject.php) holds a `protected array $state`:
 
 ```
-Property App\Pricing\PriceContextData::$_additional must be public and readonly: only immutable data classes are supported.
-Property App\Pricing\PriceContextData::$lines cannot be read in a verified method: Type list<App\Pricing\LineData> is not supported in verified methods (...).
+PriceContext.php:53: Property PhpstanContracts\Examples\RealWorld\PriceContext::$state must be public and readonly: only immutable data classes are supported.
 ```
 
 A class whose properties are all left out is rejected as a type, with the reason of the first one.

@@ -135,7 +135,7 @@ final class Pricing
 
 ## It works on your DTOs, not only on numbers
 
-Real signatures take objects. Readonly data classes (the usual DTOs and value objects, including `spatie/laravel-data` DTOs with promoted `public readonly` properties) can be parameters, return types and nested fields, nullable or not. Their PHPDoc ranges are the domain of the proof.
+Real signatures take objects. Readonly data classes (the usual DTOs and value objects) can be parameters, return types and nested fields, nullable or not. Their PHPDoc ranges are the domain of the proof. A class may also hold properties the proof does not read, such as the state of a framework base class (`Spatie\LaravelData\Data` is one example): the `public readonly` properties of a supported type are the model, and reading any other property is rejected.
 
 ```php
 final readonly class Cart
@@ -191,11 +191,11 @@ The verified subset is small on purpose, so that the answer is a real proof and 
 
 - `int`, `bool`, `string` (as bytes), enums (pure and backed), nullable versions of all of these, and readonly data classes
 - `float`, modelled exactly as IEEE 754: the prover knows that `0.1 + 0.2 !== 0.3`, and that regrouping a sum changes the result
-- `if` / `elseif` / `else`, `match`, early `return`, local variables, null checks that narrow the type, and guards that throw, declared with `#[Throws(E::class, when: '...')]`
-- enum and value-object code as it is usually written: `self::Case`, class constants, `$this` in the methods of enums (`match ($this)`) and readonly data classes, and calls to other methods of the same file, such as `$this->level() <= $other->level()`
-- arithmetic, comparisons, `min`, `max`, `abs`, `intdiv`, `in_array` over a list of cases or scalars, and the common string checks (length, prefix, suffix, containment, concatenation)
+- `if` / `elseif` / `else`, `match`, early `return`, local variables, null checks that narrow the type, and guards that throw, declared with `#[Throws(E::class, when: '...')]` (a `throw` that nothing declares must be unreachable, as in the `default` arm of an exhaustive `match`)
+- enum and value-object code as it is usually written: `self::Case`, class constants, `$this` in the methods of enums (`match ($this)`) and readonly data classes, and calls to other methods of the same file, such as `$this->level() <= $other->level()` or a static helper whose `#[Requires]` is checked at the call
+- arithmetic, comparisons, `min`, `max`, `abs`, `intdiv`, `in_array` over a list of cases or scalars (`strict: true` for strings), and the common string checks (length, prefix, suffix, containment, concatenation, with an `int` written in decimal in `.`, interpolation and `(string)`)
 
-Not yet: loops, calls to methods of other files, arrays and lists, mutable objects. Anything outside the subset is reported as `contracts.unsupported` with the reason, never silently skipped. Floating-point multiplication of two variables can be too slow to decide, so money is better kept as integer cents and rates as basis points. See [Supported types](docs/types.md) for what each type can do, and [Limits and roadmap](docs/limits-and-roadmap.md) for what a green run guarantees and what comes next.
+Not yet: loops, `try`/`catch`, calls to methods of other files, arrays and lists (other than the list of `in_array()`), mutable state (the state of a framework base class can stay in a data class, but a verified method cannot read it), and `float` or `bool` in a string. Anything outside the subset is reported as `contracts.unsupported` with the reason, never silently skipped. Floating-point multiplication of two variables can be too slow to decide, so money is better kept as integer cents and rates as basis points. See [Supported types](docs/types.md) for what each type can do, and [Limits and roadmap](docs/limits-and-roadmap.md) for what a green run guarantees and what comes next.
 
 ## Learn more
 
@@ -204,7 +204,7 @@ Not yet: loops, calls to methods of other files, arrays and lists, mutable objec
 | [Getting started](docs/getting-started.md) | Install, first proof, configuration |
 | [Writing contracts](docs/writing-contracts.md) | The attributes, the contract language, every diagnostic |
 | [Supported types](docs/types.md) | `int`, `float`, `string`, enums, nullables, data classes, with the real bugs found in each |
-| [Real-world examples](docs/real-world-examples.md) | Pagination, VAT, installments, workflows, rate limits, uploads, checkout and more: twenty-one rules, each with the bug the prover found |
+| [Real-world examples](docs/real-world-examples.md) | Pagination, VAT, installments, workflows, rate limits, uploads, checkout and more: twenty-two rules, each with the bug the prover found |
 | [How it works](docs/how-it-works.md) | From PHP to SMT-LIB to Z3 |
 | [Limits and roadmap](docs/limits-and-roadmap.md) | What is guaranteed, what is next |
 
@@ -216,7 +216,7 @@ php bin/phpstan-contracts-install-z3
 vendor/bin/phpstan analyse
 ```
 
-The run reports 57 diagnostics, all intended: the examples that show a refuted rule, an undecided one or a rejected construct. It takes about a minute and a half with a cold cache. Every other annotated method is proven.
+The run reports 62 errors, all intended: 58 from this extension (the examples that show a refuted rule, an undecided one or a rejected construct) and 4 from PHPStan's own rules on the deliberately broken methods (`argument.type` twice, `return.missing`, `match.unhandled`). It takes about a minute and a half with a cold cache. Every other annotated method is proven.
 
 ## Status
 

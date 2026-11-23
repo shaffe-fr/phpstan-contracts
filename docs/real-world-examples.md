@@ -1,6 +1,6 @@
 # Real-world examples
 
-Twenty-one business rules of the kind found in shops, booking engines and APIs. Each one is real code in [`examples/RealWorld`](../examples/RealWorld), checked by `phpstan analyse` with this extension. Sections 1 to 8 use integers, booleans and enums. [Section 9](#9-the-same-rules-over-richer-types) covers data classes, strings, floats, nullable values, enum methods, class constants, calls, `in_array()` and guards that throw, which the [types page](types.md) shows in detail. The code blocks below are copied from those files with the prose descriptions of the docblocks left out, and the outputs are the actual diagnostics, shown with `--error-format=raw` and shortened paths.
+Twenty-two business rules of the kind found in shops, booking engines and APIs. Each one is real code in [`examples/RealWorld`](../examples/RealWorld), checked by `phpstan analyse` with this extension. Sections 1 to 8 use integers, booleans and enums. [Section 9](#9-the-same-rules-over-richer-types) covers data classes, strings, floats, nullable values, enum methods, class constants, calls, `in_array()` and guards that throw, which the [types page](types.md) shows in detail. The code blocks below are copied from those files with the prose descriptions of the docblocks left out, and the outputs are the actual diagnostics, shown with `--error-format=raw` and shortened paths.
 
 Each section follows the same arc: the rule, the contract that states it, what the prover established, and a plausible bug it caught.
 
@@ -16,7 +16,7 @@ Each section follows the same arc: the rule, the contract that states it, what t
 | 6 | Shipping fee | 2 | 1 proven, 1 refuted |
 | 7 | Rate limiting | 3 | 2 proven, 1 refuted (two ways) |
 | 8 | Calendar | 3 | 2 proven, 1 refuted |
-| 9 | Richer types: data classes, strings, floats, nullables, enum parsing, enum methods, class constants, calls, `in_array()`, guards that throw | 49 | 28 proven, 21 refuted |
+| 9 | Richer types: data classes, strings, floats, nullables, enum parsing, enum methods, class constants, calls, `in_array()`, guards that throw | 56 | 32 proven, 24 refuted |
 
 ## 1. Pagination
 
@@ -565,7 +565,7 @@ Real signatures are rarely just integers. The rules below use the types that sec
 |---|---|---|---|---|---|
 | [Checkout with an optional coupon](types.md#data-classes-and-the-return-type) | `Checkout.php` | data classes, nullable fields, `?->` | 4 | 3 proven, 1 refuted | a flat 5.00 bonus makes the total negative |
 | [Parsing and printing currencies](types.md#enums) | `CurrencyParser.php` | string-backed enum, `from()`, `tryFrom()`, `->value` | 5 | 3 proven, 2 refuted | `from()` throws on unknown input, and `"€"` is 3 bytes, not 1 |
-| [File uploads and storage keys](types.md#real-string-bugs) | `Uploads.php` | strings | 7 | 4 proven, 3 refuted | `str_contains()` accepts `shell.png.php`; a hidden file named `.jpg`; a key that starts with `/` |
+| [File uploads and storage keys](types.md#real-string-bugs) | `Uploads.php` | strings, `in_array()` with `strict: true` | 9 | 5 proven, 4 refuted | `str_contains()` accepts `shell.png.php`; a hidden file named `.jpg`; a key that starts with `/`; a list of extensions that forgets `jpeg` |
 | [Optional values](types.md#real-nullable-bugs) | `Nullables.php` | nullable ints, `??`, null checks | 4 | 3 proven, 1 refuted | a clamp forgotten on the value that was given |
 | [Floating point](types.md#real-floating-point-bugs) | `Floats.php` | `float` | 8 | 3 proven, 5 refuted | a midpoint that overflows, `floor(19.99 * 100)` is 1998, `NAN`, a regrouped sum |
 | [Stock availability](types.md#enum-methods-and-this) | `StockAvailability.php` | an enum returning `self::` cases | 2 | 1 proven, 1 refuted | `>=` offers a product with no stock |
@@ -573,9 +573,10 @@ Real signatures are rarely just integers. The rules below use the types that sec
 | [Stock left to sell](types.md#readonly-data-classes) | `StockLine.php` | `$this` in a data class | 2 | 1 proven, 1 refuted | over-reservation makes the stock negative |
 | [A code range reserved in the ERP](writing-contracts.md#class-constants-self-and-this) | `ErpCode.php` | class constants, `self::` | 2 | 1 proven, 1 refuted | the last id gets the first code outside the range |
 | [The same range, as a guard that throws](writing-contracts.md#exceptions) | `ErpCode.php` | `#[Throws(..., when: ...)]` | 2 | 1 proven, 1 refuted | the guard lets the last id through |
+| [A `match` default that cannot happen](writing-contracts.md#exceptions) | `ErpCode.php` | an undeclared `throw` in a `match` default, proven unreachable | 2 | 1 proven, 1 refuted | the domain grew and the default arm is reached at id 1000 |
 | [Roles that manage each other](writing-contracts.md#calls-to-other-methods) | `UserRole.php` | an enum calling its own method, `in_array()` over cases and over a constant | 5 | 3 proven, 2 refuted | `<` stops a role from managing its own level; the constant of prescribers forgets the validator |
-| [Delivery labels](types.md#string) | `DeliveryLabel.php` | an int in `.`, in an interpolation and in `(string)` | 3 | 2 proven, 1 refuted | "Ships in 1 days" |
-| [A DTO of a data framework](types.md#readonly-data-classes) | `PriceContext.php` | a data class with the mutable state of its base class | 2 | 1 proven, 1 refuted | the bulk discount starts at eleven items |
+| [Delivery labels](types.md#string) | `DeliveryLabel.php` | an int in `.`, in an interpolation and in `(string)`; a static helper with a `#[Requires]` checked at the call | 6 | 4 proven, 2 refuted | "Ships in 1 days"; a guard of `>= 1` calls a helper that needs `>= 2` |
+| [A DTO of a data framework](types.md#readonly-data-classes) | `PriceContext.php` | a data class extending a base class with protected mutable state | 2 | 1 proven, 1 refuted | the bulk discount starts at eleven items. A third method, which reads the base state, is rejected with `contracts.unsupported` |
 
 Two of them are worth reading first. The checkout shows a rule over an object graph, with a nullable object inside a cart, which is the shape of most real signatures. The float page shows bugs that no unit test with ordinary values finds, such as a regrouped sum that differs in the last bit.
 

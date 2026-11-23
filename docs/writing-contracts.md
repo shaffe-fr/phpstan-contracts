@@ -150,7 +150,7 @@ Everything in the table in [the contract language](#the-contract-language) works
 | a method call on anything but an enum case or a data object | `Method calls are only supported on enums and data classes, not on a string.` |
 | `new` on a class that is not a plain data class | `Cannot instantiate Percentage: its constructor contains logic, which is not verified.` |
 | `$this` in a class that is not an enum or a readonly data class | `Object state ($this) is only part of the verified subset in enums and readonly data classes.`, followed by the reason, such as `Property Counter::$count must be public and readonly` |
-| reading a property that is not `public readonly`, or whose type is not supported | `Property Foo::$_additional must be public and readonly: only immutable data classes are supported.` |
+| reading a property that is not `public readonly`, or whose type is not supported | `Property Foo::$state must be public and readonly: only immutable data classes are supported.` |
 | `static::LIMIT` on a class that is not final, for a constant that is not final | `static::LIMIT is late bound: a subclass of CartLimits can override the constant. Use self::LIMIT, or make the class or the constant final.` |
 | `static::` for anything else on a class that is not final, such as `new static()` | `static:: is late bound and CartLimits is not final, so a subclass can change what it refers to; use self:: or make the class final.` |
 | `parent::` | `parent:: is not supported; write the name of the parent class.` |
@@ -198,8 +198,8 @@ public static function tryFrom(int $webId): ?int
 The off-by-one version is refuted at the last id:
 
 ```
-ErpCode.php:35: Postcondition #[Ensures('implies($result !== null, $result < self::RANGE_END)')] can be violated.
-Counterexample: $webId = 1000000 => $result = 99000000 (return at line 38).
+ErpCode.php:36: Postcondition #[Ensures('implies($result !== null, $result < self::RANGE_END)')] can be violated.
+Counterexample: $webId = 1000000 => $result = 99000000 (return at line 39).
 ```
 
 `self::X` and `ClassName::X` are statically bound, so they are always accepted. `static::X` is accepted when the class is final or the constant is declared `final`. Otherwise a subclass can override the constant, and the access is rejected:
@@ -257,6 +257,12 @@ Counterexample: $this = Role::Validator, $other = Role::Validator => $result = f
 ```
 CallFixture.php:45: The call to PhpstanContracts\Tests\Fixtures\CallFixture::halve() can violate its precondition #[Requires('$x >= 0')].
 Counterexample: $x = -1.
+```
+
+The same check in [`examples/RealWorld/DeliveryLabel.php`](../examples/RealWorld/DeliveryLabel.php): `plural()` requires `$days >= 2`, `shortDelay()` calls it only for more than one day and is proven, and `shortDelayBroken()` guards with `>= 1`:
+
+```
+DeliveryLabel.php:76: The call to PhpstanContracts\Examples\RealWorld\DeliveryLabel::plural() can violate its precondition #[Requires('$days >= 2')]. Counterexample: $days = 1.
 ```
 
 A safety check inside the callee is reported at the line of the call, and says which call it comes from: ``Possible integer overflow: `$x * 2` can leave the PHP int range, in the call to PhpstanContracts\Tests\Fixtures\CallFixture::double().`` When the callee calls another method, the message names the whole chain, from the call on the reported line to the method that holds the check: ``..., in the call to PhpstanContracts\Tests\Fixtures\CallFixture::quadruple(), through PhpstanContracts\Tests\Fixtures\CallFixture::double().``
@@ -320,19 +326,26 @@ ThrowsFixture.php:35: Postcondition #[Ensures('$result < self::OFFSET + self::SI
 Counterexample: $webId = 1000000 => $result = 99000000 (return at line 42).
 ```
 
-**A `throw` that no `#[Throws]` declares must be unreachable.** This is how a consistency check, such as a `default` arm of a `match` that cannot happen, is proven dead:
+**A `throw` that no `#[Throws]` declares must be unreachable.** This is how a consistency check, such as a `default` arm of a `match` that cannot happen, is proven dead. `ErpCode::shard()` in [`examples/RealWorld/ErpCode.php`](../examples/RealWorld/ErpCode.php) is proven:
 
 ```php
-#[Ensures('$result >= 0 && $result <= 2')]
-public static function anUndeclaredThrowThatIsUnreachable(Suit $suit): int
+#[Requires('$webId >= 0 && $webId < 1000')]
+#[Ensures('$result >= 1 && $result <= 2')]
+#[Ensures('implies($webId < 500, $result === 1)')]
+public static function shard(int $webId): int
 {
-    return match ($suit) {
-        Suit::Hearts => 0,
-        Suit::Spades => 1,
-        Suit::Clubs => 2,
-        default => throw new \LogicException('Unknown suit.'),
+    return match (intdiv($webId, 500)) {
+        0 => 1,
+        1 => 2,
+        default => throw new \LogicException('Unknown shard.'),
     };
 }
+```
+
+`shardBroken()` has the same body with a domain that grew to 1500 ids, so the `default` arm can be reached:
+
+```
+ErpCode.php:98: `throw new \LogicException('Unknown shard.')` can be reached where no #[Throws] allows it. Counterexample: $webId = 1000.
 ```
 
 Without `when`, `#[Throws(E::class)]` allows `E` on any path where no other declaration forbids it, and proves nothing about when it happens: only the paths that return are checked.
