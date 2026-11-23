@@ -261,6 +261,25 @@ final class SmtTest extends TestCase
         self::assertSame('list<?string>', Sort::list(Sort::nullable(Sort::string()))->describe());
     }
 
+    public function testListSearchAndIdentity(): void
+    {
+        $list = Sort::list(Sort::int());
+        $l = Smt::symbol('l', $list);
+        $other = Smt::symbol('m', $list);
+        $needle = Smt::symbol('n', Sort::int());
+
+        self::assertSame(
+            '(exists ((k!0 Int)) (! (and (and (<= 0 k!0) (< k!0 (List_Int_len l))) (= (select (List_Int_items l) k!0) n)) :pattern ((select (List_Int_items l) k!0))))',
+            Smt::listContains($l, static fn (Term $item): Term => Smt::phpEquals($item, $needle))->smt,
+        );
+        self::assertSame(
+            '(and (= (List_Int_len l) (List_Int_len m)) (forall ((k!0 Int)) (! (or (not (and (<= 0 k!0) (< k!0 (List_Int_len l)))) (= (select (List_Int_items l) k!0) (select (List_Int_items m) k!0))) :pattern ((select (List_Int_items l) k!0)) :pattern ((select (List_Int_items m) k!0)))))',
+            Smt::listIdentical($l, $other)->smt,
+        );
+        $this->expectException(InvalidArgumentException::class);
+        Smt::listIdentical($l, Smt::symbol('f', Sort::list(Sort::float())));
+    }
+
     public function testQuantifiers(): void
     {
         $body = Smt::symbol('p', Sort::bool());

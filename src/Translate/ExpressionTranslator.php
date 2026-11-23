@@ -59,6 +59,8 @@ use PHPStan\Type\VerbosityLevel;
  */
 final class ExpressionTranslator
 {
+    private const IN_ARRAY_HAYSTACK = 'in_array() is only supported on a list<T>, or on a list literal such as [self::A, self::B] or a class constant holding one.';
+
     private const FLOAT_ORDER = [
         '<' => 'fp.lt',
         '<=' => 'fp.leq',
@@ -497,11 +499,7 @@ final class ExpressionTranslator
         }
 
         if ($left->sort->isArrayLike() || $right->sort->isArrayLike()) {
-            $isShape = static fn (Sort $sort): bool => ($sort->isNullable() ? $sort->inner : $sort)?->isShape() === true;
-
-            throw $this->reject($expr, $isShape($left->sort) || $isShape($right->sort)
-                ? $this->shapeIdentityRefusal()
-                : 'Lists compared with === are not supported yet: PHP compares the keys, their order and every value, which is not modelled. Compare count($list) and the elements, such as count($a) === count($b) && $a[0] === $b[0].');
+            return $this->identicalArrays($expr, $left, $right);
         }
 
         if ($left->sort->isNullable() && $left->sort->inner !== null && $left->sort->inner->equals($right->sort)) {
@@ -526,6 +524,67 @@ final class ExpressionTranslator
         }
 
         return Smt::phpEquals($left, $right);
+    }
+
+    /**
+     * `===` where an operand is an array. Two lists are identical when they have the same
+     * count and an identical element at every key, which is exact for elements that compare
+     * by value. For floats it is not: PHP answers true at once for the same array in memory,
+     * so `[NAN] === [NAN]` is false but `$a === $a` is true for `$a = [NAN]`.
+     */
+    private function identicalArrays(Expr $expr, Term $left, Term $right): Term
+    {
+        $isShape = static fn (Sort $sort): bool => ($sort->isNullable() ? $sort->inner : $sort)?->isShape() === true;
+        if ($isShape($left->sort) || $isShape($right->sort)) {
+            throw $this->reject($expr, $this->shapeIdentityRefusal());
+        }
+        if ($left->sort->isNullable() || $right->sort->isNullable()) {
+            throw $this->reject($expr, sprintf(
+                'A list that may be null (%s === %s) is not compared with === yet: check it with `!== null` first, then compare the lists.',
+                $left->sort->describe(),
+                $right->sort->describe(),
+            ));
+        }
+        $isList = static fn (Sort $sort): bool => $sort->isList() || $sort->isEmptyList();
+        if (!$isList($left->sort) || !$isList($right->sort)) {
+            throw $this->reject($expr, sprintf(
+                '%s === %s is always false in PHP; the operands have different types.',
+                $left->sort->describe(),
+                $right->sort->describe(),
+            ));
+        }
+
+        if ($left->sort->isEmptyList() && $right->sort->isEmptyList()) {
+            return Smt::bool(true);
+        }
+        // `$list === []` holds exactly when the list is empty, whatever its elements are.
+        if ($left->sort->isEmptyList() || $right->sort->isEmptyList()) {
+            $list = $left->sort->isEmptyList() ? $right : $left;
+
+            return Smt::eq(Smt::listLength($list), Smt::int(0));
+        }
+
+        if (!$left->sort->equals($right->sort)) {
+            throw $this->reject($expr, sprintf(
+                'Lists of different element types (%s and %s) are not compared with ===: convert the elements first, or compare count() and the elements.',
+                $left->sort->describe(),
+                $right->sort->describe(),
+            ));
+        }
+
+        $element = $left->sort->element ?? throw new LogicException('A list sort has an element sort.');
+        $plain = $element->isNullable() && $element->inner !== null ? $element->inner : $element;
+        if ($plain->isFloat()) {
+            throw $this->reject($expr, 'Lists of floats cannot be compared with ===: PHP first checks whether both are the same array in memory, so [NAN] === [NAN] is false while $a === $a is true for $a = [NAN]. Compare count() and the elements instead, such as count($a) === count($b) && $a[0] === $b[0].');
+        }
+        if ($plain->isShape()) {
+            throw $this->reject($expr, $this->shapeIdentityRefusal());
+        }
+        if ($plain->kind === SortKind::Record) {
+            throw $this->reject($expr, 'Lists of objects cannot be compared with ===: objects are compared by identity; compare the fields of the elements.');
+        }
+
+        return Smt::listIdentical($this->encoding->define('list', $left), $this->encoding->define('list', $right));
     }
 
     /**
@@ -1201,6 +1260,10 @@ final class ExpressionTranslator
             ));
         }
 
+        if (!$slots['haystack'] instanceof Expr\Array_ && !$slots['haystack'] instanceof ClassConstFetch) {
+            return $this->inArrayOfList($call, $needle, $strict, $this->translate($slots['haystack'], $env, $pc));
+        }
+
         $matches = [];
         foreach ($this->listElements($slots['haystack'], $env, $pc) as $element) {
             $matches[] = $strict
@@ -1209,6 +1272,59 @@ final class ExpressionTranslator
         }
 
         return Smt::any(...$matches);
+    }
+
+    /**
+     * `in_array($needle, $list, $strict)` where `$list` is a list-valued expression: some key
+     * below `count($list)` whose element equals the needle, with `===` or `==` as PHP does it
+     * element by element (IEEE equality for floats, so NAN is never found and -0.0 equals 0.0).
+     * The needle must have the element sort, once a nullable is lifted, so that `==` between
+     * the two is as exact as `===`.
+     */
+    private function inArrayOfList(FuncCall $call, Term $needle, bool $strict, Term $list): Term
+    {
+        if ($list->sort->isShape()) {
+            throw $this->reject($call, 'in_array() is only supported on a list or a list literal, not on an array shape; compare the values, such as $x === $totals[\'net\'] || $x === $totals[\'vat\'].');
+        }
+        if ($list->sort->isNullable() && $list->sort->inner?->isList() === true) {
+            throw $this->reject($call, sprintf('in_array() needs a list, not a %s, which may be null here: PHP throws a TypeError for in_array() on null. Check it first with `!== null`.', $list->sort->describe()));
+        }
+        if ($list->sort->isEmptyList()) {
+            return Smt::bool(false);
+        }
+        $element = $list->sort->element;
+        if (!$list->sort->isList() || $element === null) {
+            throw $this->reject($call, self::IN_ARRAY_HAYSTACK);
+        }
+
+        $plain = $element->isNullable() && $element->inner !== null ? $element->inner : $element;
+        if ($plain->kind === SortKind::Record || $plain->isShape()) {
+            throw $this->reject($call, sprintf(
+                'in_array() on a list of %s compares them by identity with strict: true and property by property without it, which is not modelled; compare a field instead.',
+                $plain->isShape() ? 'array shapes' : 'objects',
+            ));
+        }
+        if (!$strict && $element->isNullable()) {
+            throw $this->reject($call, sprintf(
+                'in_array() without strict: true compares with ==, which juggles a %s (null == 0 is true); pass true as the third argument.',
+                $element->describe(),
+            ));
+        }
+
+        $list = $this->encoding->define('list', $list);
+        $matches = match (true) {
+            $needle->sort->equals($element) => static fn (Term $item): Term => Smt::phpEquals($item, $needle),
+            $element->isNullable() && $needle->sort->isNull() => static fn (Term $item): Term => Smt::isNone($item),
+            $element->isNullable() && $element->inner !== null && $needle->sort->equals($element->inner) => static fn (Term $item): Term => Smt::phpEquals($item, Smt::some($needle)),
+            $needle->sort->isNullable() && $needle->sort->inner !== null && $needle->sort->inner->equals($element) => static fn (Term $item): Term => Smt::phpEquals(Smt::some($item), $needle),
+            default => throw $this->reject($call, sprintf(
+                'in_array() needs a needle of the element type of the list: got %s for a %s. Convert the needle first, such as (float) $x.',
+                $needle->sort->describe(),
+                $list->sort->describe(),
+            )),
+        };
+
+        return Smt::listContains($list, $matches);
     }
 
     /**
@@ -1231,11 +1347,7 @@ final class ExpressionTranslator
         }
 
         if (!$list instanceof Expr\Array_) {
-            if ($this->translate($list, $env, $pc)->sort->isShape()) {
-                throw $this->reject($list, 'in_array() is only supported on a list or a list literal, not on an array shape; compare the values, such as $x === $totals[\'net\'] || $x === $totals[\'vat\'].');
-            }
-
-            throw $this->reject($list, 'in_array() is only supported on a list literal, such as [self::A, self::B], or a class constant holding one.');
+            throw $this->reject($list, self::IN_ARRAY_HAYSTACK);
         }
 
         $elements = [];

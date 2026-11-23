@@ -474,6 +474,41 @@ final class Smt
     }
 
     /**
+     * `in_array()` over a list: some key below `count($list)` whose element satisfies `$matches`.
+     * `$list` must be an atom, since it appears under the quantifier.
+     *
+     * @param callable(Term): Term $matches the equality of one element with the needle
+     */
+    public static function listContains(Term $list, callable $matches): Term
+    {
+        $key = self::symbol('k!0', Sort::int());
+        $element = self::listItem($list, $key);
+
+        return self::exists('k!0', self::all(self::hasKey($list, $key), $matches($element)), [$element]);
+    }
+
+    /**
+     * `$a === $b` on two lists of the same sort whose elements compare by structure: the same
+     * count, and the same element at every key below it. Both lists must be atoms.
+     */
+    public static function listIdentical(Term $left, Term $right): Term
+    {
+        self::assertSameSort($left, $right);
+        $key = self::symbol('k!0', Sort::int());
+        $leftItem = self::listItem($left, $key);
+        $rightItem = self::listItem($right, $key);
+
+        return self::all(
+            self::eq(self::listLength($left), self::listLength($right)),
+            self::forall(
+                'k!0',
+                self::implies(self::hasKey($left, $key), self::eq($leftItem, $rightItem)),
+                [$leftItem, $rightItem],
+            ),
+        );
+    }
+
+    /**
      * `(forall ((k!0 Int)) (! body :pattern (...)))`.
      *
      * @param list<Term> $patterns

@@ -483,6 +483,147 @@ final class SemanticsTest extends TestCase
         }
     }
     /**
+     * `in_array($needle, $list, true)` and, where the needle and the elements have the same
+     * scalar type, `in_array($needle, $list)`, against PHP: floats are equal by IEEE (NAN is never
+     * found, -0.0 is found as 0.0), strings compare byte for byte, and a nullable element is
+     * compared with a null, an int or a nullable needle after lifting, as the translator does.
+     * Each list is checked in a script of its own: with several lists in one script the solver
+     * instantiates the quantifiers over all of them.
+     */
+    public function testInArrayOverListsMatchesPhp(): void
+    {
+        $pools = [
+            'int' => [Sort::int(), [PHP_INT_MIN, PHP_INT_MAX, -1, 0, 1, 42]],
+            'string' => [Sort::string(), ['', "a\0b", "\xC3\xA9", 'EUR', "\xFF", '0', '00']],
+            'float' => [Sort::float(), [0.0, -0.0, NAN, INF, -INF, 1.5, PHP_FLOAT_MAX]],
+            'bool' => [Sort::bool(), [true, false]],
+            'nullable int' => [Sort::nullable(Sort::int()), [null, 0, PHP_INT_MAX, -5]],
+            'nullable float' => [Sort::nullable(Sort::float()), [null, 0.0, -0.0, NAN, INF, 1.5]],
+        ];
+
+        mt_srand(29);
+        foreach ($pools as $name => [$elementSort, $pool]) {
+            $lists = [[], array_slice($pool, 0, 1), array_slice($pool, 0, 2), $pool];
+            for ($i = 0; $i < 4; ++$i) {
+                $lists[] = $this->randomList($pool);
+            }
+
+            $failed = [];
+            $total = 0;
+            foreach ($lists as $php) {
+                $encoding = new Encoding();
+                $encoding->registerSort(Sort::list($elementSort));
+                $encoding->registerSort(Sort::nullable($elementSort->isNullable() ? ($elementSort->inner ?? $elementSort) : $elementSort));
+                $list = $this->definedList($encoding, $elementSort, $php);
+
+                $claims = [];
+                foreach ($pool as $needle) {
+                    $needleTerm = $this->valueTerm($elementSort, $needle);
+                    $found = Smt::listContains($list, static fn (Term $item): Term => Smt::phpEquals($item, $needleTerm));
+                    $claims[] = Smt::eq($found, Smt::bool(in_array($needle, $php, true)))->smt;
+                    if (!$elementSort->isString() && !$elementSort->isNullable()) {
+                        $claims[] = Smt::eq($found, Smt::bool(in_array($needle, $php)))->smt;
+                    }
+
+                    if ($elementSort->isNullable() && $needle !== null) {
+                        $plain = $this->valueTerm($elementSort->inner ?? $elementSort, $needle);
+                        $lifted = Smt::listContains($list, static fn (Term $item): Term => Smt::phpEquals($item, Smt::some($plain)));
+                        $claims[] = Smt::eq($lifted, Smt::bool(in_array($needle, $php, true)))->smt;
+                    }
+                    if (!$elementSort->isNullable() && !$elementSort->isBool()) {
+                        $maybe = Smt::some($needleTerm);
+                        $claims[] = Smt::eq(
+                            Smt::listContains($list, static fn (Term $item): Term => Smt::phpEquals(Smt::some($item), $maybe)),
+                            Smt::bool(in_array($needle, $php, true)),
+                        )->smt;
+                        $none = Smt::none($maybe->sort);
+                        $claims[] = Smt::eq(
+                            Smt::listContains($list, static fn (Term $item): Term => Smt::phpEquals(Smt::some($item), $none)),
+                            Smt::bool(false),
+                        )->smt;
+                    }
+                }
+                if ($elementSort->isNullable()) {
+                    $claims[] = Smt::eq(Smt::listContains($list, static fn (Term $item): Term => Smt::isNone($item)), Smt::bool(in_array(null, $php, true)))->smt;
+                }
+
+                $total += count($claims);
+                array_push($failed, ...$this->failedClaims($encoding, $claims));
+            }
+
+            self::assertSame([], array_slice($failed, 0, 3), sprintf('%d of %d claims about in_array() over lists of %s differ from PHP.', count($failed), $total, $name));
+        }
+    }
+
+    /**
+     * `$a === $b` on lists of ints, strings, bools and nullable ints against PHP, for equal lists,
+     * a prefix, one differing element, different lengths and the empty list, whatever the junk
+     * beyond the length of each list. `$a === []` is `count($a) === 0`.
+     */
+    public function testIdenticalOnListsMatchesPhp(): void
+    {
+        $pools = [
+            'int' => [Sort::int(), [PHP_INT_MIN, PHP_INT_MAX, -1, 0, 1, 42]],
+            'string' => [Sort::string(), ['', "a\0b", "\xC3\xA9", 'EUR', "\xFF", '0', '00']],
+            'bool' => [Sort::bool(), [true, false]],
+            'nullable int' => [Sort::nullable(Sort::int()), [null, 0, PHP_INT_MAX, -5]],
+        ];
+
+        mt_srand(31);
+        foreach ($pools as $name => [$elementSort, $pool]) {
+            $lists = [[], array_slice($pool, 0, 1), array_slice($pool, 0, 2), array_slice($pool, 0, 4)];
+            for ($i = 0; $i < 3; ++$i) {
+                $lists[] = $this->randomList($pool);
+            }
+            $pairs = [];
+            foreach ($lists as $first) {
+                $pairs[] = [$first, $first];
+                $pairs[] = [$first, [...$first, $pool[0]]];
+                if ($first !== []) {
+                    $changed = $first;
+                    $changed[array_key_last($changed)] = $pool[mt_rand(0, count($pool) - 1)];
+                    $pairs[] = [$first, $changed];
+                    $pairs[] = [$first, array_slice($first, 1)];
+                }
+                $pairs[] = [$first, $lists[mt_rand(0, count($lists) - 1)]];
+            }
+
+            $failed = [];
+            foreach ($pairs as [$first, $second]) {
+                $encoding = new Encoding();
+                $encoding->registerSort(Sort::list($elementSort));
+                $a = $this->definedList($encoding, $elementSort, $first);
+                $b = $this->definedList($encoding, $elementSort, $second);
+                $claims = [
+                    Smt::eq(Smt::listIdentical($a, $b), Smt::bool($first === $second))->smt,
+                    Smt::eq(Smt::listIdentical($b, $a), Smt::bool($first === $second))->smt,
+                    Smt::eq(Smt::eq(Smt::listLength($a), Smt::int(0)), Smt::bool($first === []))->smt,
+                ];
+                array_push($failed, ...$this->failedClaims($encoding, $claims));
+            }
+
+            self::assertSame([], array_slice($failed, 0, 3), sprintf('%d of %d pairs of lists of %s differ from PHP.', count($failed), count($pairs), $name));
+        }
+    }
+
+    /**
+     * @param list<string> $claims
+     * @return list<string> the claims that Z3 cannot prove
+     */
+    private function failedClaims(Encoding $encoding, array $claims): array
+    {
+        $declarations = [...(new ScriptRenderer())->declarations($encoding), ...$encoding->commands()];
+        $failed = [];
+        foreach ($this->z3->holds($claims, $declarations) as $position => $holds) {
+            if (!$holds) {
+                $failed[] = $claims[$position];
+            }
+        }
+
+        return $failed;
+    }
+
+    /**
      * @param list<mixed> $values
      */
     private function definedList(Encoding $encoding, Sort $elementSort, array $values): Term
