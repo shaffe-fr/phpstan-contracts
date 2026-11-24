@@ -73,6 +73,9 @@ final class VerifyContractRule implements Rule
 
             $encoding = $this->encoder->encode($node, $scope, $contract);
             $results = $this->z3->run($this->renderer->render($encoding), $this->renderer->checkCount($encoding));
+            if ($encoding->needsSolverFallback) {
+                $results = $this->retryUndecided($encoding, $results);
+            }
         } catch (VerificationRejected $rejected) {
             return [$this->error($rejected->getMessage(), $rejected->identifier, $rejected->errorLine)];
         } catch (SolverFailure $failure) {
@@ -80,6 +83,30 @@ final class VerifyContractRule implements Rule
         }
 
         return $this->interpret($encoding, $results, $method->getStartLine());
+    }
+
+    /**
+     * Asks again, alone and with Z3's default options, every check of a loop script that came
+     * back `unknown`: the option of the main script suits most checks, and a few are decided
+     * only by the default solver. The new answer replaces `unknown`; if the retry fails or is
+     * `unknown` too, the first answer stays, and `unknown` is never read as a proof.
+     *
+     * @param list<SolverResult> $results
+     * @return list<SolverResult>
+     */
+    private function retryUndecided(Encoding $encoding, array $results): array
+    {
+        foreach ($results as $check => $result) {
+            if ($result->verdict !== Verdict::Unknown) {
+                continue;
+            }
+            try {
+                $results[$check] = $this->z3->run($this->renderer->renderSingleCheck($encoding, $check), 1)[0];
+            } catch (SolverFailure) {
+                continue;
+            }
+        }
+        return $results;
     }
 
     /**

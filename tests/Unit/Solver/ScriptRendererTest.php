@@ -274,6 +274,55 @@ final class ScriptRendererTest extends TestCase
         $this->renderer->renderBoundedCheck($encoding, 1, 10);
     }
 
+    public function testOnlyAScriptThatNeedsTheFallbackGetsTheSolverOption(): void
+    {
+        $plain = new Encoding();
+        $plain->declareInput('x', Sort::int());
+        self::assertStringNotContainsString('solver2_timeout', $this->renderer->render($plain));
+
+        $loop = new Encoding();
+        $loop->declareInput('x', Sort::int());
+        $loop->needsSolverFallback = true;
+        $script = $this->renderer->render($loop);
+        self::assertStringContainsString('(set-option :combined_solver.solver2_timeout 1000)', $script);
+        self::assertStringNotContainsString('solver2_timeout', $this->renderer->renderSingleCheck($loop, 0));
+    }
+
+    public function testASingleCheckHoldsTheCommandsAndTheEarlierObligationsAlone(): void
+    {
+        $encoding = new Encoding();
+        $x = $encoding->declareInput('x', Sort::int());
+        $result = $encoding->declareResult(Sort::int());
+        $encoding->recordReturn(Smt::bool(true), Smt::arithmetic('+', $x, Smt::int(1)), 7);
+        $encoding->addObligation(new Obligation(ObligationKind::Overflow, 7, '$x + 1', Smt::bool(true), Smt::inRange($result, -100, 100)));
+        $encoding->ensures[] = new EnsuresCheck('$result > 0', 5, Smt::compare('>', $result, Smt::int(0)));
+
+        $postcondition = $this->afterThePrelude($this->renderer->renderSingleCheck($encoding, 2));
+        self::assertSame(
+            [
+                '(declare-const x@1 Int)',
+                '(declare-const result@2 Int)',
+                '(assert (= result@2 (+ x@1 1)))',
+                '(declare-const return@3 Bool)',
+                '(assert return@3)',
+                '(assert (and (>= result@2 (- 100)) (<= result@2 100)))',
+                '(echo "@@0")',
+                '(push 1)',
+                '(assert (not (> result@2 0)))',
+                '(check-sat)',
+                '(get-value (x@1 result@2 return@3))',
+                '(pop 1)',
+            ],
+            $postcondition,
+        );
+
+        $assumptions = $this->afterThePrelude($this->renderer->renderSingleCheck($encoding, 0));
+        self::assertContains('(check-sat)', $assumptions);
+        self::assertNotContains('(assert (and (>= result@2 (- 100)) (<= result@2 100)))', $assumptions);
+
+        $this->expectException(\LogicException::class);
+        $this->renderer->renderSingleCheck($encoding, 9);
+    }
     /**
      * @return list<string> the lines that follow the fixed prelude
      */

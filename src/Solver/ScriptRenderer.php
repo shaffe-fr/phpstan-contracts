@@ -37,6 +37,13 @@ final class ScriptRenderer
     /** The sum of the first `n` cells of an array, for `array_sum()` over a `list<int>`. */
     private const LIST_SUM = '(define-fun-rec sum_List_Int ((a (Array Int Int)) (n Int)) Int (ite (<= n 0) 0 (+ (sum_List_Int a (- n 1)) (select a (- n 1)))))';
 
+    /**
+     * Z3 answers the checks of a script with `push`/`pop` with its incremental solver, which with
+     * quantifiers gives up at the timeout. This hands a check to the other solver after 1000 ms.
+     * Both are sound: the option changes which checks are answered, never what an answer means.
+     */
+    private const SOLVER_FALLBACK = '(set-option :combined_solver.solver2_timeout 1000)';
+
     public function checkCount(Encoding $encoding): int
     {
         return 1 + count($encoding->obligations) + count($encoding->ensures) + count($encoding->throwsChecks) + ($encoding->returnTypeCheck === null ? 0 : 1);
@@ -44,7 +51,11 @@ final class ScriptRenderer
 
     public function render(Encoding $encoding): string
     {
-        $lines = ['(set-option :produce-models true)', ...$this->declarations($encoding)];
+        $lines = ['(set-option :produce-models true)'];
+        if ($encoding->needsSolverFallback) {
+            $lines[] = self::SOLVER_FALLBACK;
+        }
+        array_push($lines, ...$this->declarations($encoding));
 
         $lines[] = self::PRELUDE;
 
@@ -95,6 +106,34 @@ final class ScriptRenderer
         $lines[] = '(check-sat)';
         $lines[] = '(get-value (' . implode(' ', $encoding->observedTerms()) . '))';
 
+        return implode("\n", $lines) . "\n";
+    }
+
+    /**
+     * A script with one check, number 0, that asks again for the check `$check` of {@see self::render()},
+     * alone and with Z3's default options. It holds what the main script assumes before that check: the
+     * commands, and the obligations that come earlier, so its answer is the answer to the same question.
+     */
+    public function renderSingleCheck(Encoding $encoding, int $check): string
+    {
+        $lines = ['(set-option :produce-models true)', ...$this->declarations($encoding), self::PRELUDE];
+        $commands = $encoding->commands();
+        $observed = implode(' ', $encoding->observedTerms());
+        if ($check === 0) {
+            $boundary = $encoding->assumptionBoundary() ?? count($commands);
+            array_push($lines, ...array_slice($commands, 0, $boundary));
+            array_push($lines, '(echo "@@0")', '(push 1)', '(check-sat)', "(get-value ($observed))", '(pop 1)');
+            return implode("\n", $lines) . "\n";
+        }
+        array_push($lines, ...$commands);
+        $violations = $this->violations($encoding);
+        foreach (array_slice($violations, 0, $check - 1) as [, $assumed]) {
+            if ($assumed !== null) {
+                $lines[] = '(assert ' . $assumed->smt . ')';
+            }
+        }
+        [$violation] = $violations[$check - 1] ?? throw new \LogicException('There is no check number ' . $check . '.');
+        array_push($lines, ...$this->check(0, $violation, $observed));
         return implode("\n", $lines) . "\n";
     }
 
