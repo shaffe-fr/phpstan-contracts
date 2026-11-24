@@ -99,12 +99,14 @@ final class ScriptRenderer
 
         [$violation] = $violations[$check - 1] ?? throw new \LogicException('There is no check number ' . $check . '.');
         $lines[] = '(echo "@@0")';
+        $lines[] = '(push 1)';
         $lines[] = '(assert ' . $violation->smt . ')';
         foreach ($encoding->lengthProbes() as $length) {
             $lines[] = sprintf('(assert (<= %s %d))', $length, $maxLength);
         }
         $lines[] = '(check-sat)';
         $lines[] = '(get-value (' . implode(' ', $encoding->observedTerms()) . '))';
+        $lines[] = '(pop 1)';
 
         return implode("\n", $lines) . "\n";
     }

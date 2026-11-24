@@ -241,7 +241,8 @@ final class ScriptRendererTest extends TestCase
         self::assertContains('(assert (<= (List_Int_len items@1) 10))', $lines, 'every probed length is bounded');
         self::assertSame(1, substr_count($script, '(check-sat)'));
         self::assertSame(1, substr_count($script, '(echo "@@0")'), 'the answer is read as check 0');
-        self::assertStringNotContainsString('(push', $script);
+        self::assertSame(1, substr_count($script, '(push 1)'), 'the question is asked in a pushed scope, as for the single check');
+        self::assertSame(1, substr_count($script, '(pop 1)'));
         self::assertSame(
             '(check-sat)',
             $lines[array_search('(assert (<= (List_Int_len items@1) 10))', $lines, true) + 1],
