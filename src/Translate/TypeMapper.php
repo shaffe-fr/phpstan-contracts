@@ -9,15 +9,10 @@ use PhpstanContracts\Smt\RecordSort;
 use PhpstanContracts\Smt\SmtName;
 use PhpstanContracts\Smt\ShapeSort;
 use PhpstanContracts\Smt\Sort;
-use PhpParser\Error;
 use PhpParser\Node;
 use PhpParser\Node\Stmt\ClassLike;
 use PhpParser\NodeFinder;
-use PhpParser\NodeTraverser;
-use PhpParser\NodeVisitor\NameResolver;
-use PhpParser\ParserFactory;
 use PHPStan\Reflection\ClassReflection;
-use PHPStan\Reflection\ReflectionProvider;
 use PHPStan\Type\Constant\ConstantFloatType;
 use PHPStan\Type\Constant\ConstantIntegerType;
 use PHPStan\Type\IntegerRangeType;
@@ -34,7 +29,7 @@ use PHPStan\Type\VerbosityLevel;
  */
 final class TypeMapper
 {
-    /** @var array<string, VarSpec> */
+    /** @var array<string, array{VarSpec, Dependencies}> class => its record, and what building it read */
     private array $records = [];
 
     /** @var list<string> */
@@ -44,15 +39,14 @@ final class TypeMapper
 
     /** How many properties a message names before it counts the rest. */
     private const LISTED_PROPERTIES = 5;
-
     private const SUPPORTED_CLASSES = 'only enums, readonly data classes, lists, array shapes with string keys and scalars are';
-
-    /** @var array<string, string|null> class declaring a constructor => why its body cannot be modelled, null when it is empty */
+    /** @var array<string, array{string|null, Dependencies}> class declaring a constructor => why its body cannot be modelled, null when it is empty, and what reading it read */
     private array $constructorBodies = [];
 
     public function __construct(
         private readonly EnumRegistry $enums,
-        private readonly ReflectionProvider $reflectionProvider,
+        private readonly Lookups $lookups,
+        private readonly SourceFiles $sources,
     ) {
     }
 
@@ -63,6 +57,11 @@ final class TypeMapper
      */
     public function map(Type $type, int $line, bool $input = false): VarSpec
     {
+        // A class named in the type decides what the type is, even when the type is rejected.
+        foreach ($type->getReferencedClasses() as $referenced) {
+            $this->lookups->hasClass($referenced);
+        }
+
         // typeOnly() would print an array shape as array<string, int>, without its keys.
         $description = $type->describe(TypeCombinator::removeNull($type)->isArray()->yes() ? VerbosityLevel::value() : VerbosityLevel::typeOnly());
 
@@ -241,21 +240,35 @@ final class TypeMapper
 
     private function mapRecord(string $className, int $line): VarSpec
     {
-        if (!$this->reflectionProvider->hasClass($className)) {
+        if (!$this->lookups->hasClass($className)) {
             throw new VerificationRejected(sprintf('Class %s cannot be resolved.', $className), $line);
         }
 
         // Class names are case-insensitive: every spelling of a class is the same record.
-        $class = $this->reflectionProvider->getClass($className);
+        $class = $this->lookups->getClass($className);
         $className = $class->getName();
 
         if (isset($this->records[$className])) {
-            return $this->records[$className];
+            [$record, $dependencies] = $this->records[$className];
+            $this->lookups->replay($dependencies);
+
+            return $record;
         }
 
         if (in_array($className, $this->building, true)) {
             throw $this->recursion = new VerificationRejected(sprintf('Class %s refers to itself; recursive types are not supported.', $className), $line);
         }
+
+        $this->records[$className] = $this->lookups->capture(fn (): VarSpec => $this->buildRecord($class, $line));
+
+        return $this->records[$className][0];
+    }
+
+    private function buildRecord(ClassReflection $class, int $line): VarSpec
+    {
+        $className = $class->getName();
+        // The PHPDoc types of its properties can use aliases imported from other classes.
+        $this->lookups->recordTypeAliasImports($class);
 
         if ($class->isInterface() || $class->isAbstract() || $class->isAnonymous() || $class->isEnum()) {
             throw new VerificationRejected(
@@ -346,7 +359,7 @@ final class TypeMapper
             $unmodelled,
         );
 
-        return $this->records[$className] = new VarSpec(
+        return new VarSpec(
             Sort::record($record),
             fields: $fieldSpecs,
             description: $class->getDisplayName(),
@@ -491,35 +504,34 @@ final class TypeMapper
      */
     public function constructorBodyRefusal(string $className, ?string $file): ?string
     {
-        $constructor = $this->reflectionProvider->getClass($className)->getNativeReflection()->getConstructor();
+        $constructor = $this->lookups->getClass($className)->getNativeReflection()->getConstructor();
         $declaredIn = $constructor?->getFileName();
         if ($constructor === null || !is_string($declaredIn) || $file === null || realpath($declaredIn) !== realpath($file)) {
             return 'its constructor is declared in another file. Only classes whose constructor is in the same file can be built: PHPStan re-analyses a file when the signatures it uses change, not when a body in another file does, so the proof would not be redone';
         }
 
         $declaringClass = $constructor->getDeclaringClass()->getName();
-        if (!array_key_exists($declaringClass, $this->constructorBodies)) {
-            $this->constructorBodies[$declaringClass] = $this->readConstructorBody($declaredIn, $declaringClass);
+        if (array_key_exists($declaringClass, $this->constructorBodies)) {
+            [$refusal, $dependencies] = $this->constructorBodies[$declaringClass];
+            $this->lookups->replay($dependencies);
+
+            return $refusal;
         }
 
-        return $this->constructorBodies[$declaringClass];
+        $this->constructorBodies[$declaringClass] = $this->lookups->capture(fn (): ?string => $this->readConstructorBody($declaredIn, $declaringClass));
+
+        return $this->constructorBodies[$declaringClass][0];
     }
 
     private function readConstructorBody(string $file, string $className): ?string
     {
-        $code = @file_get_contents($file);
-        if ($code === false) {
-            return sprintf('%s cannot be read', $file);
-        }
-
-        try {
-            $statements = (new ParserFactory())->createForNewestSupportedVersion()->parse($code) ?? [];
-        } catch (Error) {
-            return sprintf('%s cannot be parsed', $file);
+        $statements = $this->sources->tryParse($file);
+        if (is_string($statements)) {
+            return $statements;
         }
 
         $class = (new NodeFinder())->findFirst(
-            (new NodeTraverser(new NameResolver()))->traverse($statements),
+            $statements,
             static fn (Node $node): bool => $node instanceof ClassLike && $node->namespacedName?->toString() === $className,
         );
         $constructor = $class instanceof ClassLike ? $class->getMethod('__construct') : null;

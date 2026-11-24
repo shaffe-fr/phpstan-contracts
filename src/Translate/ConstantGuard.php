@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace PhpstanContracts\Translate;
 
-use PhpParser\Error;
 use PhpParser\Node;
 use PhpParser\Node\Arg;
 use PhpParser\Node\ArrayItem;
@@ -21,8 +20,7 @@ use PhpParser\Node\Scalar\String_;
 use PhpParser\Node\Stmt;
 use PhpParser\NodeFinder;
 use PhpParser\NodeTraverser;
-use PhpParser\NodeVisitor\NameResolver;
-use PhpParser\ParserFactory;
+use PhpParser\NodeVisitor\CloningVisitor;
 use PHPStan\BetterReflection\Reflection\Adapter\ReflectionEnum;
 use PHPStan\BetterReflection\Reflection\Adapter\ReflectionEnumBackedCase;
 use PHPStan\Reflection\AttributeReflection;
@@ -31,7 +29,6 @@ use PHPStan\Reflection\ClassReflection;
 use PHPStan\Reflection\ConstantReflection;
 use PHPStan\Reflection\InitializerExprContext;
 use PHPStan\Reflection\InitializerExprTypeResolver;
-use PHPStan\Reflection\ReflectionProvider;
 use PHPStan\Type\Type;
 
 /**
@@ -52,15 +49,13 @@ use PHPStan\Type\Type;
  */
 final class ConstantGuard
 {
-    /** @var array<string, Expr|string> global constant => its initializer with every name resolved, or why it cannot be checked */
+    /** @var array<string, array{Expr|string, Dependencies}> global constant => its initializer with every name resolved, or why it cannot be checked, and what finding it read */
     private array $globalInitializers = [];
 
-    /** @var array<string, array<Node>|string> file => its statements with names resolved, or why it cannot be read */
-    private array $files = [];
-
     public function __construct(
-        private readonly ReflectionProvider $reflection,
+        private readonly Lookups $lookups,
         private readonly InitializerExprTypeResolver $initializers,
+        private readonly SourceFiles $sources,
     ) {
     }
 
@@ -299,7 +294,7 @@ final class ConstantGuard
         $class = match (strtolower($fetch->class->toString())) {
             'self', 'static' => $context,
             'parent' => $context?->getParentClass(),
-            default => $this->reflection->hasClass($fetch->class->toString()) ? $this->reflection->getClass($fetch->class->toString()) : null,
+            default => $this->lookups->hasClass($fetch->class->toString()) ? $this->lookups->getClass($fetch->class->toString()) : null,
         };
         if ($class === null) {
             return sprintf('%s reads a constant of %s, which cannot be resolved.', $where, $fetch->class->toString());
@@ -324,11 +319,11 @@ final class ConstantGuard
             return null;
         }
         // Resolved as PHPStan resolves it when it folds the initializer, namespace fallback included.
-        if (!$this->reflection->hasConstant($fetch->name, $types)) {
+        if (!$this->lookups->hasConstant($fetch->name, $types)) {
             return sprintf('%s reads the constant %s, which cannot be resolved.', $where, $fetch->name->toString());
         }
 
-        $constant = $this->reflection->getConstant($fetch->name, $types);
+        $constant = $this->lookups->getConstant($fetch->name, $types);
         if (self::visited($seen, 'global:' . $constant->getName(), $deprecations)) {
             return null;
         }
@@ -358,13 +353,24 @@ final class ConstantGuard
     {
         $name = $constant->getName();
         if (array_key_exists($name, $this->globalInitializers)) {
-            return $this->globalInitializers[$name];
+            [$initializer, $dependencies] = $this->globalInitializers[$name];
+            $this->lookups->replay($dependencies);
+
+            return $initializer;
         }
 
+        $this->globalInitializers[$name] = $this->lookups->capture(fn (): Expr|string => $this->findInitializer($constant));
+
+        return $this->globalInitializers[$name][0];
+    }
+
+    private function findInitializer(ConstantReflection $constant): Expr|string
+    {
+        $name = $constant->getName();
         $file = $constant->getFileName();
-        $statements = $file === null ? 'no file defines it' : $this->statements($file);
+        $statements = $file === null ? 'no file defines it' : $this->sources->tryParse($file);
         if (is_string($statements)) {
-            return $this->globalInitializers[$name] = $this->unchecked($name, $statements);
+            return $this->unchecked($name, $statements);
         }
 
         $found = [];
@@ -385,14 +391,19 @@ final class ConstantGuard
             }
         }
         if (count($found) !== 1) {
-            return $this->globalInitializers[$name] = $this->unchecked($name, sprintf('it is not defined exactly once at the top level of %s', $file));
+            return $this->unchecked($name, sprintf('it is not defined exactly once at the top level of %s', $file));
         }
 
-        foreach ((new NodeFinder())->findInstanceOf($found[0], ConstFetch::class) as $fetch) {
+        // A copy: the parsed statements are shared with the other readers of the file.
+        $initializer = (new NodeTraverser(new CloningVisitor()))->traverse([$found[0]])[0] ?? null;
+        if (!$initializer instanceof Expr) {
+            return $this->unchecked($name, sprintf('its initializer in %s cannot be copied', $file));
+        }
+        foreach ((new NodeFinder())->findInstanceOf($initializer, ConstFetch::class) as $fetch) {
             $fetch->name = $this->fullyQualified($fetch->name);
         }
 
-        return $this->globalInitializers[$name] = $found[0];
+        return $initializer;
     }
 
     /**
@@ -433,33 +444,11 @@ final class ConstantGuard
     private function fullyQualified(Name $name): Name\FullyQualified
     {
         $namespaced = $name->getAttribute('namespacedName');
-        if (!$name->isFullyQualified() && $namespaced instanceof Name && $this->reflection->hasConstant(new Name\FullyQualified($namespaced->toString()), null)) {
+        if (!$name->isFullyQualified() && $namespaced instanceof Name && $this->lookups->hasConstant(new Name\FullyQualified($namespaced->toString()), null)) {
             return new Name\FullyQualified($namespaced->toString());
         }
 
         return new Name\FullyQualified($name->toString());
-    }
-
-    /**
-     * @return array<Node>|string
-     */
-    private function statements(string $file): array|string
-    {
-        if (array_key_exists($file, $this->files)) {
-            return $this->files[$file];
-        }
-
-        $code = @file_get_contents($file);
-        if ($code === false) {
-            return $this->files[$file] = sprintf('%s cannot be read', $file);
-        }
-        try {
-            $statements = (new ParserFactory())->createForNewestSupportedVersion()->parse($code) ?? [];
-        } catch (Error) {
-            return $this->files[$file] = sprintf('%s cannot be parsed', $file);
-        }
-
-        return $this->files[$file] = (new NodeTraverser(new NameResolver()))->traverse($statements);
     }
 
     private function unchecked(string $constant, string $reason): string

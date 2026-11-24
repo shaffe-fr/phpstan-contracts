@@ -7,7 +7,6 @@ namespace PhpstanContracts\Translate;
 use PhpstanContracts\Smt\Smt;
 use PhpstanContracts\Smt\Term;
 use PHPStan\Reflection\ClassReflection;
-use PHPStan\Reflection\ReflectionProvider;
 
 /**
  * The exceptions a method declares with `#[Throws]`, each with its condition on
@@ -92,7 +91,7 @@ final class ThrowPolicy
      * or a subclass, allowed() decides for `$thrown` alone. That would be unsound if a
      * subclass instance fell under another condition.
      */
-    public function conditionOnASubclassOf(ClassReflection $thrown, ReflectionProvider $reflection): ?string
+    public function conditionOnASubclassOf(ClassReflection $thrown, Lookups $reflection): ?string
     {
         foreach ($this->declared as [$class, $when]) {
             if ($when === null || $this->covers($class, $thrown) || !$reflection->hasClass($class)) {

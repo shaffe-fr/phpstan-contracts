@@ -7,15 +7,14 @@ namespace PhpstanContracts\Translate;
 use PhpstanContracts\Smt\EnumSort;
 use PhpstanContracts\Smt\SmtName;
 use PHPStan\BetterReflection\Reflection\Adapter\ReflectionEnumBackedCase;
-use PHPStan\Reflection\ReflectionProvider;
 
 final class EnumRegistry
 {
-    /** @var array<string, EnumSort|null> */
+    /** @var array<string, array{EnumSort|null, Dependencies}> class name => its enum, null when it is not one, and what finding it read */
     private array $cache = [];
 
     public function __construct(
-        private readonly ReflectionProvider $reflectionProvider,
+        private readonly Lookups $lookups,
         private readonly ConstantGuard $guard,
     ) {
     }
@@ -28,19 +27,24 @@ final class EnumRegistry
     public function find(string $className): ?EnumSort
     {
         if (array_key_exists($className, $this->cache)) {
-            return $this->cache[$className];
+            [$enum, $dependencies] = $this->cache[$className];
+            $this->lookups->replay($dependencies);
+
+            return $enum;
         }
 
-        return $this->cache[$className] = $this->load($className);
+        $this->cache[$className] = $this->lookups->capture(fn (): ?EnumSort => $this->load($className));
+
+        return $this->cache[$className][0];
     }
 
     private function load(string $className): ?EnumSort
     {
-        if (!$this->reflectionProvider->hasClass($className)) {
+        if (!$this->lookups->hasClass($className)) {
             return null;
         }
 
-        $class = $this->reflectionProvider->getClass($className);
+        $class = $this->lookups->getClass($className);
         if (!$class->isEnum()) {
             return null;
         }

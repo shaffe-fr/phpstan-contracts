@@ -11,20 +11,15 @@ use PhpstanContracts\Exception\VerificationRejected;
 use PhpstanContracts\Smt\Smt;
 use PhpstanContracts\Smt\Sort;
 use PhpstanContracts\Smt\Term;
-use PhpParser\Error;
 use PhpParser\Node;
 use PhpParser\Node\Arg;
 use PhpParser\Node\Expr;
 use PhpParser\Node\Stmt\ClassLike;
 use PhpParser\Node\Stmt\ClassMethod;
 use PhpParser\NodeFinder;
-use PhpParser\NodeTraverser;
-use PhpParser\NodeVisitor\NameResolver;
-use PhpParser\ParserFactory;
 use PHPStan\Reflection\ClassReflection;
 use PHPStan\Reflection\ExtendedMethodReflection;
 use PHPStan\Reflection\InitializerExprTypeResolver;
-use PHPStan\Reflection\ReflectionProvider;
 use PHPStan\Type\TypeCombinator;
 use PHPStan\Type\VerbosityLevel;
 
@@ -41,12 +36,6 @@ use PHPStan\Type\VerbosityLevel;
  */
 final class MethodInliner
 {
-    /** The file parsed last, by path and modification time: the calls of a file are translated together. */
-    private static ?string $parsedKey = null;
-
-    /** @var array<Node> */
-    private static array $parsed = [];
-
     /**
      * @param list<string> $stack the methods being translated, outermost first
      */
@@ -54,7 +43,8 @@ final class MethodInliner
         private readonly Encoding $encoding,
         private readonly TypeMapper $types,
         private readonly EnumRegistry $enums,
-        private readonly ReflectionProvider $reflection,
+        private readonly Lookups $lookups,
+        private readonly SourceFiles $sources,
         private readonly InitializerExprTypeResolver $initializers,
         private readonly ContractReader $contracts,
         private readonly string $file,
@@ -86,10 +76,10 @@ final class MethodInliner
         ?string $statelessThis = null,
     ): Term {
         $onAnObject = $receiver !== null || $statelessThis !== null;
-        if (!$this->reflection->hasClass($className)) {
+        if (!$this->lookups->hasClass($className)) {
             throw new VerificationRejected(sprintf('Class %s cannot be resolved.', $className), $line);
         }
-        $class = $this->reflection->getClass($className);
+        $class = $this->lookups->getClass($className);
         if (!$class->hasNativeMethod($methodName)) {
             throw new VerificationRejected(sprintf('%s has no method %s().', $class->getDisplayName(), $methodName), $line);
         }
@@ -115,6 +105,8 @@ final class MethodInliner
         }
 
         $owner = $method->getDeclaringClass();
+        // The PHPDoc types of its parameters and return value can use aliases imported from other classes.
+        $this->lookups->recordTypeAliasImports($owner);
         $label = sprintf('%s::%s()', $owner->getDisplayName(), $method->getName());
 
         $this->checkCallable($class, $method, $owner, $callerScope, $label, $onAnObject, $lateStatic, $line);
@@ -243,7 +235,7 @@ final class MethodInliner
 
         $finder = new NodeFinder();
         $classNode = $finder->findFirst(
-            $this->parse($file, $line),
+            $this->sources->parse($file, $line),
             static fn (Node $node): bool => $node instanceof ClassLike && $node->namespacedName?->toString() === $owner->getName(),
         );
         $methodNode = $classNode instanceof ClassLike ? $classNode->getMethod($method->getName()) : null;
@@ -409,7 +401,7 @@ final class MethodInliner
         $signature = array_values($parameters);
         $signature[] = $resultSort;
         $namespace = ($position = strrpos($owner->getName(), '\\')) === false ? null : substr($owner->getName(), 0, $position);
-        $classes = new ClassNameResolver($this->reflection, $namespace, ClassNameResolver::classesOf($signature), $owner);
+        $classes = new ClassNameResolver($this->lookups, $namespace, ClassNameResolver::classesOf($signature), $owner);
 
         $statelessThis = $method->isStatic() ? null : $statelessThis;
         $thisRefusal = match (true) {
@@ -419,7 +411,7 @@ final class MethodInliner
         };
         // The calls that lead here from the verified method, outermost first, this one last.
         $calls = array_slice($this->stack, 1);
-        $body = new ExpressionTranslator($this->encoding, $this->types, $this->enums, $classes, $this->reflection, $this->initializers, false, $line, $thisRefusal, $this, $calls, file: $this->file, statelessThis: $statelessThis);
+        $body = new ExpressionTranslator($this->encoding, $this->types, $this->enums, $classes, $this->lookups, $this->initializers, false, $line, $thisRefusal, $this, $calls, file: $this->file, statelessThis: $statelessThis);
 
         $entry = [];
         if ($receiver !== null && !$method->isStatic()) {
@@ -440,7 +432,7 @@ final class MethodInliner
         // The callee was proven assuming its preconditions; here they are checked.
         $view = $entry;
         foreach ($this->contracts->read($node)->requires as $clause) {
-            $contract = new ExpressionTranslator($this->encoding, $this->types, $this->enums, $classes, $this->reflection, $this->initializers, true, $line, $thisRefusal, null, $calls, file: $this->file);
+            $contract = new ExpressionTranslator($this->encoding, $this->types, $this->enums, $classes, $this->lookups, $this->initializers, true, $line, $thisRefusal, null, $calls, file: $this->file);
             $this->encoding->addObligation(new Obligation(
                 ObligationKind::RequiresViolated,
                 $line,
@@ -465,33 +457,5 @@ final class MethodInliner
         }
 
         return $this->encoding->define('call', $returns->value($resultSort));
-    }
-
-    /**
-     * @return array<Node>
-     */
-    private function parse(string $file, int $line): array
-    {
-        $key = $file . ':' . (string) @filemtime($file);
-        if (self::$parsedKey === $key) {
-            return self::$parsed;
-        }
-
-        $code = @file_get_contents($file);
-        if ($code === false) {
-            throw new VerificationRejected(sprintf('Cannot read %s.', $file), $line);
-        }
-
-        try {
-            $statements = (new ParserFactory())->createForNewestSupportedVersion()->parse($code) ?? [];
-        } catch (Error) {
-            throw new VerificationRejected(sprintf('Cannot parse %s.', $file), $line);
-        }
-
-        $traverser = new NodeTraverser(new NameResolver());
-        self::$parsed = $traverser->traverse($statements);
-        self::$parsedKey = $key;
-
-        return self::$parsed;
     }
 }

@@ -18,7 +18,6 @@ use PHPStan\Analyser\Scope;
 use PHPStan\Node\InClassMethodNode;
 use PHPStan\Reflection\ClassReflection;
 use PHPStan\Reflection\InitializerExprTypeResolver;
-use PHPStan\Reflection\ReflectionProvider;
 use PHPStan\Type\VerbosityLevel;
 
 /**
@@ -32,9 +31,10 @@ final class MethodEncoder
         private readonly EnumRegistry $enums,
         private readonly TypeMapper $types,
         private readonly DomainBuilder $domains,
-        private readonly ReflectionProvider $reflectionProvider,
+        private readonly Lookups $lookups,
         private readonly InitializerExprTypeResolver $initializers,
         private readonly ContractReader $contracts,
+        private readonly SourceFiles $sources,
         private readonly int $loopUnroll = 10,
         private readonly int $maxLoopUnroll = 100,
     ) {
@@ -55,6 +55,11 @@ final class MethodEncoder
         $signature = [];
 
         $declaringClass = $scope->getClassReflection();
+        if ($declaringClass !== null) {
+            // Its parents and traits can be in other files, and so can the aliases its PHPDoc imports.
+            $this->lookups->recordClass($declaringClass);
+            $this->lookups->recordTypeAliasImports($declaringClass);
+        }
         $thisRefusal = $method->isStatic()
             ? 'There is no $this in a static method.'
             : 'Object state ($this) is not part of the verified subset yet.';
@@ -124,7 +129,7 @@ final class MethodEncoder
         $signature[] = $resultSpec->sort;
         $result = $encoding->declareResult($resultSpec->sort);
 
-        $classes = new ClassNameResolver($this->reflectionProvider, $scope->getNamespace(), ClassNameResolver::classesOf($signature), $declaringClass);
+        $classes = new ClassNameResolver($this->lookups, $scope->getNamespace(), ClassNameResolver::classesOf($signature), $declaringClass);
 
         // A precondition that checks for null tells the clauses after it, the body and the
         // postconditions that the value is not null, just like an `if` would.
@@ -140,10 +145,10 @@ final class MethodEncoder
         // The conditions of `#[Throws]` are about the inputs on entry, like a precondition.
         $declaredThrows = [];
         foreach ($contract->throws as $throws) {
-            if (!$this->reflectionProvider->hasClass($throws->class)) {
+            if (!$this->lookups->hasClass($throws->class)) {
                 throw new VerificationRejected(sprintf('Cannot resolve class %s in #[Throws]; write its fully qualified name.', $throws->class), $throws->line, 'contracts.invalidContract');
             }
-            $thrown = $this->reflectionProvider->getClass($throws->class);
+            $thrown = $this->lookups->getClass($throws->class);
             if (!$thrown->implementsInterface(\Throwable::class) && $thrown->getName() !== \Throwable::class) {
                 throw new VerificationRejected(sprintf('%s is not a Throwable class.', $thrown->getDisplayName()), $throws->line, 'contracts.invalidContract');
             }
@@ -163,7 +168,8 @@ final class MethodEncoder
             $encoding,
             $this->types,
             $this->enums,
-            $this->reflectionProvider,
+            $this->lookups,
+            $this->sources,
             $this->initializers,
             $this->contracts,
             $scope->getFile(),
@@ -171,7 +177,7 @@ final class MethodEncoder
             $this->loopUnroll,
             $this->maxLoopUnroll,
         );
-        $body = new ExpressionTranslator($encoding, $this->types, $this->enums, $classes, $this->reflectionProvider, $this->initializers, false, null, $thisRefusal, $inliner, [], $policy, $scope->getFile(), $statelessThis);
+        $body = new ExpressionTranslator($encoding, $this->types, $this->enums, $classes, $this->lookups, $this->initializers, false, null, $thisRefusal, $inliner, [], $policy, $scope->getFile(), $statelessThis);
         $loopBounds = LoopBounds::of($contract->requires, $body, $this->loopUnroll, $this->maxLoopUnroll);
         $statements = new StatementTranslator($body, $encoding, $resultSpec->sort, $loopBounds, $entry);
         $final = $statements->execute($method->stmts ?? [], (new State($entry, Smt::bool(true)))->withView($view));
@@ -260,12 +266,12 @@ final class MethodEncoder
 
     private function displayName(string $class): string
     {
-        return $this->reflectionProvider->getClass($class)->getDisplayName();
+        return $this->lookups->getClass($class)->getDisplayName();
     }
 
     private function translator(Encoding $encoding, ClassNameResolver $classes, bool $isContract, ?int $line, string $thisRefusal, string $file): ExpressionTranslator
     {
-        return new ExpressionTranslator($encoding, $this->types, $this->enums, $classes, $this->reflectionProvider, $this->initializers, $isContract, $line, $thisRefusal, file: $file);
+        return new ExpressionTranslator($encoding, $this->types, $this->enums, $classes, $this->lookups, $this->initializers, $isContract, $line, $thisRefusal, file: $file);
     }
 
     public static function statelessRefusal(string $class): string

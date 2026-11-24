@@ -29,6 +29,8 @@ parametersSchema:
 
 services:
 	- PhpstanContracts\Contract\ContractReader
+	- PhpstanContracts\Translate\Lookups
+	- PhpstanContracts\Translate\SourceFiles
 	- PhpstanContracts\Translate\ConstantGuard
 	- PhpstanContracts\Translate\EnumRegistry
 	- PhpstanContracts\Translate\TypeMapper
@@ -76,6 +78,10 @@ services:
 			parallelism: %contracts.parallelism%
 		tags:
 			- phpstan.rules.rule
+	-
+		class: PhpstanContracts\Solver\SymbolValueExtension
+		tags:
+			- phpstan.resultCacheValueExtension
 	-
 		class: PhpstanContracts\Rule\PropertyHookContractRule
 		tags:

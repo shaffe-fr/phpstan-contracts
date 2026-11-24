@@ -39,7 +39,6 @@ use PhpParser\PrettyPrinter\Standard;
 use PHPStan\Reflection\ClassReflection;
 use PHPStan\Reflection\InitializerExprContext;
 use PHPStan\Reflection\InitializerExprTypeResolver;
-use PHPStan\Reflection\ReflectionProvider;
 use PHPStan\Type\FloatType;
 use PHPStan\Type\IntegerType;
 use PHPStan\Type\MixedType;
@@ -91,7 +90,7 @@ final class ExpressionTranslator
         private readonly TypeMapper $types,
         private readonly EnumRegistry $enums,
         private readonly ClassNameResolver $classes,
-        private readonly ReflectionProvider $reflection,
+        private readonly Lookups $lookups,
         private readonly InitializerExprTypeResolver $initializers,
         private readonly bool $isContract,
         private readonly ?int $fixedLine = null,
@@ -338,7 +337,7 @@ final class ExpressionTranslator
             return true;
         }
 
-        return !$this->reflection->hasConstant(new Name\FullyQualified($namespace . '\\' . $constant), null);
+        return !$this->lookups->hasConstant(new Name\FullyQualified($namespace . '\\' . $constant), null);
     }
 
     /**
@@ -1010,10 +1009,10 @@ final class ExpressionTranslator
         }
 
         $className = $this->classes->resolve($new->class, $this->lineOf($expr));
-        if (!$this->reflection->hasClass($className)) {
+        if (!$this->lookups->hasClass($className)) {
             throw $this->reject($expr, sprintf('Class %s cannot be resolved.', $className));
         }
-        $class = $this->reflection->getClass($className);
+        $class = $this->lookups->getClass($className);
         if (!$class->implementsInterface(\Throwable::class) || $class->isAbstract() || $class->isInterface()) {
             throw $this->reject($expr, sprintf('%s is not a concrete Throwable class.', $class->getDisplayName()));
         }
@@ -1079,10 +1078,10 @@ final class ExpressionTranslator
 
         $line = $this->lineOf($expr);
         $className = $this->classes->resolve($call->class, $line);
-        if (!$this->reflection->hasClass($className)) {
+        if (!$this->lookups->hasClass($className)) {
             throw $this->reject($expr, sprintf('Class %s cannot be resolved.', $className));
         }
-        $class = $this->reflection->getClass($className);
+        $class = $this->lookups->getClass($className);
         $name = $call->name->toString();
         if (!$class->hasNativeMethod($name)) {
             throw $this->reject($expr, sprintf('%s has no method %s().', $class->getDisplayName(), $name));
@@ -1122,7 +1121,7 @@ final class ExpressionTranslator
                 $thrown->getDisplayName(),
             ));
         }
-        $inheritor = $thrown->isFinalByKeyword() ? null : $throws->conditionOnASubclassOf($thrown, $this->reflection);
+        $inheritor = $thrown->isFinalByKeyword() ? null : $throws->conditionOnASubclassOf($thrown, $this->lookups);
         if ($inheritor !== null) {
             throw $this->reject($expr, sprintf(
                 '%s returns %s, which is not final: the object can be an instance of a subclass, and a #[Throws] with a `when` condition on %s depends on the class. Make %s final, or declare a final class as the return type.',
@@ -1229,7 +1228,7 @@ final class ExpressionTranslator
             return true;
         }
 
-        return !$this->reflection->hasFunction(new Name\FullyQualified($namespace . '\\' . $function), null);
+        return !$this->lookups->hasFunction(new Name\FullyQualified($namespace . '\\' . $function), null);
     }
 
     /**
@@ -1496,7 +1495,7 @@ final class ExpressionTranslator
         if ($expr->class instanceof Name && $expr->name instanceof Identifier && $expr->name->toLowerString() !== 'class') {
             $enum = $this->enums->find($this->classes->resolveStatically($expr->class, $this->lineOf($expr)));
             if ($enum !== null && array_key_exists($expr->name->toString(), $enum->cases)) {
-                $refusal = $this->enums->guard()->caseRefusal($this->reflection->getClass($enum->className), $expr->name->toString());
+                $refusal = $this->enums->guard()->caseRefusal($this->lookups->getClass($enum->className), $expr->name->toString());
                 if ($refusal !== null) {
                     throw $this->reject($expr, $refusal);
                 }
@@ -1563,10 +1562,10 @@ final class ExpressionTranslator
         $className = $this->classes->resolveStatically($expr->class, $this->lineOf($expr));
         $enum = $this->enums->find($className);
 
-        if (!$this->reflection->hasClass($className)) {
+        if (!$this->lookups->hasClass($className)) {
             throw $this->reject($expr, sprintf('Class %s cannot be resolved.', $className));
         }
-        $class = $this->reflection->getClass($className);
+        $class = $this->lookups->getClass($className);
         if (!$class->hasConstant($name)) {
             throw $this->reject($expr, $enum !== null
                 ? sprintf('Enum %s has no case %s.', $enum->shortName(), $name)
@@ -1662,7 +1661,7 @@ final class ExpressionTranslator
 
         // A pure enum has no built-in from(), but may declare a static method of that name.
         if ($enum !== null && !$enum->backed) {
-            if (!$this->reflection->getClass($enum->className)->hasNativeMethod($expr->name->toString())) {
+            if (!$this->lookups->getClass($enum->className)->hasNativeMethod($expr->name->toString())) {
                 throw $this->reject($expr, sprintf('%s is not a backed enum, so it has no %s().', $enum->shortName(), $expr->name->toString()));
             }
             $enum = null;
@@ -1834,10 +1833,10 @@ final class ExpressionTranslator
     private function rejectShadowedProperty(PropertyFetch|NullsafePropertyFetch $expr, string $className, string $property, string $operator): void
     {
         $scope = $this->classes->declaringClass();
-        if ($scope === null || $scope->getName() === $className || !$this->reflection->hasClass($className)) {
+        if ($scope === null || $scope->getName() === $className || !$this->lookups->hasClass($className)) {
             return;
         }
-        $class = $this->reflection->getClass($className);
+        $class = $this->lookups->getClass($className);
         $native = $scope->getNativeReflection();
         if (!$class->isSubclassOfClass($scope) || !$native->hasProperty($property)) {
             return;
@@ -1952,7 +1951,7 @@ final class ExpressionTranslator
             throw $this->reject($expr, sprintf('Cannot instantiate %s: %s.', $record->shortName(), $refusal));
         }
 
-        $class = $this->reflection->getClass($record->className);
+        $class = $this->lookups->getClass($record->className);
         $constructor = $class->getConstructor();
         // PHPStan reports an inaccessible constructor too, but a proof must not rest on code that throws.
         if (!$this->canAccess($constructor->getDeclaringClass(), $constructor->isPrivate(), $constructor->isPublic())) {

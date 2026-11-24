@@ -14,12 +14,15 @@ use PhpstanContracts\Solver\MethodAnswer;
 use PhpstanContracts\Solver\MethodSolver;
 use PhpstanContracts\Solver\RunBudgetExhausted;
 use PhpstanContracts\Solver\ScriptRenderer;
+use PhpstanContracts\Solver\SymbolValueExtension;
 use PhpstanContracts\Solver\SolverFailure;
 use PhpstanContracts\Solver\SolverResult;
 use PhpstanContracts\Solver\UnknownReason;
 use PhpstanContracts\Solver\Verdict;
 use PhpstanContracts\Solver\Z3Runner;
+use PhpstanContracts\Translate\Dependencies;
 use PhpstanContracts\Translate\Encoding;
+use PhpstanContracts\Translate\Lookups;
 use PhpstanContracts\Translate\LoopBounds;
 use PhpstanContracts\Translate\MethodEncoder;
 use PhpstanContracts\Translate\Obligation;
@@ -27,6 +30,7 @@ use PhpstanContracts\Translate\ObligationKind;
 use PhpstanContracts\Translate\ProbePlanner;
 use LogicException;
 use PhpParser\Node;
+use PHPStan\Analyser\DependencyTracker;
 use PHPStan\Analyser\Scope;
 use PHPStan\Node\InClassMethodNode;
 use PHPStan\Rules\IdentifierRuleError;
@@ -41,6 +45,8 @@ use PHPStan\Rules\RuleErrorBuilder;
  */
 final class VerifyContractRule implements Rule
 {
+    private const NO_TRACKING = 'This proof reads code from other files, and this version of PHPStan cannot re-analyse the file when they change: PHPStan 2.3 or later is needed.';
+
     private const BODILESS = 'Contracts on abstract and interface methods are not verified, and the methods that implement them do not inherit them: put the contract on each concrete method.';
 
     private readonly UnknownExplainer $explainer;
@@ -54,6 +60,7 @@ final class VerifyContractRule implements Rule
         private readonly CounterexampleFormatter $formatter,
         private readonly TimingReport $timingReport,
         private readonly int $timeoutMs,
+        private readonly Lookups $lookups,
         private readonly int $methodBudgetMs,
         int $loopUnroll = 10,
         int $maxLoopUnroll = 100,
@@ -74,6 +81,61 @@ final class VerifyContractRule implements Rule
      * @return list<IdentifierRuleError>
      */
     public function processNode(Node $node, Scope $scope): array
+    {
+        $method = $node->getOriginalNode();
+        $tracker = self::tracker($scope);
+
+        // What was read outside a proof, by another rule using the same services, is not this proof's.
+        $this->lookups->drain();
+        try {
+            $errors = $this->verify($node, $scope);
+        } finally {
+            // On every path, so that a rejection caused by another file goes away once that file is fixed.
+            $dependencies = $this->lookups->drain();
+            if ($tracker !== null) {
+                $this->declare($dependencies, $tracker, $scope->getFile());
+            }
+        }
+
+        if ($tracker === null && $dependencies->filesOtherThan($scope->getFile()) !== []) {
+            return [$this->error(self::NO_TRACKING, 'contracts.unsupported', $method->getStartLine())];
+        }
+
+        return $errors;
+    }
+
+    /**
+     * PHPStan declares the scope a DependencyTracker from 2.3 on, but an older PHPStan, such as a
+     * global phar that ignores the Composer constraint, can still load the extension.
+     */
+    private static function tracker(object $scope): ?DependencyTracker
+    {
+        return $scope instanceof DependencyTracker ? $scope : null;
+    }
+
+    /**
+     * PHPStan re-analyses a file when the signatures it uses change, not when a body, a
+     * private constant or an enum case attribute of another file does: each file the proof
+     * read is declared, and each name it looked up, since creating it can change what a
+     * name means.
+     */
+    private function declare(Dependencies $dependencies, DependencyTracker $scope, string $analysedFile): void
+    {
+        foreach ($dependencies->filesOtherThan($analysedFile) as $file) {
+            $scope->trackFileDependency($file);
+        }
+        foreach ($dependencies->missingClasses as $className) {
+            $scope->trackClassDependency($className);
+        }
+        foreach ($dependencies->symbols as $symbol) {
+            $scope->trackValueDependency(SymbolValueExtension::class, $symbol);
+        }
+    }
+
+    /**
+     * @return list<IdentifierRuleError>
+     */
+    private function verify(InClassMethodNode $node, Scope $scope): array
     {
         $method = $node->getOriginalNode();
 

@@ -9,7 +9,6 @@ use PhpstanContracts\Smt\Sort;
 use PhpstanContracts\Smt\SortKind;
 use PhpParser\Node\Name;
 use PHPStan\Reflection\ClassReflection;
-use PHPStan\Reflection\ReflectionProvider;
 
 /**
  * Contract strings are parsed outside the file's name-resolution pass, so `use`
@@ -26,7 +25,7 @@ final class ClassNameResolver
      * @param array<string, string> $signatureClasses short name => fully qualified name
      */
     public function __construct(
-        private readonly ReflectionProvider $reflectionProvider,
+        private readonly Lookups $lookups,
         private readonly ?string $namespace,
         private readonly array $signatureClasses,
         private readonly ?ClassReflection $declaringClass = null,
@@ -81,8 +80,8 @@ final class ClassNameResolver
             : [$written];
 
         foreach ($candidates as $candidate) {
-            if ($this->reflectionProvider->hasClass($candidate)) {
-                return $this->reflectionProvider->getClass($candidate)->getName();
+            if ($this->lookups->hasClass($candidate)) {
+                return $this->lookups->getClass($candidate)->getName();
             }
         }
 
