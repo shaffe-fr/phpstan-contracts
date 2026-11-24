@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   quality:
-    name: PHP ${{ matrix.php }} on ${{ matrix.os }}
+    name: PHP ${{ matrix.php }} on ${{ matrix.os }}${{ matrix.phpstan && format(' with PHPStan {0}', matrix.phpstan) || '' }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     strategy:
@@ -18,6 +18,8 @@ jobs:
       matrix:
         include:
           - { os: ubuntu-24.04, php: "8.3" }
+          # The lowest PHPStan that composer.json allows, so that the minimum stays tested.
+          - { os: ubuntu-24.04, php: "8.3", phpstan: "2.3.0" }
           - { os: ubuntu-24.04, php: "8.4" }
           - { os: ubuntu-24.04, php: "8.5" }
           - { os: windows-latest, php: "8.5" }
@@ -40,7 +42,12 @@ jobs:
         run: composer validate --strict
 
       - name: Install dependencies
-        run: composer update --no-interaction --no-progress --prefer-dist
+        run: |
+          if [ -n "${{ matrix.phpstan }}" ]; then
+            composer update --with phpstan/phpstan:${{ matrix.phpstan }} --no-interaction --no-progress --prefer-dist
+          else
+            composer update --no-interaction --no-progress --prefer-dist
+          fi
 
       - name: Install Z3
         run: php bin/phpstan-contracts-install-z3
