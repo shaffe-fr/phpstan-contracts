@@ -45,6 +45,9 @@ final class Encoding
     /** @var list<array{int, int, int}> the loops being translated: line, iteration and bound */
     private array $loops = [];
 
+    /** Whether the script holds a loop, which gets the solver option of the retry. */
+    public bool $needsSolverFallback = false;
+
     /** @var array<string, Sort> datatypes in the order they must be declared */
     private array $datatypes = [];
 
