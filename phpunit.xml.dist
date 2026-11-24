@@ -20,6 +20,9 @@
         <testsuite name="rule">
             <directory>tests/Rule</directory>
         </testsuite>
+        <testsuite name="cache">
+            <directory>tests/Cache</directory>
+        </testsuite>
         <testsuite name="docs">
             <directory>tests/Docs</directory>
         </testsuite>

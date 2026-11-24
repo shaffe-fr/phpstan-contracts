@@ -1,0 +1,18 @@
+includes:
+	- {extension}
+parameters:
+	level: 0
+	paths:
+		- src
+	scanDirectories:
+		- lib
+	tmpDir: tmp
+	parallel:
+		jobSize: 1
+		maximumNumberOfProcesses: 2
+	bootstrapFiles:
+		- {autoload}
+		- bootstrap.php
+	contracts:
+		z3Binary: {z3}
+		cacheDirectory: null
