@@ -121,7 +121,7 @@ final class ExamplesTest extends RuleFixtureTestCase
                 'total' => [],
                 'totalBroken' => ['contracts.loopBound: The proof unrolls this foreach up to 10 iterations, and $lines can have more. This is a limit of the proof, not a bug in the code.'],
                 'firstLineAbove' => [],
-                'firstLineAboveBroken' => ['contracts.ensuresViolated: Postcondition #[Ensures(\'$result < count($lines)\')] can be violated'],
+                'firstLineAboveBroken' => ['contracts.ensuresViolated: Counterexample: $lines = [OrderLine(quantity: 998, unitCents: 999999), OrderLine(quantity: 1000, unitCents: 998000), OrderLine(quantity: 998, unitCents: 1000000), OrderLine(quantity: 998, unitCents: 1000000), OrderLine(quantity: 999, unitCents: 998000), OrderLine(quantity: 998, unitCents: 1000000), OrderLine(quantity: 998, unitCents: 1000000), OrderLine(quantity: 998, unitCents: 999999), OrderLine(quantity: 998, unitCents: 1000000), OrderLine(quantity: 999, unitCents: 1000000)], $limitCents = 998000000 => $result = 10'],
                 'withoutEmptyLines' => [],
                 'withoutEmptyLinesBroken' => ['contracts.ensuresViolated: Counterexample: $lines = [OrderLine(quantity: 1, unitCents: 0)] => $result = []'],
             ],

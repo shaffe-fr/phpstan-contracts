@@ -1,8 +1,12 @@
 <?php
+
 declare(strict_types=1);
+
 namespace PhpstanContracts\Examples\RealWorld;
+
 use PhpstanContracts\Attribute\Ensures;
 use PhpstanContracts\Attribute\Requires;
+
 /**
  * Splits an order discount over the lines of the order. The parts must add up to
  * the discount, to the cent, whatever the number of lines.
@@ -28,8 +32,10 @@ final class DiscountSplit
         foreach ($lineCents as $i => $cents) {
             $parts[] = $i < $remainder ? $share + 1 : $share;
         }
+
         return $parts;
     }
+
     /**
      * The remainder is forgotten: the parts add up to less than the discount
      * whenever it does not divide by the number of lines.
@@ -47,8 +53,10 @@ final class DiscountSplit
         foreach ($lineCents as $cents) {
             $parts[] = $share;
         }
+
         return $parts;
     }
+
     /**
      * Each line takes what it can, never more than its own amount, until the
      * discount is used up. The caller guarantees that the lines can absorb it.
@@ -70,8 +78,10 @@ final class DiscountSplit
             $parts[] = $part;
             $left -= $part;
         }
+
         return $parts;
     }
+
     /**
      * Without the guarantee that the lines can absorb the discount, a part of it
      * is lost.
@@ -91,6 +101,7 @@ final class DiscountSplit
             $parts[] = $part;
             $left -= $part;
         }
+
         return $parts;
     }
 }

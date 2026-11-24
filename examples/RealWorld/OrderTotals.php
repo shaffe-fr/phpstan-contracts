@@ -1,8 +1,12 @@
 <?php
+
 declare(strict_types=1);
+
 namespace PhpstanContracts\Examples\RealWorld;
+
 use PhpstanContracts\Attribute\Ensures;
 use PhpstanContracts\Attribute\Requires;
+
 /**
  * Totals over the lines of an order, with a loop over the list of lines.
  */
@@ -20,8 +24,10 @@ final class OrderTotals
         foreach ($lines as $line) {
             $total += $line->quantity * $line->unitCents;
         }
+
         return $total;
     }
+
     /**
      * The same total without a bound on the number of lines: the proof covers the
      * orders up to a number of lines only, which the prover says instead of
@@ -36,8 +42,10 @@ final class OrderTotals
         foreach ($lines as $line) {
             $total += $line->quantity * $line->unitCents;
         }
+
         return $total;
     }
+
     /**
      * Position of the first line above the limit, or -1 when there is none. Empty
      * lines are skipped.
@@ -58,14 +66,16 @@ final class OrderTotals
                 return $i;
             }
         }
+
         return -1;
     }
+
     /**
      * The off-by-one of the index: it can point after the last line.
      *
      * @param list<OrderLine> $lines
      */
-    #[Requires('count($lines) <= 20')]
+    #[Requires('count($lines) <= 10')]
     #[Ensures('$result < count($lines)')]
     public static function firstLineAboveBroken(array $lines, int $limitCents): int
     {
@@ -74,8 +84,10 @@ final class OrderTotals
                 return $i + 1;
             }
         }
+
         return -1;
     }
+
     /**
      * Keeps the lines that cost something, in their order.
      *
@@ -93,8 +105,10 @@ final class OrderTotals
             }
             $kept[] = $line;
         }
+
         return $kept;
     }
+
     /**
      * Claims that nothing is dropped, which is false as soon as a line is free.
      *
@@ -112,9 +126,11 @@ final class OrderTotals
             }
             $kept[] = $line;
         }
+
         return $kept;
     }
 }
+
 /**
  * A line of an order.
  */
