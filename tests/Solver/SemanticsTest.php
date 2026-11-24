@@ -10,8 +10,10 @@ use PhpstanContracts\Smt\Smt;
 use PhpstanContracts\Smt\Sort;
 use PhpstanContracts\Smt\Term;
 use PhpstanContracts\Solver\ScriptRenderer;
+use PhpstanContracts\Translate\DomainBuilder;
 use PhpstanContracts\Translate\Encoding;
 use PhpstanContracts\Translate\ListConcat;
+use PhpstanContracts\Translate\VarSpec;
 use PhpstanContracts\Tests\Support\RequiresZ3;
 use PhpstanContracts\Tests\Support\Z3Evaluator;
 use PHPUnit\Framework\TestCase;
@@ -613,6 +615,70 @@ final class SemanticsTest extends TestCase
 
         self::assertGreaterThan(5, $floats, 'the lists include sums that PHP turns into floats');
         self::assertSame([], array_slice($failed, 0, 3), sprintf('%d of %d claims about array_sum() differ from PHP.', count($failed), $total));
+    }
+
+    /**
+     * The range lemma of `array_sum()` is an assumption of every check of a method, so it is
+     * compared with PHP: for bounded input lists (negative bound, a single value, the empty list,
+     * very large bounds) the assertions stay consistent and the sum of every prefix is what PHP
+     * computes, inside `[n * lo, n * hi]`.
+     */
+    public function testArraySumRangeLemmaMatchesPhp(): void
+    {
+        $bounds = [[-5, 5], [7, 7], [0, 0], [-1000, 3], [0, 4000000000000000000], [-4000000000000000000, 4000000000000000000], [PHP_INT_MIN, PHP_INT_MAX]];
+        $domains = new DomainBuilder();
+        // Closures, so that the int|float result of PHP is not narrowed to int by the analysis.
+        $phpSum = static function (array $values, int $n): int|float {
+            $sum = 0;
+            foreach (array_slice($values, 0, $n) as $value) {
+                $sum += $value;
+            }
+            return $sum;
+        };
+        $phpProduct = static fn (int|float $a, int|float $b): int|float => $a * $b;
+        mt_srand(31);
+        $total = 0;
+        $failed = [];
+        foreach ($bounds as [$lo, $hi]) {
+            $lists = [[], [$lo], [$hi], [$lo, $hi, $lo]];
+            for ($i = 0; $i < 4; ++$i) {
+                $list = [];
+                for ($k = mt_rand(0, 6); $k > 0; --$k) {
+                    $list[] = mt_rand(0, 3) === 0 ? ($k % 2 === 0 ? $lo : $hi) : mt_rand($lo, $hi);
+                }
+                $lists[] = $list;
+            }
+            foreach ($lists as $php) {
+                $spec = new VarSpec(Sort::list(Sort::int()), element: new VarSpec(Sort::int(), $lo, $hi));
+                $encoding = new Encoding();
+                $input = $encoding->declareInput('xs', $spec->sort);
+                $encoding->assert($domains->constraint($spec, $input, true));
+                $encoding->registerInput($input, $spec);
+                $encoding->requireListSum();
+                $elements = array_map(static fn (int $value): Term => Smt::int($value), $php);
+                $encoding->assert(Smt::eq($input, Smt::listLiteral($spec->sort, $elements, $encoding->fresh('base', $spec->sort))));
+
+                $claims = [];
+                for ($n = 0; $n <= count($php); ++$n) {
+                    $sum = $phpSum($php, $n);
+                    $low = $phpProduct($n, $lo);
+                    $high = $phpProduct($n, $hi);
+                    if (is_int($low) && is_int($high)) {
+                        self::assertTrue(is_int($sum) && $sum >= $low && $sum <= $high, 'the PHP sum is inside the bounds');
+                    }
+                    if (is_int($sum)) {
+                        $claims[] = Smt::eq(Smt::prefixSum($input, Smt::int($n)), Smt::int($sum))->smt;
+                    }
+                }
+                $total += count($claims);
+                array_push($failed, ...$this->failedClaims($encoding, $claims));
+                // The assertions are consistent: `false` is not provable from them.
+                self::assertSame(['false'], $this->failedClaims($encoding, ['false']), 'the lemma contradicts a list of the domain');
+            }
+        }
+
+        self::assertGreaterThan(50, $total);
+        self::assertSame([], array_slice($failed, 0, 3), sprintf('%d of %d prefix sums differ from PHP.', count($failed), $total));
     }
 
     /**
