@@ -598,4 +598,89 @@ final class ForeachFixture
 
         return $total;
     }
+    /**
+     * @param list<int<0, 1000>> $amounts
+     * @return list<int<500, 1000>>
+     */
+    #[Requires('count($amounts) <= 10')]
+    #[Ensures('count($result) <= count($amounts)')]
+    public static function filtersTheLargeAmounts(array $amounts): array
+    {
+        $large = [];
+        foreach ($amounts as $amount) {
+            if ($amount >= 500) {
+                $large[] = $amount;
+            }
+        }
+        return $large;
+    }
+    /**
+     * @param list<int<0, 1000>> $amounts
+     * @return list<int<0, 2000>>
+     */
+    #[Requires('count($amounts) <= 10')]
+    #[Ensures('count($result) === count($amounts)')]
+    #[Ensures('count($amounts) === 0 || $result[0] === 2 * $amounts[0]')]
+    public static function mapsEachAmountToItsDouble(array $amounts): array
+    {
+        $doubled = [];
+        foreach ($amounts as $amount) {
+            $doubled[] = 2 * $amount;
+        }
+        return $doubled;
+    }
+    /**
+     * @param list<int<0, 1000>> $amounts
+     * @return list<int<0, 1000>>
+     */
+    #[Requires('count($amounts) <= 10')]
+    #[Ensures('count($result) === count($amounts) + 1')]
+    public static function buildsTheListWithASpread(array $amounts): array
+    {
+        $copy = [0];
+        foreach ($amounts as $amount) {
+            $copy = [...$copy, $amount];
+        }
+        return $copy;
+    }
+    /**
+     * @param list<int<0, 1000>> $amounts
+     * @return list<int<0, 1000>>
+     */
+    #[Requires('count($amounts) <= 3')]
+    #[Ensures('count($result) <= count($amounts)')]
+    public static function claimsAFilterThatAppendsTwice(array $amounts): array
+    {
+        $kept = [];
+        foreach ($amounts as $amount) {
+            $kept[] = $amount;
+            $kept[] = $amount;
+        }
+        return $kept;
+    }
+    /**
+     * @param list<int<0, 1000>> $amounts
+     */
+    #[Requires('count($amounts) <= 10')]
+    #[Ensures('$result === 2 * count($amounts)')]
+    public static function appendsToTheListItIterates(array $amounts): int
+    {
+        $work = [...$amounts];
+        foreach ($work as $amount) {
+            $work[] = $amount;
+        }
+        return count($work);
+    }
+    /**
+     * @param list<int<0, 1000>> $amounts
+     */
+    #[Requires('count($amounts) <= 10')]
+    #[Ensures('$result >= 0')]
+    public static function appendsToTheParameterItIterates(array $amounts): int
+    {
+        foreach ($amounts as $amount) {
+            $amounts[] = $amount;
+        }
+        return count($amounts);
+    }
 }

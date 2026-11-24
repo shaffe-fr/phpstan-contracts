@@ -4,11 +4,11 @@ declare(strict_types=1);
 
 namespace PhpstanContracts\Tests\Rule;
 
-use Closure;
 use PhpstanContracts\Attribute\Throws;
 use PhpstanContracts\Tests\Fixtures\ReplayFixture;
 use PhpstanContracts\Tests\Fixtures\ReplayStatus;
 use PhpstanContracts\Tests\Support\Diagnostic;
+use PhpstanContracts\Tests\Support\PhpContract;
 use PhpstanContracts\Tests\Support\RuleFixtureTestCase;
 use ReflectionClass;
 use ReflectionEnum;
@@ -34,9 +34,6 @@ final class CounterexampleReplayTest extends RuleFixtureTestCase
 {
     public function testEveryReportedCounterexampleIsReproducedByPhp(): void
     {
-        if (!function_exists('implies')) {
-            eval('function implies(bool $premise, bool $conclusion): bool { return !$premise || $conclusion; }');
-        }
 
         $classes = [ReplayFixture::class, ReplayStatus::class];
         $diagnostics = $this->diagnose($classes);
@@ -71,6 +68,16 @@ final class CounterexampleReplayTest extends RuleFixtureTestCase
             'The counterexample is not replayable: it holds a list too long to print, and the bounded re-run did not shorten it. ' . $label,
         );
 
+        // A `loopBound` diagnostic is about what the proof covers: PHP runs the method fine on the
+        // longer list it prints, so there is nothing to falsify.
+        if ($diagnostic->identifier === 'contracts.loopBound') {
+            $this->addToAssertionCount(1);
+            return;
+        }
+        if ($diagnostic->identifier === 'contracts.returnType') {
+            $this->replayReturnType($method, $diagnostic, $label);
+            return;
+        }
         if ($diagnostic->identifier === 'contracts.overflow') {
             [$object, $arguments] = $this->arguments($method, $this->between($diagnostic->message, 'Counterexample: ', '.'), $label);
 
@@ -123,7 +130,7 @@ final class CounterexampleReplayTest extends RuleFixtureTestCase
         );
 
         self::assertFalse(
-            $this->evaluateContract($contract, $method, $object, $arguments, $actual),
+            PhpContract::evaluate($contract, $method, $object, $arguments, $actual),
             'The contract holds in PHP for the reported inputs, so the counterexample is not one. ' . $label,
         );
     }
@@ -148,6 +155,26 @@ final class CounterexampleReplayTest extends RuleFixtureTestCase
         }
     }
 
+    /**
+     * PHP returns the value the message shows, and it is outside the range the docblock declares.
+     * Only `int<min, max>` and `list<int<min, max>>` are read here, which is what the fixtures declare.
+     */
+    private function replayReturnType(ReflectionMethod $method, Diagnostic $diagnostic, string $label): void
+    {
+        $pattern = '/declared return type `(list<)?int<(-?\d+), (-?\d+)>>?`\. Counterexample: (.*) => \$result = (.*) \(return at line \d+\)\.$/s';
+        if (preg_match($pattern, $diagnostic->message, $matches) !== 1) {
+            self::fail('The message has an unexpected shape: ' . $label);
+        }
+        [, $isList, $min, $max, $inputs, $shownResult] = $matches;
+        [$object, $arguments] = $this->arguments($method, $inputs, $label);
+        $actual = $method->invoke($object, ...$arguments);
+        $position = 0;
+        self::assertTrue($this->same($this->parseValue($shownResult, $position, $label), $actual), sprintf("PHP returns %s, the message says %s.\n%s", var_export($actual, true), $shownResult, $label));
+        $values = $isList === 'list<' ? $actual : [$actual];
+        self::assertIsArray($values, $label);
+        $outside = array_filter($values, static fn (mixed $value): bool => !is_int($value) || $value < (int) $min || $value > (int) $max);
+        self::assertNotSame([], $outside, 'PHP returns a value inside the declared type. ' . $label);
+    }
     private function replayPrecondition(ReflectionMethod $method, Diagnostic $diagnostic, string $label): void
     {
         if (preg_match('/#\[Requires\(\'(.*?)\'\)\]/s', $diagnostic->message, $matches) !== 1) {
@@ -156,7 +183,7 @@ final class CounterexampleReplayTest extends RuleFixtureTestCase
         [$object, $arguments] = $this->arguments($method, $this->between($diagnostic->message, 'Counterexample: ', '.'), $label);
 
         self::assertFalse(
-            $this->evaluateContract($matches[1], $method, $object, $arguments, null),
+            PhpContract::evaluate($matches[1], $method, $object, $arguments, null),
             'The precondition holds in PHP for the reported inputs. ' . $label,
         );
     }
@@ -178,7 +205,7 @@ final class CounterexampleReplayTest extends RuleFixtureTestCase
         $conditions = true;
         foreach ($method->getAttributes(Throws::class) as $attribute) {
             $throws = $attribute->newInstance();
-            $holds = $throws->when === null ? null : $this->evaluateContract($throws->when, $method, $object, $arguments, null);
+            $holds = $throws->when === null ? null : PhpContract::evaluate($throws->when, $method, $object, $arguments, null);
             if ($thrown instanceof $throws->class) {
                 $covered = true;
                 $conditions = $conditions && $holds !== false;
@@ -206,7 +233,7 @@ final class CounterexampleReplayTest extends RuleFixtureTestCase
             sprintf("PHP returns %s, the message says %s.\n%s", var_export($actual, true), $shownResult, $label),
         );
         self::assertTrue(
-            $this->evaluateContract($when, $method, $object, $arguments, $actual),
+            PhpContract::evaluate($when, $method, $object, $arguments, $actual),
             'The condition of the #[Throws] does not hold in PHP for the reported inputs. ' . $label,
         );
     }
@@ -223,26 +250,6 @@ final class CounterexampleReplayTest extends RuleFixtureTestCase
         }
 
         return [$matches[1], $matches[2], $matches[3]];
-    }
-
-    /**
-     * The contract is evaluated in the scope of the class, so that `self::` resolves,
-     * with `$this` passed as an ordinary parameter.
-     *
-     * @param list<mixed> $arguments
-     */
-    private function evaluateContract(string $contract, ReflectionMethod $method, ?object $object, array $arguments, mixed $result): bool
-    {
-        $names = array_map(static fn ($parameter): string => '$' . $parameter->getName(), $method->getParameters());
-        $closure = eval(sprintf(
-            'namespace PhpstanContracts\Tests\Fixtures; return static function (%s): bool { return (bool) (%s); };',
-            implode(', ', ['$self', ...$names, '$result']),
-            str_replace('$this', '$self', $contract),
-        ));
-        $closure = Closure::bind($closure, null, $method->getDeclaringClass()->getName());
-        self::assertNotNull($closure);
-
-        return $closure($object, ...$arguments, ...[$result]);
     }
 
     /**

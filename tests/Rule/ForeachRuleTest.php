@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace PhpstanContracts\Tests\Rule;
 
 use PhpstanContracts\Tests\Fixtures\ForeachFixture;
+use PhpstanContracts\Tests\Fixtures\ForeachSemantics;
 use PhpstanContracts\Tests\Support\RuleFixtureTestCase;
 
 final class ForeachRuleTest extends RuleFixtureTestCase
@@ -52,8 +53,35 @@ final class ForeachRuleTest extends RuleFixtureTestCase
                 'overANullableList' => ['contracts.unsupported: foreach over $amounts, which may be null here: PHP warns "foreach() argument must be of type array|object" and skips the loop. Check it first with !== null.'],
                 'overAString' => ['contracts.unsupported: foreach is only supported over a list<T>, not over a string.'],
                 'overAnEmptyLiteral' => ['contracts.unsupported: This list is always empty, so the loop never runs; remove the loop.'],
+                'filtersTheLargeAmounts' => [],
+                'mapsEachAmountToItsDouble' => [],
+                'buildsTheListWithASpread' => [],
+                'claimsAFilterThatAppendsTwice' => ['contracts.ensuresViolated: Postcondition #[Ensures(\'count($result) <= count($amounts)\')] can be violated. Counterexample: $amounts = ['],
+                'appendsToTheListItIterates' => [],
+                'appendsToTheParameterItIterates' => ['contracts.unsupported: Appending to $amounts, a list received from outside the method, is not supported: PHP appends at the array\'s next free key'],
                 'boundsTheListWithAGuard' => [],
                 'overAnEmptyVariable' => ['contracts.unsupported: This list is always empty, so the loop never runs; remove the loop.'],
+            ],
+        ]);
+    }
+
+    public function testTheLoopsOfTheSemanticsFixtureAreProven(): void
+    {
+        $this->assertOutcomes([
+            ForeachSemantics::class => [
+                'appendsWhileIterating' => [],
+                'doublesTheListWithASpread' => [],
+                'visitsEveryElementAfterEmptyingTheVariable' => [],
+                'leavesTheVariableEmptied' => [],
+                'sumsTheListItWasGivenAndNotTheOneItBecame' => [],
+                'keepsTheLastKeyAndValue' => [],
+                'overwritesTheKeyAndTheValueInTheBody' => [],
+                'findsTheFirstElementAbove50' => [],
+                'countsTheElementsThatAreNotZero' => [],
+                'sumsTheElementsBeforeTheFirstOneAbove50' => [],
+                'returnsTheFirstEvenElement' => [],
+                'keepsTheElementsAbove50' => [],
+                'leavesTheVariablesAloneForAnEmptyList' => [],
             ],
         ]);
     }

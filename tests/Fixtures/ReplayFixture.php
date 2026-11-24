@@ -393,6 +393,139 @@ final class ReplayFixture
         return in_array($n, $items, true);
     }
 
+    /**
+     * @param list<int<0, 1000>> $amounts
+     */
+    #[Requires('count($amounts) <= 3')]
+    #[Ensures('$result <= 2000')]
+    public static function loopSumPastItsClaim(array $amounts): int
+    {
+        $total = 0;
+        foreach ($amounts as $amount) {
+            $total += $amount;
+        }
+        return $total;
+    }
+    /**
+     * Splits an even discount over two lines and loses a cent when it is odd.
+     *
+     * @param list<int<1, 100>> $lines
+     * @param int<0, 100000> $discountCents
+     * @return list<int<0, 100000>>
+     */
+    #[Requires('count($lines) === 2')]
+    #[Ensures('$result[0] + $result[1] === $discountCents')]
+    public static function loopSplitLosesACent(array $lines, int $discountCents): array
+    {
+        $share = intdiv($discountCents, count($lines));
+        $parts = [];
+        foreach ($lines as $line) {
+            $parts[] = $share;
+        }
+        return $parts;
+    }
+    /**
+     * @param list<int<0, 100>> $items
+     */
+    #[Requires('count($items) <= 3')]
+    #[Ensures('$result === count($items)')]
+    public static function loopBreaksOneElementTooEarly(array $items): int
+    {
+        $visited = 0;
+        foreach ($items as $index => $item) {
+            $visited += 1;
+            if ($index === 1) {
+                break;
+            }
+        }
+        return $visited;
+    }
+    /**
+     * @param list<int<0, 100>> $items
+     */
+    #[Requires('count($items) <= 3')]
+    #[Ensures('$result === -1 || $result >= 60')]
+    public static function loopReturnsTheWrongElement(array $items): int
+    {
+        foreach ($items as $item) {
+            if ($item > 50) {
+                return $item;
+            }
+        }
+        return -1;
+    }
+    /**
+     * @param list<int<0, 100>> $items
+     * @return list<int<60, 100>>
+     */
+    #[Requires('count($items) <= 3')]
+    public static function loopFilterBreaksTheElementRange(array $items): array
+    {
+        $kept = [];
+        foreach ($items as $item) {
+            if ($item > 50) {
+                $kept[] = $item;
+            }
+        }
+        return $kept;
+    }
+    /**
+     * @param list<int<0, 4000000000000000000>> $amounts
+     */
+    #[Requires('count($amounts) <= 3')]
+    public static function loopSumOverflows(array $amounts): int
+    {
+        $total = 0;
+        foreach ($amounts as $amount) {
+            $total += $amount;
+        }
+        return $total;
+    }
+    /**
+     * @param list<int<0, 100>> $items
+     */
+    #[Requires('count($items) <= 3')]
+    public static function loopReadsTheNextElementUnguarded(array $items): int
+    {
+        $total = 0;
+        foreach ($items as $index => $item) {
+            $total += $items[$index + 1];
+        }
+        return $total;
+    }
+    /**
+     * @param list<int<0, 1000>> $quantities
+     */
+    #[Requires('count($quantities) <= 3')]
+    public static function loopThrowsFromTheSecondElementWithoutSayingSo(array $quantities): int
+    {
+        $total = 0;
+        foreach ($quantities as $index => $quantity) {
+            if ($quantity === 0 && $index > 0) {
+                throw new \InvalidArgumentException('A quantity is zero.');
+            }
+            $total += $quantity;
+        }
+        return $total;
+    }
+    /**
+     * Never throws for the first element, so `[0]` returns although the declaration says it throws.
+     *
+     * @param list<int<0, 1000>> $quantities
+     */
+    #[Requires('count($quantities) <= 3')]
+    #[Throws(\InvalidArgumentException::class, when: 'in_array(0, $quantities, true)')]
+    public static function loopThrowsOnlyFromTheSecondElement(array $quantities): int
+    {
+        $total = 0;
+        foreach ($quantities as $index => $quantity) {
+            if ($quantity === 0 && $index > 0) {
+                throw new \InvalidArgumentException('A quantity is zero.');
+            }
+            $total += $quantity;
+        }
+        return $total;
+    }
     private static function twice(int $x): int
     {
         return $x * 2;
