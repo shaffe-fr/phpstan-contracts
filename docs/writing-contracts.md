@@ -117,7 +117,7 @@ A contract on a method without a body, in an interface or on an abstract method,
 
 | Rejected | Message |
 |---|---|
-| `while`, `for`, `foreach`, `do` | `Loops are not supported yet: termination and loop invariants cannot be established. Read a list with count($list), $list[$i] and in_array() instead.` |
+| `while`, `for`, `do` | `Only foreach over a list is supported: a while, do or for loop needs a termination argument, which is not supported yet. Iterate the list with foreach ($list as $i => $item), or read it with count($list) and $list[$i].` |
 | `switch` | `switch is not supported; use match.` |
 | `try` / `catch` | `try/catch is not supported: verified methods must not rely on exceptions.` |
 | `throw` inside an operation or a condition | `throw is only supported as a statement, or as a whole branch of match, ?: or ?? whose value is returned or assigned.` |
@@ -346,7 +346,7 @@ What can be called:
 | `static::helper($x)` | `static::` looks the method up in the called class, where a subclass's own `helper()` wins even over a private one. So the class must be `final`, or the method `final` and not `private`. |
 | arguments | Positional or named. A missing argument takes its default value. An `int` is converted for a parameter whose native type is `float` or `?float`, as PHP does. PHP converts by the native type only, so a parameter without a native type, or whose native type does not match its PHPDoc type, is rejected. Any other mismatch of types is rejected. |
 
-The callee must itself be in the verified subset; when it is not, the reason is given: ``The call to PhpstanContracts\Tests\Fixtures\CallFixture::loops() cannot be verified: Loops are not supported: ...``. Recursion, methods from a trait, methods marked `#[\Deprecated]` (calling one triggers `E_USER_DEPRECATED`, which runs the error handler), generators (``PhpstanContracts\Tests\Fixtures\Generators::five() contains a yield, so calling it returns a Generator.``) and calls inside a contract are rejected.
+The callee must itself be in the verified subset; when it is not, the reason is given: ``The call to PhpstanContracts\Tests\Fixtures\CallFixture::loops() cannot be verified: Only foreach over a list is supported: ...``. Recursion, methods from a trait, methods marked `#[\Deprecated]` (calling one triggers `E_USER_DEPRECATED`, which runs the error handler), generators (``PhpstanContracts\Tests\Fixtures\Generators::five() contains a yield, so calling it returns a Generator.``) and calls inside a contract are rejected.
 
 A called method cannot throw yet: ``The call to PhpstanContracts\Tests\Fixtures\ThrowsFixture::guarded() cannot be verified: throw is not supported in a called method yet: ...``.
 
@@ -442,6 +442,7 @@ Besides your contracts, every checked method must satisfy a set of safety condit
 | Valid enum value | `Status::from($v)` can receive a value that is not a backing value | `contracts.invalidEnumValue` |
 | Representable cast | `(int) $float` can receive `NAN`, an infinity, or a value outside the `int` range | `contracts.invalidCast` |
 | Existing list key | `$list[$i]` can read a key that does not exist: PHP warns and yields `null` | `contracts.undefinedKey` |
+| Loop bound | a `foreach` over a list that can have more elements than the proof unrolls: a limit of the proof, not a bug in the code | `contracts.loopBound` |
 | Return type respected | the returned value can leave the domain of its declared type, such as a PHPDoc range or a field range of a data class | `contracts.returnType` |
 | No undeclared exception | a `throw` can be reached where the [`#[Throws]`](#exceptions) declarations do not allow it | `contracts.unexpectedThrow` |
 | Callee preconditions respected | a [call to a method of the same file](#calls-to-other-methods) can break one of its `#[Requires]` | `contracts.requiresViolated` |
@@ -463,6 +464,7 @@ Each condition is checked **under the path that reaches it**. In `$parts > 0 && 
 
 | `contracts.invalidCast` | `(int)` of a float that can be `NAN`, infinite or out of range: PHP 8.3 and 8.4 wrap the value or return 0, PHP 8.5 also raises a warning. | Bound the float, or exclude `NAN` and infinities with `#[Requires]`. |
 | `contracts.undefinedKey` | A list read `$list[$i]` whose key may not exist. | Guard the read with `$i >= 0 && $i < count($list)` or `isset($list[$i])`, or state the range with `#[Requires]`. |
+| `contracts.loopBound` | A `foreach` over a list that can have more elements than the proof unrolls. This is a limit of the proof, not a bug in the code. | Bound the list with `#[Requires('count($list) <= 50')]`, or raise `contracts.loopUnroll`. |
 | `contracts.returnType` | The method can return a value that its declared type excludes. | Fix the computation, or widen the declared type. |
 | `contracts.unexpectedThrow` | A `throw` can be reached where no `#[Throws]` allows it, or where the `#[Throws]` declarations do not allow it; the message then lists the conditions that allow it. | Declare it with its condition, or fix the guard. |
 | `contracts.throwsViolated` | The method can return although the condition of a `#[Throws]` holds. | Fix the guard, or the condition. |

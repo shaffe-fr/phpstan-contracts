@@ -34,6 +34,8 @@ final class MethodEncoder
         private readonly ReflectionProvider $reflectionProvider,
         private readonly InitializerExprTypeResolver $initializers,
         private readonly ContractReader $contracts,
+        private readonly int $loopUnroll = 10,
+        private readonly int $maxLoopUnroll = 100,
     ) {
     }
 
@@ -151,9 +153,12 @@ final class MethodEncoder
             $this->contracts,
             $scope->getFile(),
             [sprintf('%s::%s()', $methodReflection->getDeclaringClass()->getDisplayName(), $methodReflection->getName())],
+            $this->loopUnroll,
+            $this->maxLoopUnroll,
         );
         $body = new ExpressionTranslator($encoding, $this->types, $this->enums, $classes, $this->reflectionProvider, $this->initializers, false, null, $thisRefusal, $inliner, [], $policy, $scope->getFile());
-        $statements = new StatementTranslator($body, $encoding, $resultSpec->sort);
+        $loopBounds = LoopBounds::of($contract->requires, $body, $this->loopUnroll, $this->maxLoopUnroll);
+        $statements = new StatementTranslator($body, $encoding, $resultSpec->sort, $loopBounds, $entry);
         $final = $statements->execute($method->stmts ?? [], (new State($entry, Smt::bool(true)))->withView($view));
 
         if (!$final->reached->isFalse()) {

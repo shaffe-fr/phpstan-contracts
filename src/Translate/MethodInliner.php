@@ -57,6 +57,8 @@ final class MethodInliner
         private readonly ContractReader $contracts,
         private readonly string $file,
         private array $stack,
+        private readonly int $loopUnroll = 10,
+        private readonly int $maxLoopUnroll = 100,
     ) {
     }
 
@@ -398,7 +400,8 @@ final class MethodInliner
         }
 
         $returns = new InlinedReturns();
-        $statements = new StatementTranslator($body, $this->encoding, $resultSort, $returns);
+        $loopBounds = LoopBounds::of($this->contracts->read($node)->requires, $body, $this->loopUnroll, $this->maxLoopUnroll);
+        $statements = new StatementTranslator($body, $this->encoding, $resultSort, $loopBounds, $entry, $calls, $returns);
         $final = $statements->execute($node->stmts ?? [], (new State($entry, $pc))->withView($view));
 
         if (!$final->reached->isFalse()) {

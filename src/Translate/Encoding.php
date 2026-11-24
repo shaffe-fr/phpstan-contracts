@@ -42,6 +42,9 @@ final class Encoding
 
     private int $counter = 0;
 
+    /** @var list<array{int, int, int}> the loops being translated: line, iteration and bound */
+    private array $loops = [];
+
     /** @var array<string, Sort> datatypes in the order they must be declared */
     private array $datatypes = [];
 
@@ -214,7 +217,35 @@ final class Encoding
             return;
         }
 
-        $this->obligations[] = $obligation;
+        $this->obligations[] = $this->loops === [] ? $obligation : $obligation->inIterations(array_map(
+            static fn (array $frame): array => [$frame[0], $frame[1]],
+            $this->loops,
+        ));
+    }
+
+    /**
+     * Starts translating iteration `$iteration` (0-based) of the `foreach` at `$line`, which is
+     * unrolled `$bound` times. The obligations added until {@see self::leaveIteration()} are
+     * stamped with it, and the loops inside it count towards the size of the unrolling.
+     */
+    public function enterIteration(int $line, int $iteration, int $bound): void
+    {
+        $this->loops[] = [$line, $iteration, $bound];
+    }
+
+    public function leaveIteration(): void
+    {
+        array_pop($this->loops);
+    }
+
+    /**
+     * The bounds of the loops being translated, outermost first.
+     *
+     * @return list<int>
+     */
+    public function enclosingBounds(): array
+    {
+        return array_map(static fn (array $frame): int => $frame[2], $this->loops);
     }
 
     /**

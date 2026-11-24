@@ -35,6 +35,43 @@ final readonly class Obligation
          * author can paste, such as `$index >= 0 && $index < count($amounts)`.
          */
         public ?string $guard = null,
+        /** For a `loopBound`, the bound the proof unrolls to. */
+        public ?LoopBound $loop = null,
+        /**
+         * The loop iterations the obligation was created in, outermost first, as the line of
+         * the `foreach` and the 0-based iteration. The copies of one obligation made by the
+         * iterations of a loop are reported once.
+         *
+         * @var list<array{int, int}>
+         */
+        public array $iterations = [],
     ) {
+    }
+
+    /**
+     * @param list<array{int, int}> $iterations
+     */
+    public function inIterations(array $iterations): self
+    {
+        return new self(
+            $this->kind,
+            $this->line,
+            $this->expression,
+            $this->pathCondition,
+            $this->goal,
+            $this->calls,
+            $this->allowedWhere,
+            $this->guard,
+            $this->loop,
+            $iterations,
+        );
+    }
+
+    /**
+     * What the copies of one obligation have in common.
+     */
+    public function groupKey(): string
+    {
+        return implode('|', [$this->kind->value, $this->line, $this->expression, implode(',', $this->calls)]);
     }
 }

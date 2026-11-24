@@ -13,10 +13,12 @@ use PhpstanContracts\Solver\SolverResult;
 use PhpstanContracts\Solver\Verdict;
 use PhpstanContracts\Solver\Z3Runner;
 use PhpstanContracts\Translate\Encoding;
+use PhpstanContracts\Translate\LoopBounds;
 use PhpstanContracts\Translate\MethodEncoder;
 use PhpstanContracts\Translate\Obligation;
 use PhpstanContracts\Translate\ObligationKind;
 use PhpstanContracts\Translate\ProbePlanner;
+use LogicException;
 use PhpParser\Node;
 use PHPStan\Analyser\Scope;
 use PHPStan\Node\InClassMethodNode;
@@ -41,7 +43,11 @@ final class VerifyContractRule implements Rule
         private readonly Z3Runner $z3,
         private readonly CounterexampleFormatter $formatter,
         private readonly int $timeoutMs,
+        int $loopUnroll = 10,
+        int $maxLoopUnroll = 100,
     ) {
+        // The translation uses these two numbers; they are checked here, where the other settings of the rule are.
+        LoopBounds::validateLimits($loopUnroll, $maxLoopUnroll);
     }
 
     public function getNodeType(): string
@@ -104,16 +110,20 @@ final class VerifyContractRule implements Rule
             );
         }
 
-        foreach ($encoding->obligations as $obligation) {
+        $reported = $this->reportedCopies($encoding, $results, $cursor);
+        foreach ($encoding->obligations as $position => $obligation) {
             $check = $cursor++;
             $result = $results[$check];
+            if ($reported[$position] !== true) {
+                continue;
+            }
 
             if ($result->verdict === Verdict::Sat) {
                 $errors[] = $this->error(
                     sprintf(
                         '%s Counterexample: %s.',
-                        $this->describeObligation($obligation),
-                        $this->counterexample($encoding, $check, $result, false),
+                        $this->inIteration($this->describeObligation($obligation), $obligation),
+                        $this->counterexample($encoding, $check, $result, false, $this->isBeyondShortLists($obligation)),
                     ),
                     'contracts.' . $obligation->kind->value,
                     $obligation->line,
@@ -192,10 +202,10 @@ final class VerifyContractRule implements Rule
      * satisfies everything the first one did, so it is as genuine, and it can be printed in full.
      * If the second question is not answered with a model, the long form is kept.
      */
-    private function counterexample(Encoding $encoding, int $check, SolverResult $result, bool $withResult): string
+    private function counterexample(Encoding $encoding, int $check, SolverResult $result, bool $withResult, bool $keepLongForm = false): string
     {
         $text = $this->formatter->format($encoding, $result->values, $withResult);
-        if (!$this->formatter->isTruncated($text)) {
+        if ($keepLongForm || !$this->formatter->isTruncated($text)) {
             return $text;
         }
 
@@ -226,12 +236,103 @@ final class VerifyContractRule implements Rule
                 $obligation->guard ?? 'count($list) > $index',
                 $obligation->expression,
             ),
+            ObligationKind::LoopBound => $this->describeLoopBound($obligation),
             ObligationKind::UnexpectedThrow => $obligation->allowedWhere === null
                 ? sprintf('`%s` can be reached where no #[Throws] allows it.', $obligation->expression)
                 : sprintf('`%s` can be reached where the #[Throws] declarations do not allow it: they allow it only where %s.', $obligation->expression, $obligation->allowedWhere),
         };
 
         return $through === null ? $description : sprintf('%s, in the call to %s.', substr($description, 0, -1), $through);
+    }
+
+    /**
+     * Which obligations are reported. Each iteration of a loop has its own copy of every
+     * obligation of the body, and the copies of one location are reported once: the first one
+     * Z3 refutes, which is the earliest iteration that can fail (each copy is checked assuming
+     * the earlier ones), or else one that Z3 could not decide. Reporting one copy cannot hide a
+     * failure: the method already fails.
+     *
+     * @param list<SolverResult> $results
+     * @param int $first the check number of the first obligation
+     * @return list<bool> by position in the obligations of the encoding
+     */
+    private function reportedCopies(Encoding $encoding, array $results, int $first): array
+    {
+        /** @var array<string, array{int|null, int|null}> $chosen the refuted and the undecided copy of each group */
+        $chosen = [];
+        foreach ($encoding->obligations as $position => $obligation) {
+            if ($obligation->iterations === []) {
+                continue;
+            }
+            $key = $obligation->groupKey();
+            $chosen[$key] ??= [null, null];
+            $verdict = $results[$first + $position]->verdict;
+            if ($verdict === Verdict::Sat) {
+                $chosen[$key][0] ??= $position;
+            } elseif ($verdict === Verdict::Unknown) {
+                $chosen[$key][1] ??= $position;
+            }
+        }
+
+        $reported = [];
+        foreach ($encoding->obligations as $position => $obligation) {
+            $reported[] = $obligation->iterations === []
+                || $position === ($chosen[$obligation->groupKey()][0] ?? $chosen[$obligation->groupKey()][1]);
+        }
+
+        return $reported;
+    }
+
+    /**
+     * Where in a loop the reported copy of an obligation failed: `in iteration 3 (key 2) of the
+     * foreach at line 12`, the innermost loop first.
+     */
+    private function inIteration(string $description, Obligation $obligation): string
+    {
+        // A loop bound is about the list, not about an iteration.
+        if ($obligation->iterations === [] || $obligation->kind === ObligationKind::LoopBound) {
+            return $description;
+        }
+
+        $where = array_map(
+            static fn (array $iteration): string => sprintf('in iteration %d (key %d) of the foreach at line %d', $iteration[1] + 1, $iteration[1], $iteration[0]),
+            array_reverse($obligation->iterations),
+        );
+
+        return sprintf('%s, %s.', substr($description, 0, -1), implode(', ', $where));
+    }
+
+    private function describeLoopBound(Obligation $obligation): string
+    {
+        $loop = $obligation->loop ?? throw new LogicException('A loop bound obligation describes its loop.');
+
+        $unrolled = $loop->origin === null
+            ? sprintf('The proof unrolls this foreach up to %d iterations, and %s can have more.', $loop->iterations, $loop->subject)
+            : sprintf('The proof unrolls this foreach up to %d iterations, the bound of #[Requires(\'%s\')], and %s can have more.', $loop->iterations, $loop->origin, $loop->subject);
+
+        if ($loop->nameable) {
+            $example = sprintf('#[Requires(\'count(%s) <= %d\')]', $loop->subject, $loop->origin === null ? 50 : $loop->iterations);
+            $way = $loop->origin === null
+                ? sprintf('If the real maximum is known, add %s; otherwise raise contracts.loopUnroll.', $example)
+                : sprintf('If the real maximum is known, add %s, or raise the bound of the #[Requires] above.', $example);
+        } else {
+            $way = $loop->origin === null
+                ? 'If the real maximum is known, bound the list it is built from with #[Requires]; otherwise raise contracts.loopUnroll.'
+                : 'If the real maximum is known, bound the list it is built from with #[Requires], or raise the bound of the #[Requires] above.';
+        }
+
+        return sprintf('%s This is a limit of the proof, not a bug in the code. %s', $unrolled, $way);
+    }
+
+    /**
+     * A list that must exceed the loop bound cannot be shortened to ten elements when asking for
+     * a counterexample that can be printed in full.
+     */
+    private function isBeyondShortLists(Obligation $obligation): bool
+    {
+        return $obligation->kind === ObligationKind::LoopBound
+            && $obligation->loop !== null
+            && $obligation->loop->iterations >= ProbePlanner::MAX_ELEMENTS;
     }
 
     private function claimOf(Obligation $obligation): string
@@ -248,6 +349,7 @@ final class VerifyContractRule implements Rule
             ObligationKind::InvalidCast => sprintf('a representable value in `%s`', $obligation->expression),
             ObligationKind::ReturnType => sprintf('the return type `%s`', $obligation->expression),
             ObligationKind::UndefinedKey => sprintf('an existing key in `%s`', $obligation->expression),
+            ObligationKind::LoopBound => sprintf('the loop bound `%s`', $obligation->expression),
         };
 
         return $through === null ? $claim : sprintf('%s, in the call to %s', $claim, $through);

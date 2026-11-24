@@ -20,9 +20,9 @@ final class StatementRuleTest extends RuleFixtureTestCase
                 'callsAnotherMethod' => [],
                 'castToString' => [],
 
-                'whileLoop' => ['contracts.unsupported: Loops are not supported'],
-                'forLoop' => ['contracts.unsupported: Loops are not supported'],
-                'doWhileLoop' => ['contracts.unsupported: Loops are not supported'],
+                'whileLoop' => ['contracts.unsupported: Only foreach over a list is supported: a while, do or for loop needs a termination argument'],
+                'forLoop' => ['contracts.unsupported: Only foreach over a list is supported: a while, do or for loop needs a termination argument'],
+                'doWhileLoop' => ['contracts.unsupported: Only foreach over a list is supported: a while, do or for loop needs a termination argument'],
                 'switchStatement' => ['contracts.unsupported: switch is not supported; use match'],
                 'tryCatch' => ['contracts.unsupported: try/catch is not supported'],
                 'throwStatement' => ['contracts.unexpectedThrow: `throw new \\InvalidArgumentException(\'negative\')` can be reached where no #[Throws] allows it. Counterexample: $n = -'],

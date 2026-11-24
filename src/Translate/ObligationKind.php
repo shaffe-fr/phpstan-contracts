@@ -16,4 +16,5 @@ enum ObligationKind: string
     case RequiresViolated = 'requiresViolated';
     case UnexpectedThrow = 'unexpectedThrow';
     case UndefinedKey = 'undefinedKey';
+    case LoopBound = 'loopBound';
 }

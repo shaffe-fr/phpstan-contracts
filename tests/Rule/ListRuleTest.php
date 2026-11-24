@@ -100,7 +100,7 @@ final class ListRuleTest extends RuleFixtureTestCase
                 'appendsANullToAnEmptyList' => ['contracts.unsupported: Cannot infer the element type of $items from a null'],
                 'destructuresAList' => ['contracts.unsupported: Destructuring ([$a, $b] = ...) is not supported: read the elements with $list[0] and $list[1]'],
                 'unsetsAnElement' => ['contracts.unsupported: unset() is not supported: removing an element leaves a gap in the keys of a list'],
-                'loopsOverAList' => ['contracts.unsupported: Loops are not supported yet: termination and loop invariants cannot be established. Read a list with count($list), $list[$i] and in_array() instead.'],
+                'loopsOverAList' => [],
                 'mixesKeysAndNoKeys' => ['contracts.unsupported: An array literal is either a list without keys'],
                 'aLiteralOfDifferentTypes' => ['contracts.unsupported: The elements of this list have different types (int and string); a list must hold a single type.'],
                 'aLiteralOfAnIntAndAFloat' => ['contracts.unsupported: The elements of this list have different types (int and float)'],

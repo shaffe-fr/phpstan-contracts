@@ -15,6 +15,7 @@ use PhpParser\Node\Stmt;
 use PhpParser\NodeTraverser;
 use PhpParser\NodeVisitor;
 use PhpParser\NodeVisitorAbstract;
+use PhpParser\PrettyPrinter\Standard;
 
 /**
  * Symbolic execution of structured statements into SSA form.
@@ -26,6 +27,8 @@ use PhpParser\NodeVisitorAbstract;
  */
 final class StatementTranslator
 {
+    private const FOREACH_TARGETS = 'The key and the value of a foreach must be local variables.';
+
     private const LOCAL_WRITES_ONLY = 'Only assignments to local variables are allowed (no property, array or dynamic writes); appending is supported on a list built in the method ($list = []; $list[] = $value), or write $list = [...$list, $value].';
 
     /**
@@ -38,12 +41,22 @@ final class StatementTranslator
      */
     private array $built = [];
 
+    private readonly Standard $printer;
+
+    /**
+     * @param array<string, Term> $entry the parameters on entry, which a `#[Requires]` can name
+     * @param list<string> $calls in an inlined method, the calls that lead to it from the verified method
+     */
     public function __construct(
         private readonly ExpressionTranslator $expressions,
         private readonly Encoding $encoding,
         private readonly Sort $resultSort,
+        private readonly LoopBounds $loopBounds,
+        private readonly array $entry = [],
+        private readonly array $calls = [],
         private readonly ?InlinedReturns $inlinedReturns = null,
     ) {
+        $this->printer = new Standard();
     }
 
     public const GENERATOR_REFUSAL = 'Generators are not supported: a yield anywhere in the body, even in unreachable code, makes the method return a Generator.';
@@ -109,6 +122,7 @@ final class StatementTranslator
                 $statement->else,
                 $state,
             ),
+            $statement instanceof Stmt\Foreach_ => $this->executeForeach($statement, $state),
             $statement instanceof Stmt\Nop => $state,
             default => throw $this->expressions->reject($statement, $this->explainUnsupported($statement)),
         };
@@ -253,7 +267,7 @@ final class StatementTranslator
     /**
      * Gives a local variable its new value.
      */
-    private function bind(string $name, Term $term, State $state, Expr $at, bool $built = false): State
+    private function bind(string $name, Term $term, State $state, Node $at, bool $built = false): State
     {
         $previous = $state->variables[$name] ?? null;
 
@@ -475,14 +489,174 @@ final class StatementTranslator
         );
     }
 
+    /**
+     * `foreach ($list as $item)` and `foreach ($list as $i => $item)` over a list, by value.
+     *
+     * The loop is unrolled: iteration `k` runs the body on the element `k` under the condition
+     * `k < count($list)`, for `k` below a bound `N`. What the unrolling leaves out is every
+     * iteration after the `N`th, so wherever a path can still be in the loop after `N`
+     * iterations, a `loopBound` obligation says that the list has at most `N` elements. The bound
+     * is never assumed: it only decides how much of the loop is translated.
+     *
+     * PHP iterates a by-value `foreach` over the array as it was on entry, which is why the list
+     * is translated once, into a term of its own, and every iteration reads that term: writing
+     * the variable inside the loop does not change what is iterated.
+     */
+    private function executeForeach(Stmt\Foreach_ $loop, State $state): State
+    {
+        [$keyName, $valueName] = $this->foreachTargets($loop);
+
+        $list = $this->valueOf($loop->expr, $state, $loop);
+        $state = $this->stopThrownPaths($state);
+        $this->requireIterableList($loop, $list);
+        $list = $this->encoding->define('iter', $list);
+
+        [$bound, $origin] = $this->loopBounds->boundOf($loop->expr);
+        $refusal = $this->loopBounds->budgetRefusal($this->encoding->enclosingBounds(), $bound);
+        if ($refusal !== null) {
+            throw $this->expressions->reject($loop, $refusal);
+        }
+
+        $line = $loop->getStartLine();
+        $length = Smt::listLength($list);
+        $exits = [];
+        $current = $state;
+        for ($k = 0; $k < $bound && !$current->reached->isFalse(); ++$k) {
+            $more = $this->encoding->define('more', Smt::compare('<', Smt::int($k), $length));
+            $exits[] = $this->branch($current, Smt::not($more));
+            $inside = $this->branch($current, $more);
+            if ($keyName !== null) {
+                $inside = $this->bind($keyName, Smt::int($k), $inside, $loop);
+            }
+            $inside = $this->bind($valueName, Smt::listItem($list, Smt::int($k)), $inside, $loop);
+
+            $this->encoding->enterIteration($line, $k, $bound);
+            try {
+                $current = $this->execute($loop->stmts, $inside);
+            } finally {
+                $this->encoding->leaveIteration();
+            }
+        }
+
+        // A path that finished the last unrolled iteration is exact only if the list has no
+        // more elements than that. Once checked, the obligation is assumed, like every other.
+        if (!$current->reached->isFalse()) {
+            $subject = $this->printer->prettyPrintExpr($loop->expr);
+            $this->encoding->addObligation(new Obligation(
+                ObligationKind::LoopBound,
+                $line,
+                sprintf('count(%s) <= %d', $subject, $bound),
+                $current->reached,
+                Smt::compare('<=', $length, Smt::int($bound)),
+                $this->calls,
+                loop: new LoopBound($bound, $subject, $origin, $this->canBeNamedInContract($loop->expr, $state)),
+            ));
+            $exits[] = $current;
+        }
+
+        return $this->mergeAll($loop, $exits, $state);
+    }
+
+    /**
+     * The key and value variables of a `foreach`, or why the loop is not supported.
+     *
+     * @return array{string|null, string}
+     */
+    private function foreachTargets(Stmt\Foreach_ $loop): array
+    {
+        if ($loop->valueVar instanceof Expr\Array_ || $loop->valueVar instanceof Expr\List_) {
+            throw $this->expressions->reject($loop, 'Destructuring in foreach is not supported: iterate with foreach ($list as $item) and read the elements, such as $item[\'net\'].');
+        }
+        if ($loop->byRef) {
+            throw $this->expressions->reject($loop, 'foreach by reference (&$item) changes the list in place and leaves $item a reference to its last element, which is not modelled. Iterate by value and build a new list with $out[] = $value.');
+        }
+
+        $key = null;
+        if ($loop->keyVar !== null) {
+            $key = self::localName($loop->keyVar) ?? throw $this->expressions->reject($loop, self::FOREACH_TARGETS);
+        }
+        $value = self::localName($loop->valueVar) ?? throw $this->expressions->reject($loop, self::FOREACH_TARGETS);
+        if ($key === $value) {
+            throw $this->expressions->reject($loop, sprintf('The key and the value of this foreach are both $%s; use two different variables.', $value));
+        }
+
+        return [$key, $value];
+    }
+
+    private static function localName(Expr $target): ?string
+    {
+        return $target instanceof Variable && is_string($target->name) && $target->name !== 'this' ? $target->name : null;
+    }
+
+    private function requireIterableList(Stmt\Foreach_ $loop, Term $list): void
+    {
+        $sort = $list->sort;
+        if ($sort->isList()) {
+            return;
+        }
+
+        $message = match (true) {
+            $sort->isEmptyList() => 'This list is always empty, so the loop never runs; remove the loop.',
+            $sort->isShape() => 'foreach over an array shape is not supported: its keys are not a list and its values can have different types. Read each key, such as $totals[\'net\'].',
+            $sort->isNullable() && $sort->inner?->isList() === true => sprintf(
+                'foreach over %s, which may be null here: PHP warns "foreach() argument must be of type array|object" and skips the loop. Check it first with !== null.',
+                $this->printer->prettyPrintExpr($loop->expr),
+            ),
+            default => sprintf('foreach is only supported over a list<T>, not over %s %s.', preg_match('/^[aeiou]/', $sort->describe()) === 1 ? 'an' : 'a', $sort->describe()),
+        };
+
+        throw $this->expressions->reject($loop, $message);
+    }
+
+    /**
+     * Whether a `#[Requires]` can state a bound on this list: a parameter, or a property of one,
+     * still holding the value it had on entry.
+     */
+    private function canBeNamedInContract(Expr $list, State $state): bool
+    {
+        while ($list instanceof Expr\PropertyFetch && $list->name instanceof Node\Identifier) {
+            $list = $list->var;
+        }
+        if (!$list instanceof Variable || !is_string($list->name)) {
+            return false;
+        }
+
+        $entry = $this->entry[$list->name] ?? null;
+        $current = $state->variables[$list->name] ?? null;
+
+        return $entry !== null && $current !== null && $entry->smt === $current->smt;
+    }
+
+    /**
+     * The states of the paths that leave a loop, merged: a variable keeps its value on each path
+     * and is dropped when one of the paths does not define it. The paths are disjoint, so the
+     * condition of each one is its own `reached`.
+     *
+     * @param list<State> $states
+     */
+    private function mergeAll(Node $at, array $states, State $dead): State
+    {
+        $states = array_values(array_filter($states, static fn (State $state): bool => !$state->reached->isFalse()));
+        if ($states === []) {
+            return $dead->withReached(Smt::bool(false));
+        }
+
+        $merged = array_pop($states);
+        while ($states !== []) {
+            $next = array_pop($states);
+            $merged = $this->merge($at, $next->reached, $next, $merged);
+        }
+
+        return $merged;
+    }
+
     private function explainUnsupported(Stmt $statement): string
     {
         return match (true) {
             $statement instanceof Stmt\While_,
             $statement instanceof Stmt\Do_,
-            $statement instanceof Stmt\For_,
-            $statement instanceof Stmt\Foreach_
-                => 'Loops are not supported yet: termination and loop invariants cannot be established. Read a list with count($list), $list[$i] and in_array() instead.',
+            $statement instanceof Stmt\For_
+                => 'Only foreach over a list is supported: a while, do or for loop needs a termination argument, which is not supported yet. Iterate the list with foreach ($list as $i => $item), or read it with count($list) and $list[$i].',
             $statement instanceof Stmt\Switch_
                 => 'switch is not supported; use match.',
             $statement instanceof Stmt\Echo_,

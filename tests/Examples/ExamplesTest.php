@@ -188,7 +188,7 @@ final class ExamplesTest extends RuleFixtureTestCase
                 'contradictory' => ['contracts.contradictoryRequires'],
                 'missingReturn' => ['contracts.missingReturn'],
                 'partialMatch' => ['contracts.unhandledMatch'],
-                'loop' => ['contracts.unsupported: Loops are not supported'],
+                'loop' => ['contracts.unsupported: Only foreach over a list is supported: a while, do or for loop needs a termination argument'],
                 'rounding' => ['contracts.unsupported: Call to round()'],
                 'array' => ['contracts.unsupported: Type array<string, int> is not supported in verified methods'],
                 'looseArrayEquality' => ['contracts.unsupported: Arrays compared with == are compared loosely'],

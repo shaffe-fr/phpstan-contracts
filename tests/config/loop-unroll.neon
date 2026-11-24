@@ -1,0 +1,6 @@
+parameters:
+	contracts:
+		timeoutMs: 30000
+		loopUnroll: 3
+		maxLoopUnroll: 8
+		cacheDirectory: null

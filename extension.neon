@@ -2,12 +2,16 @@ parameters:
 	contracts:
 		z3Binary: z3
 		timeoutMs: 10000
+		loopUnroll: 10
+		maxLoopUnroll: 100
 		cacheDirectory: %tmpDir%/contracts
 
 parametersSchema:
 	contracts: structure([
 		z3Binary: string()
 		timeoutMs: int()
+		loopUnroll: int()
+		maxLoopUnroll: int()
 		cacheDirectory: schema(string(), nullable())
 	])
 
@@ -17,7 +21,11 @@ services:
 	- PhpstanContracts\Translate\EnumRegistry
 	- PhpstanContracts\Translate\TypeMapper
 	- PhpstanContracts\Translate\DomainBuilder
-	- PhpstanContracts\Translate\MethodEncoder
+	-
+		class: PhpstanContracts\Translate\MethodEncoder
+		arguments:
+			loopUnroll: %contracts.loopUnroll%
+			maxLoopUnroll: %contracts.maxLoopUnroll%
 	- PhpstanContracts\Solver\ScriptRenderer
 	- PhpstanContracts\Report\ValueFormatter
 	- PhpstanContracts\Report\CounterexampleFormatter
@@ -34,6 +42,8 @@ services:
 		class: PhpstanContracts\Rule\VerifyContractRule
 		arguments:
 			timeoutMs: %contracts.timeoutMs%
+			loopUnroll: %contracts.loopUnroll%
+			maxLoopUnroll: %contracts.maxLoopUnroll%
 		tags:
 			- phpstan.rules.rule
 	-

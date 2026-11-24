@@ -74,7 +74,7 @@ final class Rejected
         };
     }
 
-    /** Loops are rejected. */
+    /** A while loop is rejected: it needs a termination argument, which foreach over a list does not. */
     #[Pure]
     public static function loop(int $count): int
     {

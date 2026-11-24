@@ -39,7 +39,7 @@ final class CallRuleTest extends RuleFixtureTestCase
                 'recursion' => ['contracts.unsupported: Recursive calls are not supported: PhpstanContracts\Tests\Fixtures\CallFixture::recursion() is already being translated.'],
                 'callsAMethodInAnotherFile' => ['contracts.unsupported: PhpstanContracts\Tests\Fixtures\Point::sum() is declared in another file.'],
                 'callsAMethodThatCanBeOverridden' => ['contracts.unsupported: PhpstanContracts\Tests\Fixtures\OpenShape::sides() can be overridden'],
-                'callsAMethodThatIsNotVerifiable' => ['contracts.unsupported: The call to PhpstanContracts\Tests\Fixtures\CallFixture::loops() cannot be verified: Loops are not supported'],
+                'callsAMethodThatIsNotVerifiable' => ['contracts.unsupported: The call to PhpstanContracts\Tests\Fixtures\CallFixture::loops() cannot be verified: Only foreach over a list is supported: a while, do or for loop needs a termination argument'],
                 'callsWithATypeThatDoesNotFit' => ['contracts.unsupported: Argument $x of PhpstanContracts\Tests\Fixtures\CallFixture::double() is bool, but the parameter is int.'],
                 'callInAContract' => ['contracts.unsupported: Method calls are not supported in contract expressions yet'],
                 'aPhpDocFloatParameterWithoutANativeType' => ['contracts.unsupported: Parameter $value of PhpstanContracts\Tests\Fixtures\CallFixture::isOne() has no native type, so PHP passes its argument as it is; declare the type in the signature.'],
