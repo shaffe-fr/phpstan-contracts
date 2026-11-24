@@ -41,6 +41,15 @@ final class StatementTranslator
      */
     private array $built = [];
 
+    /**
+     * One frame per iteration being translated, outermost loop first: the states that reached
+     * a `break` or a `continue` aimed at it. A translator only knows the loops of its own body,
+     * so a callee cannot jump into the loop of its caller, as in PHP.
+     *
+     * @var list<array{breaks: list<State>, continues: list<State>}>
+     */
+    private array $frames = [];
+
     private readonly Standard $printer;
 
     /**
@@ -123,6 +132,8 @@ final class StatementTranslator
                 $state,
             ),
             $statement instanceof Stmt\Foreach_ => $this->executeForeach($statement, $state),
+            $statement instanceof Stmt\Break_,
+            $statement instanceof Stmt\Continue_ => $this->executeJump($statement, $state),
             $statement instanceof Stmt\Nop => $state,
             default => throw $this->expressions->reject($statement, $this->explainUnsupported($statement)),
         };
@@ -505,6 +516,7 @@ final class StatementTranslator
     private function executeForeach(Stmt\Foreach_ $loop, State $state): State
     {
         [$keyName, $valueName] = $this->foreachTargets($loop);
+        $this->encoding->needsSolverFallback = true;
 
         $list = $this->valueOf($loop->expr, $state, $loop);
         $state = $this->stopThrownPaths($state);
@@ -531,11 +543,19 @@ final class StatementTranslator
             $inside = $this->bind($valueName, Smt::listItem($list, Smt::int($k)), $inside, $loop);
 
             $this->encoding->enterIteration($line, $k, $bound);
+            $this->frames[] = ['breaks' => [], 'continues' => []];
             try {
-                $current = $this->execute($loop->stmts, $inside);
+                $end = $this->execute($loop->stmts, $inside);
+                $frame = $this->frames[array_key_last($this->frames)];
             } finally {
+                array_pop($this->frames);
                 $this->encoding->leaveIteration();
             }
+
+            // Every path that leaves the iteration is disjoint from the others: the paths that
+            // `break` go to the exit, the ones that end it or `continue` go to the next iteration.
+            array_push($exits, ...$frame['breaks']);
+            $current = $this->mergeAll($loop, [$end, ...$frame['continues']], $state);
         }
 
         // A path that finished the last unrolled iteration is exact only if the list has no
@@ -555,6 +575,38 @@ final class StatementTranslator
         }
 
         return $this->mergeAll($loop, $exits, $state);
+    }
+
+    /**
+     * `break` and `continue`, with an optional literal level: the state is recorded in the frame
+     * of the loop it is aimed at, which merges it where PHP resumes, and the path ends here.
+     */
+    private function executeJump(Stmt\Break_|Stmt\Continue_ $jump, State $state): State
+    {
+        $word = $jump instanceof Stmt\Break_ ? 'break' : 'continue';
+        if ($this->frames === []) {
+            throw $this->expressions->reject($jump, sprintf('%s is only supported inside a foreach.', $word));
+        }
+
+        $level = 1;
+        if ($jump->num !== null) {
+            if (!$jump->num instanceof Node\Scalar\Int_) {
+                throw $this->expressions->reject($jump, sprintf('%s needs a literal level, such as %s 2.', $word, $word));
+            }
+            $level = $jump->num->value;
+            if ($level < 1) {
+                throw $this->expressions->reject($jump, sprintf('%1$s %2$d is not valid: the level of %1$s starts at 1.', $word, $level));
+            }
+        }
+        $depth = count($this->frames);
+        if ($level > $depth) {
+            throw $this->expressions->reject($jump, sprintf('%s %d leaves more loops than enclose it here (%d).', $word, $level, $depth));
+        }
+
+        $target = $depth - $level;
+        $this->frames[$target][$jump instanceof Stmt\Break_ ? 'breaks' : 'continues'][] = $state;
+
+        return $state->withReached(Smt::bool(false));
     }
 
     /**
