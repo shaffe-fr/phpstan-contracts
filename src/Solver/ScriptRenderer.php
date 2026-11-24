@@ -34,6 +34,9 @@ final class ScriptRenderer
           (ite (>= n 0) (str.from_int n) (str.++ "-" (str.from_int (- n)))))
         SMT;
 
+    /** The sum of the first `n` cells of an array, for `array_sum()` over a `list<int>`. */
+    private const LIST_SUM = '(define-fun-rec sum_List_Int ((a (Array Int Int)) (n Int)) Int (ite (<= n 0) 0 (+ (sum_List_Int a (- n 1)) (select a (- n 1)))))';
+
     public function checkCount(Encoding $encoding): int
     {
         return 1 + count($encoding->obligations) + count($encoding->ensures) + count($encoding->throwsChecks) + ($encoding->returnTypeCheck === null ? 0 : 1);
@@ -134,6 +137,9 @@ final class ScriptRenderer
         $lines = [];
         foreach ($encoding->datatypes() as $sort) {
             $lines[] = $this->datatypeDeclaration($sort);
+        }
+        if ($encoding->listSumRequired()) {
+            $lines[] = self::LIST_SUM;
         }
         foreach ($encoding->enumFunctions() as [$enum, $function]) {
             $lines[] = $this->enumFunction($enum, $function);

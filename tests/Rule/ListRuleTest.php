@@ -113,7 +113,7 @@ final class ListRuleTest extends RuleFixtureTestCase
                 'countRecursive' => ['contracts.unsupported: count() takes exactly one argument here; COUNT_RECURSIVE is not supported. Write count($list).'],
                 'countOfAnInt' => ['contracts.unsupported: count() is only supported on lists, not on a int.'],
                 'countOfANullableList' => ['contracts.unsupported: count() needs a list, not a ?list<int>, which may be null here'],
-                'anotherArrayFunction' => ['contracts.unsupported: Call to array_sum() is not part of the verified subset: of the array functions, only count() and in_array() are supported.'],
+                'anotherArrayFunction' => ['contracts.unsupported: Call to array_product() is not part of the verified subset: of the array functions, only count(), in_array() and array_sum() are supported.'],
                 'comparesListsStrictly' => [],
                 'comparesListsLoosely' => ['contracts.unsupported: Arrays compared with == are compared loosely'],
                 'ordersLists' => ['contracts.unsupported: Arrays cannot be ordered with <'],

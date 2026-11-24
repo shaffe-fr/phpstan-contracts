@@ -76,6 +76,7 @@ final class MethodEncoder
             if ($thisSpec !== null) {
                 $term = $encoding->declareInput('this', $thisSpec->sort);
                 $encoding->assert($this->domains->constraint($thisSpec, $term, true));
+                $encoding->registerInput($term, $thisSpec);
                 $signature[] = $thisSpec->sort;
                 $entry['this'] = $term;
             }
@@ -98,6 +99,7 @@ final class MethodEncoder
             $this->rejectPhpDocFloat($node, $name, $spec->sort, $param->getStartLine());
             $term = $encoding->declareInput($name, $spec->sort);
             $encoding->assert($this->domains->constraint($spec, $term, true));
+            $encoding->registerInput($term, $spec);
             $signature[] = $spec->sort;
 
             $entry[$name] = $term;

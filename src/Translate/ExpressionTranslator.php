@@ -1077,8 +1077,11 @@ final class ExpressionTranslator
         if ($name === 'count') {
             return $this->count($call, $arguments, $env, $pc);
         }
+        if ($name === 'array_sum') {
+            return $this->arraySum($call, $arguments, $env, $pc);
+        }
         if ($this->isArrayFunction($name) || (in_array($name, ['min', 'max'], true) && count($arguments) === 1)) {
-            throw $this->reject($call, sprintf('Call to %s() is not part of the verified subset: of the array functions, only count() and in_array() are supported.', $name));
+            throw $this->reject($call, sprintf('Call to %s() is not part of the verified subset: of the array functions, only count(), in_array() and array_sum() are supported. Visit the elements with foreach instead.', $name));
         }
 
         $arity = match ($name) {
@@ -2485,6 +2488,45 @@ final class ExpressionTranslator
             $subject->sort->isNullable() && $subject->sort->inner?->isList() === true => throw $this->reject($call, sprintf('count() needs a list, not a %s, which may be null here: PHP throws a TypeError for count(null). Check it first with `!== null`.', $subject->sort->describe())),
             default => throw $this->reject($call, sprintf('count() is only supported on lists, not on a %s.', $subject->sort->describe())),
         };
+    }
+
+    /**
+     * `array_sum()` over a `list<int>`: PHP adds from `0` from left to right and turns the sum
+     * into a float at the first prefix that leaves the int range. In the body that is an
+     * overflow obligation on every prefix, so the term is the exact sum wherever the proof
+     * goes on. In a contract it is the mathematical sum, like `+`.
+     *
+     * @param list<Expr> $arguments
+     * @param array<string, Term> $env
+     */
+    private function arraySum(FuncCall $call, array $arguments, array $env, Term $pc): Term
+    {
+        if (count($arguments) !== 1) {
+            throw $this->reject($call, 'array_sum() takes exactly one argument. Write array_sum($list).');
+        }
+
+        $subject = $this->translate($arguments[0], $env, $pc);
+        if ($subject->sort->isEmptyList()) {
+            return Smt::int(0);
+        }
+        if ($subject->sort->isNullable() && $subject->sort->inner?->isList() === true) {
+            throw $this->reject($call, sprintf('array_sum() needs a list, not a %s, which may be null here: PHP throws a TypeError for array_sum(null). Check it first with `!== null`.', $subject->sort->describe()));
+        }
+        $element = $subject->sort->isList() ? $subject->sort->element : null;
+        if ($element?->isFloat() === true) {
+            throw $this->reject($call, 'array_sum() of a list<float> is not supported: it returns the int 0 for an empty list and a float otherwise. Add the elements in a foreach, starting from 0.0.');
+        }
+        if ($element === null || !$element->isInt()) {
+            throw $this->reject($call, 'array_sum() is only supported on a list<int>: PHP converts null, bools and numeric strings to numbers, which is not modelled. Add the elements in a foreach.');
+        }
+
+        $this->encoding->requireListSum();
+        $list = $this->encoding->define('list', $subject);
+        if (!$this->isContract) {
+            $this->obligate(ObligationKind::Overflow, $call, $pc, Smt::prefixSumsInRange($list));
+        }
+
+        return $this->encoding->define('sum', Smt::prefixSum($list, Smt::listLength($list)));
     }
 
     private function isArrayFunction(string $name): bool

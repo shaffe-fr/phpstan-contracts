@@ -48,6 +48,12 @@ final class Encoding
     /** Whether the script holds a loop, which gets the solver option of the retry. */
     public bool $needsSolverFallback = false;
 
+    /** Whether `sum_List_Int` is used, so that the script declares it and the range lemma. */
+    private bool $listSumRequired = false;
+
+    /** @var list<array{Term, int, int}> input lists of ints with both bounds: the list and its bounds */
+    private array $boundedInputLists = [];
+
     /** @var array<string, Sort> datatypes in the order they must be declared */
     private array $datatypes = [];
 
@@ -120,6 +126,66 @@ final class Encoding
     public function requireEnumFunction(EnumSort $enum, string $function): void
     {
         $this->enumFunctions[$enum->smtName . ':' . $function] = [$enum, $function];
+    }
+
+    /**
+     * Notes the input lists of ints whose elements have both bounds, which get the range
+     * lemma of `array_sum()` (see {@see self::requireListSum()}). Looks through records
+     * and array shapes, not through nullables or nested lists.
+     */
+    public function registerInput(Term $term, VarSpec $spec): void
+    {
+        switch ($spec->sort->kind) {
+            case SortKind::List:
+                if ($spec->element !== null && $spec->element->sort->isInt() && $spec->element->min !== null && $spec->element->max !== null) {
+                    $this->boundedInputLists[] = [$term, $spec->element->min, $spec->element->max];
+                }
+                break;
+            case SortKind::Record:
+                foreach ($spec->fields as $name => $field) {
+                    $this->registerInput(Smt::field($term, (string) $name), $field);
+                }
+                break;
+            case SortKind::Shape:
+                foreach ($spec->fields as $key => $field) {
+                    $this->registerInput(Smt::shapeField($term, (string) $key), $field);
+                }
+                break;
+            default:
+                break;
+        }
+    }
+
+    /**
+     * `array_sum()` over a `list<int>` is used: the script declares `sum_List_Int`, and asserts
+     * for every input list of bounded ints that the sum of its first `n` elements is between
+     * `n * lo` and `n * hi`. That is a theorem of the domain (it follows by induction, which Z3
+     * does not do on its own), so it adds no assumption.
+     */
+    public function requireListSum(): void
+    {
+        $this->needsSolverFallback = true;
+        if ($this->listSumRequired) {
+            return;
+        }
+        $this->listSumRequired = true;
+        foreach ($this->boundedInputLists as [$list, $min, $max]) {
+            $this->registerSort($list->sort);
+            $count = Smt::symbol('n!0', Sort::int());
+            $sum = Smt::prefixSum($list, $count);
+            $this->assert(Smt::forall('n!0', Smt::implies(
+                Smt::all(Smt::compare('<=', Smt::int(0), $count), Smt::compare('<=', $count, Smt::listLength($list))),
+                Smt::all(
+                    Smt::compare('<=', Smt::arithmetic('*', Smt::int($min), $count), $sum),
+                    Smt::compare('<=', $sum, Smt::arithmetic('*', Smt::int($max), $count)),
+                ),
+            ), [$sum]));
+        }
+    }
+
+    public function listSumRequired(): bool
+    {
+        return $this->listSumRequired;
     }
 
     public function fresh(string $hint, Sort $sort): Term

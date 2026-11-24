@@ -45,7 +45,7 @@ final class ArrayShapeRuleTest extends RuleFixtureTestCase
                 'matchesAShape' => ['contracts.unsupported: Array shapes compared with === also compare the order of their keys and any extra keys'],
                 'countsAShape' => ['contracts.unsupported: count() of an array shape is not supported: the type array{...} does not rule out extra keys. count() is supported on lists.'],
                 'searchesAShape' => ['contracts.unsupported: in_array() is only supported on a list or a list literal, not on an array shape'],
-                'usesAnArrayFunction' => ['contracts.unsupported: Call to array_sum() is not part of the verified subset: of the array functions, only count() and in_array() are supported.'],
+                'usesAnArrayFunction' => ['contracts.unsupported: array_sum() is only supported on a list<int>: PHP converts null, bools and numeric strings to numbers, which is not modelled. Add the elements in a foreach.'],
                 'writesAKey' => ['contracts.unsupported: Writing to an array shape is not supported: build a new shape literal'],
                 'addsToAKey' => ['contracts.unsupported: Writing to an array shape is not supported: build a new shape literal'],
                 'appendsToAShape' => ['contracts.unsupported: Appending to an array shape is not supported: build a new shape literal.'],

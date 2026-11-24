@@ -526,6 +526,27 @@ final class ReplayFixture
         }
         return $total;
     }
+    /**
+     * PHP turns the sum into a float once a prefix leaves the int range, which the return type refuses.
+     *
+     * @param list<int<0, 4000000000000000000>> $amounts
+     */
+    #[Requires('count($amounts) <= 3')]
+    public static function arraySumOverflows(array $amounts): int
+    {
+        return array_sum($amounts);
+    }
+
+    /**
+     * @param list<int<0, 1000>> $amounts
+     */
+    #[Requires('count($amounts) <= 3')]
+    #[Ensures('$result <= 2000')]
+    public static function arraySumExceedsTheClaimedBound(array $amounts): int
+    {
+        return array_sum($amounts);
+    }
+
     private static function twice(int $x): int
     {
         return $x * 2;

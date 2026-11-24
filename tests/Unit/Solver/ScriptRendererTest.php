@@ -195,6 +195,25 @@ final class ScriptRendererTest extends TestCase
         );
     }
 
+    public function testTheSumOfAListIsDeclaredOnlyWhenItIsUsed(): void
+    {
+        $encoding = new Encoding();
+        $encoding->declareInput('items', Sort::list(Sort::int()));
+
+        self::assertStringNotContainsString('sum_List_Int', $this->renderer->render($encoding));
+
+        $encoding->requireListSum();
+        $encoding->requireListSum();
+        $script = $this->renderer->render($encoding);
+
+        self::assertSame(1, substr_count($script, '(define-fun-rec sum_List_Int '));
+        self::assertLessThan(
+            strpos($script, '(define-fun-rec sum_List_Int '),
+            strpos($script, '(declare-datatypes ((List_Int 0))'),
+            'the datatype comes first',
+        );
+    }
+
     public function testThePreludeDefinesPhpDivisionAndModulo(): void
     {
         $script = $this->renderer->render((new Encoding()));

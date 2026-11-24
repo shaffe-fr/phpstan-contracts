@@ -426,6 +426,31 @@ final class Smt
     }
 
     /**
+     * The mathematical sum of the first `$count` elements of a `list<int>`, which is
+     * `array_sum()` as long as no prefix leaves the PHP int range.
+     */
+    public static function prefixSum(Term $list, Term $count): Term
+    {
+        return new Term(sprintf('(sum_List_Int (%s_items %s) %s)', $list->sort->smt, $list->smt, $count->smt), Sort::int());
+    }
+
+    /**
+     * Every prefix sum of a `list<int>` is an int. PHP's `array_sum()` returns a float from the
+     * first prefix that is not, so this is what makes {@see self::prefixSum()} its result.
+     * `$list` must be an atom, since it appears under the quantifier.
+     */
+    public static function prefixSumsInRange(Term $list): Term
+    {
+        $prefix = self::symbol('j!0', Sort::int());
+        $sum = self::prefixSum($list, $prefix);
+
+        return self::forall('j!0', self::implies(
+            self::all(self::compare('<=', self::int(1), $prefix), self::compare('<=', $prefix, self::listLength($list))),
+            self::inRange($sum, PHP_INT_MIN, PHP_INT_MAX),
+        ), [$sum]);
+    }
+
+    /**
      * `[a, b]`: the cells 0 and 1 of a fresh, unconstrained list `$base` are replaced. The cells
      * beyond the length are junk that nothing reads.
      *

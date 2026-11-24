@@ -556,6 +556,66 @@ final class SemanticsTest extends TestCase
     }
 
     /**
+     * `array_sum()` over a `list<int>` against PHP: the sum of every prefix is `array_sum()` of
+     * that prefix, and every prefix sum being an int is exactly `is_int(array_sum($list))`, which
+     * is false for `[PHP_INT_MAX, 1, -1]` although its total fits.
+     */
+    public function testArraySumOverAListOfIntsMatchesPhp(): void
+    {
+        $pool = [PHP_INT_MIN, PHP_INT_MAX, -1, 0, 1, 2, 42, -42, 1000000, PHP_INT_MAX - 1];
+        $lists = [
+            [],
+            [0],
+            [-1, 5, 7],
+            [PHP_INT_MAX, 0],
+            [PHP_INT_MAX, 1, -1],
+            [PHP_INT_MIN, -1],
+            [-1, PHP_INT_MIN, 1],
+            [PHP_INT_MIN, PHP_INT_MAX],
+            [PHP_INT_MAX, PHP_INT_MIN, PHP_INT_MAX],
+            [PHP_INT_MAX - 1, 1],
+            [PHP_INT_MAX - 1, 2],
+        ];
+        mt_srand(31);
+        for ($i = 0; $i < 25; ++$i) {
+            $lists[] = $this->randomList($pool);
+        }
+        for ($i = 0; $i < 25; ++$i) {
+            $small = [];
+            for ($k = mt_rand(0, 8); $k > 0; --$k) {
+                $small[] = mt_rand(-1000, 1000);
+            }
+            $lists[] = $small;
+        }
+
+        $failed = [];
+        $total = 0;
+        $floats = 0;
+        foreach ($lists as $php) {
+            $encoding = new Encoding();
+            $encoding->requireListSum();
+            $list = $this->definedList($encoding, Sort::int(), $php);
+            $claims = [];
+            $isInt = is_int(array_sum($php));
+            $floats += $isInt ? 0 : 1;
+            $inRange = Smt::prefixSumsInRange($list);
+            $claims[] = $isInt ? $inRange->smt : Smt::not($inRange)->smt;
+            if ($isInt) {
+                $claims[] = Smt::eq(Smt::prefixSum($list, Smt::listLength($list)), Smt::int(array_sum($php)))->smt;
+                // Every prefix of a list that sums to an int sums to an int, to what PHP says.
+                for ($n = 0; $n <= count($php); ++$n) {
+                    $claims[] = Smt::eq(Smt::prefixSum($list, Smt::int($n)), Smt::int(array_sum(array_slice($php, 0, $n))))->smt;
+                }
+            }
+            $total += count($claims);
+            array_push($failed, ...$this->failedClaims($encoding, $claims));
+        }
+
+        self::assertGreaterThan(5, $floats, 'the lists include sums that PHP turns into floats');
+        self::assertSame([], array_slice($failed, 0, 3), sprintf('%d of %d claims about array_sum() differ from PHP.', count($failed), $total));
+    }
+
+    /**
      * `$a === $b` on lists of ints, strings, bools and nullable ints against PHP, for equal lists,
      * a prefix, one differing element, different lengths and the empty list, whatever the junk
      * beyond the length of each list. `$a === []` is `count($a) === 0`.

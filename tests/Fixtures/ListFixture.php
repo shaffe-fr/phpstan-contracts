@@ -991,7 +991,7 @@ final class ListFixture
     #[Pure]
     public static function anotherArrayFunction(array $items): int
     {
-        return array_sum($items);
+        return array_product($items);
     }
 
     /**

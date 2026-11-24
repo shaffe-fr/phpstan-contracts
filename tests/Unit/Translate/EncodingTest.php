@@ -12,6 +12,7 @@ use PhpstanContracts\Smt\Sort;
 use PhpstanContracts\Translate\Encoding;
 use PhpstanContracts\Translate\Obligation;
 use PhpstanContracts\Translate\ObligationKind;
+use PhpstanContracts\Translate\VarSpec;
 use PHPUnit\Framework\TestCase;
 
 final class EncodingTest extends TestCase
@@ -160,6 +161,29 @@ final class EncodingTest extends TestCase
             ['a@1', 'result@2'],
             array_map(static fn ($symbol): string => $symbol->smtName, $encoding->observedSymbols()),
         );
+    }
+
+    public function testTheRangeLemmaOfArraySumIsOnlyAssertedForBoundedInputListsOnceTheSumIsUsed(): void
+    {
+        $encoding = new Encoding();
+        $bounded = $encoding->declareInput('bounded', Sort::list(Sort::int()));
+        $encoding->registerInput($bounded, new VarSpec(Sort::list(Sort::int()), element: new VarSpec(Sort::int(), 0, 10)));
+        $half = $encoding->declareInput('half', Sort::list(Sort::int()));
+        $encoding->registerInput($half, new VarSpec(Sort::list(Sort::int()), element: new VarSpec(Sort::int(), 0, null)));
+        $before = $encoding->commands();
+
+        self::assertFalse($encoding->listSumRequired());
+        $encoding->requireListSum();
+        $encoding->requireListSum();
+
+        self::assertTrue($encoding->listSumRequired());
+        self::assertTrue($encoding->needsSolverFallback);
+        $lemmas = array_values(array_diff($encoding->commands(), $before));
+        self::assertCount(1, $lemmas, 'one lemma, for the list whose elements have both bounds');
+        self::assertStringContainsString('(sum_List_Int (List_Int_items bounded@1) n!0)', $lemmas[0]);
+        self::assertStringContainsString('(<= (* 0 n!0) ', $lemmas[0]);
+        self::assertStringContainsString('(* 10 n!0))', $lemmas[0]);
+        self::assertStringNotContainsString('half@2', $lemmas[0]);
     }
 
     public function testTwoClassesCannotShareASort(): void
