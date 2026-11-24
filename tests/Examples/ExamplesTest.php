@@ -11,11 +11,13 @@ use PhpstanContracts\Examples\RealWorld\CancellationPolicy;
 use PhpstanContracts\Examples\RealWorld\Checkout;
 use PhpstanContracts\Examples\RealWorld\CurrencyParser;
 use PhpstanContracts\Examples\RealWorld\DeliveryLabel;
+use PhpstanContracts\Examples\RealWorld\DiscountSplit;
 use PhpstanContracts\Examples\RealWorld\ErpCode;
 use PhpstanContracts\Examples\RealWorld\Floats;
 use PhpstanContracts\Examples\RealWorld\Invoice;
 use PhpstanContracts\Examples\RealWorld\Nullables;
 use PhpstanContracts\Examples\RealWorld\OrderLines;
+use PhpstanContracts\Examples\RealWorld\OrderTotals;
 use PhpstanContracts\Examples\RealWorld\OrderWorkflow;
 use PhpstanContracts\Examples\RealWorld\Pagination;
 use PhpstanContracts\Examples\RealWorld\PriceContext;
@@ -108,6 +110,20 @@ final class ExamplesTest extends RuleFixtureTestCase
                 'withLine' => [],
                 'withLineBroken' => ['contracts.returnType: The returned value can violate the declared return type `list<int<0, 10000000>>`. Counterexample: $amounts = [], $amount = 10000001 => $result = [10000001]'],
                 'isBlocked' => [],
+            ],
+            DiscountSplit::class => [
+                'evenly' => [],
+                'evenlyBroken' => ['contracts.ensuresViolated: Counterexample: $discountCents = 4, $lineCents = [5, 4, 8] => $result = [1, 1, 1]'],
+                'cappedByLine' => [],
+                'cappedByLineBroken' => ['contracts.ensuresViolated: Counterexample: $discountCents = 13398, $lineCents = [] => $result = []'],
+            ],
+            OrderTotals::class => [
+                'total' => [],
+                'totalBroken' => ['contracts.loopBound: The proof unrolls this foreach up to 10 iterations, and $lines can have more. This is a limit of the proof, not a bug in the code.'],
+                'firstLineAbove' => [],
+                'firstLineAboveBroken' => ['contracts.ensuresViolated: Postcondition #[Ensures(\'$result < count($lines)\')] can be violated'],
+                'withoutEmptyLines' => [],
+                'withoutEmptyLinesBroken' => ['contracts.ensuresViolated: Counterexample: $lines = [OrderLine(quantity: 1, unitCents: 0)] => $result = []'],
             ],
             VatSplit::class => [
                 'split' => [],
