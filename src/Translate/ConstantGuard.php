@@ -173,6 +173,10 @@ final class ConstantGuard
             static fn (Node $node): bool => $node instanceof Concat || $node instanceof Cast\String_ || self::isOrdering($node) || self::intOperands($node) !== [] || $node instanceof ClassConstFetch || $node instanceof ConstFetch,
         );
 
+        // Every node is visited even after a refusal: a conversion check folds the constants
+        // under it through PHPStan, so the files they come from decide the refusal and must
+        // be recorded by the visits of those constants, which come later in pre-order.
+        $first = null;
         foreach ($nodes as $node) {
             $refusal = match (true) {
                 $node instanceof Concat => $this->floatToString([$node->left, $node->right], $types, $where),
@@ -183,12 +187,10 @@ final class ConstantGuard
                 $node instanceof ConstFetch => $this->globalConstant($node, $types, $where, $seen, $deprecations),
                 default => null,
             };
-            if ($refusal !== null) {
-                return $refusal;
-            }
+            $first ??= $refusal;
         }
 
-        return null;
+        return $first;
     }
 
     /**

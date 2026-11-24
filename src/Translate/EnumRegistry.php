@@ -58,21 +58,25 @@ final class EnumRegistry
             $value = count($constants) === 1 && (is_int($constants[0]) || is_string($constants[0])) ? $constants[0] : null;
             $cases[$case->getName()] = $value;
 
-            if (!$class->isBackedEnum() || $unmodelled !== null) {
+            if (!$class->isBackedEnum()) {
                 continue;
             }
-            if ($value === null) {
-                $unmodelled = sprintf(
+            // Walked even when a refusal is already known, or when the value cannot be folded:
+            // the walk records the classes and constants that the folding read.
+            $initializer = $native->getCase($case->getName());
+            $refusal = $initializer instanceof ReflectionEnumBackedCase
+                ? $this->guard->initializerRefusal($initializer->getValueExpression(), $class)
+                : null;
+            if ($unmodelled !== null) {
+                continue;
+            }
+            $unmodelled = $value === null
+                ? sprintf(
                     'The backing value of %s::%s cannot be folded to a literal; write it as a literal.',
                     $class->getDisplayName(),
                     $case->getName(),
-                );
-                continue;
-            }
-            $initializer = $native->getCase($case->getName());
-            if ($initializer instanceof ReflectionEnumBackedCase) {
-                $unmodelled = $this->guard->initializerRefusal($initializer->getValueExpression(), $class);
-            }
+                )
+                : $refusal;
         }
 
         if ($cases === []) {
