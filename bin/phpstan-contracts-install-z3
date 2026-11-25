@@ -22,14 +22,16 @@ $options = getopt('', ['dir:', 'force', 'help']);
 if (isset($options['help'])) {
     echo "Usage: phpstan-contracts-install-z3 [--dir=<directory>] [--force]\n\n"
         . "Downloads the official Z3 " . Z3Installer::VERSION . " build for this platform, checks its SHA-256\n"
-        . "and installs it in <directory> (default: " . Z3Installer::defaultDirectory() . ").\n"
-        . "The extension uses it automatically when parameters.contracts.z3Binary is left at its default.\n";
+        . "and installs it in <directory>/" . Z3Installer::VERSION . " (default: " . (Z3Installer::cacheDirectory() ?? 'unknown here, pass --dir') . ",\n"
+        . "a per-user cache shared by every project). The extension finds the default location by itself when\n"
+        . "parameters.contracts.z3Binary is left at its default.\n";
     exit(0);
 }
 
 $directory = isset($options['dir']) && is_string($options['dir']) ? $options['dir'] : null;
 
 try {
+    $directory ??= Z3Installer::defaultDirectory();
     $binary = (new Z3Installer($directory))->install(
         static function (string $message): void {
             echo $message, "\n";
@@ -42,6 +44,6 @@ try {
 }
 
 echo 'Z3 executable: ', $binary, "\n";
-if ($directory !== null) {
+if (isset($options['dir'])) {
     echo "Set parameters.contracts.z3Binary to this path, since it is not the default directory.\n";
 }

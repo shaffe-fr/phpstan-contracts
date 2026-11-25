@@ -59,19 +59,69 @@ final class Z3Installer
     ) {
     }
 
-    public static function defaultDirectory(): string
+    /**
+     * The per-user cache shared by every project and every worktree, or null when the environment does not
+     * say where it is. Nothing is guessed: no home directory means no cache.
+     *
+     * @param array<string, string>|null $environment defaults to the real environment
+     */
+    public static function cacheDirectory(?array $environment = null, ?string $osFamily = null): ?string
+    {
+        $environment ??= self::environment();
+        $osFamily ??= PHP_OS_FAMILY;
+
+        if ($osFamily === 'Windows') {
+            $base = self::absolute($environment['LOCALAPPDATA'] ?? '');
+        } else {
+            // A relative XDG_CACHE_HOME is invalid per the XDG specification: it is ignored.
+            $base = self::absolute($environment['XDG_CACHE_HOME'] ?? '');
+            if ($base === null) {
+                $home = self::absolute($environment['HOME'] ?? '');
+                $base = $home === null ? null : $home . DIRECTORY_SEPARATOR . '.cache';
+            }
+        }
+
+        return $base === null ? null : $base . DIRECTORY_SEPARATOR . 'phpstan-contracts' . DIRECTORY_SEPARATOR . 'z3';
+    }
+
+    /**
+     * Where earlier versions installed Z3: inside the package, so inside vendor/.
+     */
+    public static function legacyDirectory(): string
     {
         return dirname(__DIR__, 2) . DIRECTORY_SEPARATOR . '.z3';
     }
 
     /**
-     * Path of the binary installed in the default directory, or null when there is none.
+     * Where the installer puts Z3 when `--dir` is not given.
+     *
+     * @param array<string, string>|null $environment defaults to the real environment
      */
-    public static function installedBinary(): ?string
+    public static function defaultDirectory(?array $environment = null): string
     {
-        $path = (new self())->binaryPath();
+        return self::cacheDirectory($environment)
+            ?? throw new SolverFailure('Cannot tell where the per-user cache is (LOCALAPPDATA on Windows, XDG_CACHE_HOME or HOME elsewhere). Pass --dir=<directory> and set parameters.contracts.z3Binary to the path it prints.');
+    }
 
-        return is_file($path) ? $path : null;
+    /**
+     * Path of an installed binary, or null when there is none: the per-user cache first, then the legacy
+     * directory inside the package so that existing installs keep working.
+     *
+     * @param array<string, string>|null $environment only read when $cacheDirectory is null
+     */
+    public static function installedBinary(?string $cacheDirectory = null, ?string $legacyDirectory = null, ?array $environment = null): ?string
+    {
+        foreach ([$cacheDirectory ?? self::cacheDirectory($environment), $legacyDirectory ?? self::legacyDirectory()] as $directory) {
+            if ($directory === null) {
+                continue;
+            }
+            $path = (new self($directory))->binaryPath();
+            if (is_file($path)) {
+                return $path;
+            }
+        }
+
+        return null;
     }
 
     public function binaryPath(): string
@@ -144,6 +194,30 @@ final class Z3Installer
         $log('Installed Z3 ' . self::VERSION . ' in ' . $this->versionDirectory());
 
         return $binary;
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    private static function environment(): array
+    {
+        $environment = [];
+        foreach (['LOCALAPPDATA', 'XDG_CACHE_HOME', 'HOME'] as $name) {
+            $value = getenv($name);
+            if (is_string($value)) {
+                $environment[$name] = $value;
+            }
+        }
+
+        return $environment;
+    }
+
+    private static function absolute(string $path): ?string
+    {
+        $path = rtrim($path, '/\\');
+        $isAbsolute = preg_match('#^(/|[A-Za-z]:[/\\\\]|\\\\\\\\)#', $path) === 1;
+
+        return $isAbsolute ? $path : null;
     }
 
     private function versionDirectory(): string
