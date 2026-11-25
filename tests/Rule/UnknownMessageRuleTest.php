@@ -5,32 +5,19 @@ declare(strict_types=1);
 namespace PhpstanContracts\Tests\Rule;
 
 use PhpstanContracts\Tests\Fixtures\LimitsFixture;
-use PhpstanContracts\Tests\Fixtures\UnknownCostFixture;
 use PhpstanContracts\Tests\Support\RuleFixtureTestCase;
 
 /**
- * A check that stays undecided says what makes it expensive when the encoder knows: the loops
- * the proof unrolls, and the products and divisions that are not linear. The timeout is short on
- * purpose, and the fixtures are far beyond what Z3 decides in it.
+ * A check that stays undecided says what makes it expensive when the encoder knows: the products
+ * and divisions that are not linear. The timeout is short on purpose, and the fixtures are far
+ * beyond what Z3 decides in it. The messages of the methods with a loop are in
+ * {@see UnknownSplitMessageRuleTest}.
  */
 final class UnknownMessageRuleTest extends RuleFixtureTestCase
 {
     protected static function configFile(): string
     {
         return 'short-timeout.neon';
-    }
-
-    public function testALoopWithNonLinearArithmeticNamesBothAndTheWaysOut(): void
-    {
-        $messages = $this->unknownMessages(UnknownCostFixture::class, 'proportionalSplit');
-
-        self::assertCount(1, $messages);
-        self::assertStringStartsWith('Not proven: Z3 answered "unknown" after 2000 ms for #[Ensures(\'array_sum($result) === $totalDiscount\')]. ', $messages[0]);
-        self::assertMatchesRegularExpression('/The proof unrolls the foreach at line \d+ up to 5 iterations and the foreach at line \d+ up to 5 iterations, and the code has /', $messages[0]);
-        self::assertStringContainsString('a product of two variables (`$totalDiscount * $lineTotal`)', $messages[0]);
-        self::assertStringContainsString('a division by a variable (`intdiv($totalDiscount * $lineTotal, $subtotal)`)', $messages[0]);
-        self::assertStringContainsString('Try a smaller bound with #[Requires(\'count($lineTotals) <= 3\')], a longer contracts.timeoutMs, or a #[Requires] that narrows the ranges.', $messages[0]);
-        self::assertStringNotContainsString('did not decide the lengths', $messages[0], 'no split was tried');
     }
 
     public function testNonLinearArithmeticWithoutALoopDoesNotMentionABound(): void

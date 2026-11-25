@@ -74,6 +74,26 @@ final class UnknownExplainerTest extends TestCase
         self::assertStringNotContainsString('did not decide', $this->explainer->explain($encoding));
     }
 
+    public function testTheListThatWasSplitIsNamedAndTheCaseOutsideTheBoundIsDescribed(): void
+    {
+        $encoding = new Encoding();
+        $encoding->noteUnrolledLoop(25, new LoopBound(5, '$first', null, true));
+        $encoding->noteSplitLength('(List_Int_len l@1)', 5, '$lineTotals');
+
+        self::assertStringContainsString(
+            'The split of the proof by the length of $lineTotals did not decide the length 5.',
+            $this->explainer->explain($encoding, [5]),
+        );
+        self::assertStringContainsString(
+            'did not decide the lengths 4 and 5 and the lengths outside 0..5.',
+            $this->explainer->explain($encoding, [4, 5, 'outside 0..5']),
+        );
+        self::assertStringContainsString(
+            'did not decide the lengths outside 0..5.',
+            $this->explainer->explain($encoding, ['outside 0..5']),
+        );
+    }
+
     public function testSeveralLoopsAreListedByLineAndAnInnerLoopIsCountedOnce(): void
     {
         $encoding = new Encoding();

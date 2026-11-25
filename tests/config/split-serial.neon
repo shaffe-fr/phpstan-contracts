@@ -1,0 +1,5 @@
+parameters:
+	contracts:
+		timeoutMs: 8000
+		cacheDirectory: null
+		parallelism: 1

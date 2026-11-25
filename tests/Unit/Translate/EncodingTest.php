@@ -17,6 +17,19 @@ use PHPUnit\Framework\TestCase;
 
 final class EncodingTest extends TestCase
 {
+    public function testTheSplitLengthIsTheOneOfTheWidestOutermostLoop(): void
+    {
+        $encoding = new Encoding();
+        self::assertNull($encoding->splitLength());
+
+        $encoding->noteSplitLength('(List_Int_len a@1)', 4, '$a');
+        $encoding->noteSplitLength('(List_Int_len b@2)', 7, '$b');
+        $encoding->noteSplitLength('(List_Int_len c@3)', 7, '$c');
+        $encoding->noteSplitLength('(List_Int_len d@4)', 2, '$d');
+
+        self::assertSame(['(List_Int_len b@2)', 7, '$b'], $encoding->splitLength(), 'the largest bound, the first of equals');
+    }
+
     public function testEveryDeclaredNameIsUnique(): void
     {
         $encoding = new Encoding();
