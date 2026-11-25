@@ -206,7 +206,7 @@ Not yet: `while`, `for` and `do` (they need a termination argument), `foreach` b
 | [Getting started](docs/getting-started.md) | Install, first proof, configuration |
 | [Writing contracts](docs/writing-contracts.md) | The attributes, the contract language, every diagnostic |
 | [Supported types](docs/types.md) | `int`, `float`, `string`, enums, nullables, data classes, lists, array shapes, with the real bugs found in each |
-| [Real-world examples](docs/real-world-examples.md) | Pagination, VAT, installments, workflows, rate limits, uploads, checkout and more: twenty-eight rules, each with the bug the prover found |
+| [Real-world examples](docs/real-world-examples.md) | Pagination, VAT, installments, workflows, rate limits, uploads, checkout and more: twenty-nine rules, each with the bug the prover found |
 | [How it works](docs/how-it-works.md) | From PHP to SMT-LIB to Z3 |
 | [Limits and roadmap](docs/limits-and-roadmap.md) | What is guaranteed, what is next |
 
@@ -218,7 +218,7 @@ php bin/phpstan-contracts-install-z3
 vendor/bin/phpstan analyse
 ```
 
-The run reports 75 errors, all intended: 70 from this extension (the examples that show a refuted rule, an undecided one or a rejected construct) and 5 from PHPStan's own rules on the deliberately broken methods (`argument.type` twice, `return.missing`, `return.type`, `match.unhandled`). It takes about a minute and a half with a cold cache. Every other annotated method is proven.
+The run reports 76 errors, all intended: 71 from this extension (the examples that show a refuted rule, an undecided one or a rejected construct) and 5 from PHPStan's own rules on the deliberately broken methods (`argument.type` twice, `return.missing`, `return.type`, `match.unhandled`). It takes about a minute and a half with a cold cache. Every other annotated method is proven.
 
 ## Status
 

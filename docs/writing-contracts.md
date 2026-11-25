@@ -509,7 +509,57 @@ Unrolling multiplies the size of the problem by `N`, so a loop whose body is lin
 | a discount split evenly, `array_sum($result) === $discountCents` | 405 ms | 821 ms | 3.9 s | 30 s, one check undecided |
 | a discount split by weight, with a division by the sum of the weights | 30 s | 95 s, three checks undecided | | |
 
-A loop over a hundred elements is fine when the body is linear. The split by weight takes 4.1 s at 5 lines, which is why the bundled examples do not include one. The cost is driven by non-linear arithmetic in the body times `N`: a product per line is comfortable up to 20 lines, the proportional split up to 5. Two nested loops of 5 elements take half a second, of 10 elements 26 seconds. A check that Z3 cannot settle within `timeoutMs` is reported as `contracts.unknown`, never as a pass.
+A loop over a hundred elements is fine when the body is linear. The cost is driven by non-linear arithmetic in the body times `N`: a product per line is comfortable up to 20 lines. The proportional split, where each line takes `intdiv($totalDiscount * $lineTotal, $subtotal)`, depends on where the remainder goes. When the last line takes it (`$discountCents - $allocated`), the sum is exact by construction, and Z3 proves it up to 5 lines (4.1 s at 5 lines). When the remainder is given back line by line in a second pass, as in the next section, the sum is proven up to 5 lines too, and answers `contracts.unknown` above that. Two nested loops of 5 elements take half a second, of 10 elements 26 seconds. A check that Z3 cannot settle within `timeoutMs` is reported as `contracts.unknown`, never as a pass.
+### A discount split in proportion to the amounts
+Each line takes the rounded-down share of its own amount, which leaves a few cents over, and a second pass gives them back one at a time to the lines that can still take one. The parts must add up to the discount, and the first part must stay within its own line. This is [`examples/RealWorld/ProportionalSplit.php`](../examples/RealWorld/ProportionalSplit.php):
+```php
+#[Requires('count($lineTotals) <= 3')]
+#[Requires('$totalDiscount <= array_sum($lineTotals)')]
+#[Requires('array_sum($lineTotals) >= 1')]
+#[Ensures('count($result) === count($lineTotals)')]
+#[Ensures('array_sum($result) === $totalDiscount')]
+#[Ensures('$result[0] <= $lineTotals[0]')]
+#[Ensures('$result[0] >= 0')]
+public static function proportional(int $totalDiscount, array $lineTotals): array
+{
+    $subtotal = array_sum($lineTotals);
+    $parts = [];
+    $distributed = 0;
+    foreach ($lineTotals as $lineTotal) {
+        $part = intdiv($totalDiscount * $lineTotal, $subtotal);
+        $parts[] = $part;
+        $distributed += $part;
+    }
+    $residual = $totalDiscount - $distributed;
+    $out = [];
+    foreach ($parts as $i => $part) {
+        if ($residual > 0 && $part < $lineTotals[$i]) {
+            $part += 1;
+            $residual -= 1;
+        }
+        $out[] = $part;
+    }
+    return $out;
+}
+```
+`proportionalBroken()` leaves the second pass out, so the cents left by the rounding are lost:
+```
+ProportionalSplit.php:61: Postcondition #[Ensures('array_sum($result) === $totalDiscount')] can be violated.
+Counterexample: $totalDiscount = 2, $lineTotals = [2, 3] => $result = [0, 1] (return at line 69).
+```
+The sum is the hard check. It needs the fact that the cents left over are fewer than the lines, so that one pass is enough, and that is a counting argument over every line at once, over products and divisions that Z3 cannot simplify. The time Z3 needs for it grows exponentially with the number of lines. When Z3 leaves a check `unknown`, the proof is asked again, first on its own and then cut by the length of the list, one question per length (see [How it works](how-it-works.md#loops)). That is what decides the sum from 4 to 5 lines, where the main script alone gave up. Measured on the reference machine (24 cores, Windows, Z3 5.4.1, PHP 8.5) with `contracts.timeoutMs` set to 10000, as the duration of one `phpstan analyse` of a file that holds both methods, startup included, and with other programs running on the machine. Before is the repository at commit 661c243, after is this version:
+| Lines | Before: `proportional()` | Before: `proportionalBroken()` | Before: run | After: `proportional()` | After: `proportionalBroken()` | After: run |
+|---|---|---|---|---|---|---|
+| 3 | proven | refuted | 6.4 s | proven | refuted | 6.4 s |
+| 4 | sum `unknown` | `unknown` | 38.5 s | proven | refuted | 38.9 s |
+| 5 | sum `unknown` | refuted | 43.8 s | proven | refuted | 44.6 s |
+| 6 | not measured | not measured | not measured | sum `unknown` | refuted | 60.1 s |
+| 8 | sum and an overflow check `unknown` | `unknown` | 95.2 s | sum `unknown` | refuted | 118.7 s |
+The bound of the example is 3, not 5, only to keep the run of the bundled examples short: at 4 lines it took 3 min 4 s instead of 1 min 27 s. At 3 lines the sum was already proven, so nothing changes there. At 8 lines the sum stays out of reach. The message names what to change, here for the example with its bound raised to 8, and the same 10000 ms:
+```
+ProportionalSplit.php:25: Not proven: Z3 answered "unknown" after 10000 ms for #[Ensures('array_sum($result) === $totalDiscount')]. The proof unrolls the foreach at line 33 up to 8 iterations and the foreach at line 40 up to 8 iterations, and the code has a product of two variables (`$totalDiscount * $lineTotal`) and a division by a variable (`intdiv($totalDiscount * $lineTotal, $subtotal)`). The split of the proof by the length of $lineTotals did not decide the lengths 5, 6, 7, and 8. Try a smaller bound with #[Requires('count($lineTotals) <= 3')], a longer contracts.timeoutMs, or a #[Requires] that narrows the ranges.
+```
+The refuted method is still refuted at 8 lines, because one counterexample is enough and the cases that find it end the run.
 
 ### Reading a diagnostic from a loop
 
@@ -770,8 +820,9 @@ Values are printed as PHP:
 Linear integer arithmetic is decidable, and Z3 settles it quickly. Multiplying two variables is **non-linear**, and non-linear integer arithmetic is undecidable in general. Most products between bounded variables are fine, as the examples show, but some statements make Z3 answer `unknown`:
 
 ```
-SolverLimits.php:22: Not proven: Z3 answered "unknown" after 30000 ms for #[Ensures('$result % $perPage === 0')].
+SolverLimits.php:22: Not proven: Z3 answered "unknown" after 30000 ms for #[Ensures('$result % $perPage === 0')]. The code has a product of two variables (`($page - 1) * $perPage`) and a modulo by a variable (`$result % $perPage`), and Z3 decides non-linear arithmetic only in part. Try a longer contracts.timeoutMs or a #[Requires] that narrows the ranges.
 ```
+The message names what made the proof expensive: the loops it unrolls with their bound, and the first product of two variables, division or modulo, and it suggests a way out.
 
 When that happens:
 
@@ -779,5 +830,7 @@ When that happens:
 2. **State the property as an identity.** `$result % $perPage === 0` makes Z3 reason about a remainder by a variable. Proving `$result === $perPage * ($page - 1)` says the same thing and is proved at once (see `Pagination::offset`).
 3. **Split a conjunction** into several `#[Ensures]`. Each is a separate query.
 4. **Lower `timeoutMs`** while iterating so that a hopeless query fails fast.
+5. **Lower the bound of a loop** with `#[Requires('count($lines) <= 3')]`. Every iteration adds its own products to the proof, and a rule over 3 lines is much cheaper than one over 8. See [the proportional split](#a-discount-split-in-proportion-to-the-amounts), where 3 lines take 6 s and 8 lines are out of reach.
+A check that stays `unknown` is not given up on at once. It is asked again alone, then cut by the length of the list that the loop unrolls, with several Z3 processes at the same time: [`contracts.parallelism`](getting-started.md#configuration) sets how many, and PHPStan's own workers multiply it. A method with several checks that stay `unknown` pays for that every time, so a short `timeoutMs` makes a hopeless check cheaper.
 
 Floating point has its own limits. The same answer appears when two float variables are multiplied, and the cost of every float operation is much higher than an integer one, division more than multiplication. See [What is slow](types.md#what-is-slow).

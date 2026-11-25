@@ -1,6 +1,6 @@
 # Real-world examples
 
-Twenty-eight business rules of the kind found in shops, booking engines and APIs. Each one is real code in [`examples/RealWorld`](../examples/RealWorld), checked by `phpstan analyse` with this extension. Sections 1 to 8 use integers, booleans and enums. [Section 9](#9-the-same-rules-over-richer-types) covers data classes, strings, floats, nullable values, enum methods, class constants, calls, `in_array()`, guards that throw, lists, array shapes and loops over lists, which the [types page](types.md) and [Loops](writing-contracts.md#loops) show in detail. The code blocks below are copied from those files with the prose descriptions of the docblocks left out, and the outputs are the actual diagnostics, shown with `--error-format=raw` and shortened paths.
+Twenty-nine business rules of the kind found in shops, booking engines and APIs. Each one is real code in [`examples/RealWorld`](../examples/RealWorld), checked by `phpstan analyse` with this extension. Sections 1 to 8 use integers, booleans and enums. [Section 9](#9-the-same-rules-over-richer-types) covers data classes, strings, floats, nullable values, enum methods, class constants, calls, `in_array()`, guards that throw, lists, array shapes and loops over lists, which the [types page](types.md) and [Loops](writing-contracts.md#loops) show in detail. The code blocks below are copied from those files with the prose descriptions of the docblocks left out, and the outputs are the actual diagnostics, shown with `--error-format=raw` and shortened paths.
 
 Each section follows the same arc: the rule, the contract that states it, what the prover established, and a plausible bug it caught.
 
@@ -582,6 +582,7 @@ Real signatures are rarely just integers. The rules below use the types that sec
 | [Splitting a gross price into net and VAT](types.md#real-array-shape-bugs) | `VatSplit.php` | an array shape as a result and as an input, `$result["net"]` in a contract | 3 | 2 proven, 1 refuted | two rounded-down divisions lose a cent: 2 cents split at a rate of 1 basis point add up to 1 |
 | [The lines of an order](types.md#real-list-bugs) | `OrderLines.php` | `list<T>`, `count()`, reads by index, `[...$list, $x]`, `in_array()` over a list | 6 | 4 proven, 2 refuted | a guard with `<=` reads the key that does not exist; an appended amount outside the declared range |
 | [Splitting a discount over the lines of an order](writing-contracts.md#loops) | `DiscountSplit.php` | `foreach` with a key, `$parts[] = ...` in the body, `array_sum($result)` in a contract, a `#[Requires]` that bounds the list and relates it to the discount | 4 | 2 proven, 2 refuted | the remainder is forgotten, so 4 cents split over three lines add up to 3; without `$discountCents <= array_sum($lineCents)`, part of the discount is lost |
+| [Splitting a discount in proportion to the amounts](writing-contracts.md#a-discount-split-in-proportion-to-the-amounts) | `ProportionalSplit.php` | two `foreach` loops, `intdiv()` of a product by the sum of the lines, a remainder given back line by line, `array_sum($result)` in a contract | 2 | 1 proven, 1 refuted | without the second pass the cents left by the rounding are lost: 2 cents split over lines of 2 and 3 add up to 1 |
 | [Totals over the lines of an order](writing-contracts.md#loops) | `OrderTotals.php` | `foreach` over a list of data classes, an early `return` and `continue` in the body, a filter that builds a list, `contracts.loopBound` | 6 | 3 proven, 3 refuted | the same total without a bound on the lines is not proven beyond 10 lines, and the proof says so; a `return $i + 1` points past the last line; a filter that claims to keep every line |
 
 Two of them are worth reading first. The checkout shows a rule over an object graph, with a nullable object inside a cart, which is the shape of most real signatures. The float page shows bugs that no unit test with ordinary values finds, such as a regrouped sum that differs in the last bit.
@@ -627,7 +628,7 @@ public static function offsetDivisibility(int $page, int $perPage): int
 ```
 
 ```
-SolverLimits.php:22: Not proven: Z3 answered "unknown" after 30000 ms for #[Ensures('$result % $perPage === 0')].
+SolverLimits.php:22: Not proven: Z3 answered "unknown" after 30000 ms for #[Ensures('$result % $perPage === 0')]. The code has a product of two variables (`($page - 1) * $perPage`) and a modulo by a variable (`$result % $perPage`), and Z3 decides non-linear arithmetic only in part. Try a longer contracts.timeoutMs or a #[Requires] that narrows the ranges.
 ```
 
 The statement is true. But it asks Z3 to reason about a remainder by a variable of a product of two variables, which is non-linear integer arithmetic, and the solver does not settle it. The extension reports it as `contracts.unknown` and never as a pass, because "no answer" is not a proof.
