@@ -1087,6 +1087,9 @@ final class ExpressionTranslator
         if (!$method->isStatic()) {
             throw $this->reject($expr, sprintf('%s is not a static method, so it needs an object that is not known here. Make it static, or build the exception with `new`.', $label));
         }
+        if ($method->isAbstract()) {
+            throw $this->reject($expr, sprintf('%s is abstract, so the body that runs is not known here. Call a concrete factory, or build the exception with `new`.', $label));
+        }
         // PHPStan reports an inaccessible method too, but a proof must not rest on a call that throws.
         if (!$this->canAccess($method->getDeclaringClass(), $method->isPrivate(), $method->isPublic())) {
             throw $this->reject($expr, sprintf('%s is not accessible here.', $label));

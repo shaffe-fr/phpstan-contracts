@@ -60,6 +60,8 @@ final class ThrowFactoryRuleTest extends RuleFixtureTestCase
                 'aFactoryWithAVariadicParameter' => ['contracts.unsupported: PhpstanContracts\Tests\Fixtures\FactoryRangeException::many() has a variadic or by-reference parameter'],
                 'aFactoryWithAPrecondition' => ['contracts.unsupported: PhpstanContracts\Tests\Fixtures\FactoryContractException::guarded() carries #[Requires]'],
                 'aFactoryThatDeclaresThrows' => ['contracts.unsupported: PhpstanContracts\Tests\Fixtures\FactoryContractException::thatThrows() carries #[Throws]'],
+                'anAbstractFactory' => ['contracts.unsupported: PhpstanContracts\Tests\Fixtures\FactoryAbstractException::make() is abstract'],
+                'aFactoryDeclaredOnAnInterface' => ['contracts.unsupported: PhpstanContracts\Tests\Fixtures\FactoryMakesException::make() is abstract'],
                 'throwInsideAnOperation' => ['contracts.unsupported: throw is only supported as a statement'],
             ],
             FactorySelfException::class => [

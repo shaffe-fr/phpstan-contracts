@@ -334,6 +334,16 @@ final class ThrowFactoryFixture
         throw FactoryContractException::thatThrows();
     }
 
+    #[Throws(FactoryAbstractException::class)]
+    public static function anAbstractFactory(int $n): int
+    {
+        throw FactoryAbstractException::make($n);
+    }
+    #[Throws(FactoryRangeException::class)]
+    public static function aFactoryDeclaredOnAnInterface(int $n): int
+    {
+        throw FactoryMakesException::make($n);
+    }
     #[Throws(FactoryRangeException::class)]
     public static function throwInsideAnOperation(int $n): int
     {
@@ -425,4 +435,13 @@ final class FactoryRangeException extends \RuntimeException
     {
         return new self('Many.');
     }
+}
+
+abstract class FactoryAbstractException extends \RuntimeException
+{
+    abstract public static function make(int $x): static;
+}
+interface FactoryMakesException
+{
+    public static function make(int $x): FactoryRangeException;
 }
