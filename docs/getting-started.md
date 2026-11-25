@@ -122,6 +122,7 @@ parameters:
 		loopUnroll: 10
 		maxLoopUnroll: 100
 		cacheDirectory: %tmpDir%/contracts
+		parallelism: null
 ```
 
 | Parameter | Default | Meaning |
@@ -131,6 +132,7 @@ parameters:
 | `loopUnroll` | `10` | Iterations unrolled for a `foreach` over a list that has no bound in a `#[Requires]`, such as `count($lines) <= 50`. A list that can have more elements is reported as `contracts.loopBound`. From `1` to `maxLoopUnroll`. See [Loops](writing-contracts.md#loops). |
 | `maxLoopUnroll` | `100` | The most iterations that one loop, or the product of the bounds of nested loops, may be unrolled. A method over the budget is rejected before Z3 runs. From `1` to `10000`. |
 | `cacheDirectory` | `%tmpDir%/contracts` | Where the answers of Z3 are remembered between runs. `null` turns the cache off. See [Cost](#cost). |
+| `parallelism` | `null`, which is `min(4, number of CPU cores)` | The most Z3 processes that run at once when a check that Z3 left `unknown` is asked again once per length of the list that the loop unrolls (see [Loops](writing-contracts.md#loops)). From `1`, which runs the cases one after another. PHPStan already runs several workers, so the total number of Z3 processes can be workers x `parallelism`: lower it on a small machine or a busy CI runner. |
 
 If the executable cannot be found, every checked method reports `contracts.solver` with the name that was looked up.
 
