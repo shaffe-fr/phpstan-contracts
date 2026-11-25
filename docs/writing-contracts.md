@@ -119,7 +119,7 @@ A contract on a method without a body, in an interface or on an abstract method,
 | `return expr;` | Early returns are fine. |
 | `foreach ($list as $item)`, `foreach ($list as $i => $item)` | Over a `list<T>`, by value. The body can hold everything above, `break`, `continue` and `return`. See [Loops](#loops). |
 | `break;`, `continue;`, `break 2;`, `continue 2;` | A literal level that does not exceed the number of `foreach` around the statement. |
-| `throw new E(...);`, and `throw` as a whole branch of `match`, `?:` or `??` whose value is returned or assigned | See [Exceptions](#exceptions). |
+| `throw new E(...);`, `throw E::factory(...);`, and `throw` as a whole branch of `match`, `?:` or `??` whose value is returned or assigned | See [Exceptions](#exceptions). |
 
 | Rejected | Message |
 |---|---|
@@ -145,7 +145,18 @@ A contract on a method without a body, in an interface or on an abstract method,
 | `try` / `catch` | `try/catch is not supported: verified methods must not rely on exceptions.` |
 | `throw` inside an operation or a condition | `throw is only supported as a statement, or as a whole branch of match, ?: or ?? whose value is returned or assigned.` |
 | `yield` or `yield from` anywhere in the body, even where no path reaches it | `Generators are not supported: a yield anywhere in the body, even in unreachable code, makes the method return a Generator.` |
-| `throw $exception`, `throw self::error()` | ``Only `throw new Exception(...)` is supported: the exception must be built where it is thrown.`` |
+| `throw $exception`, or any expression that is neither `new` nor a static call | ``Only `throw new Exception(...)` and `throw Exception::factory(...)` with a static factory are supported: the exception must be built where it is thrown, not taken from a variable or another expression.`` |
+| `throw $factory->make()` | ``throw of the result of a method call is not supported: the class of the object is not known here. Use a static factory, `throw Exception::factory(...)`, or `throw new Exception(...)`.`` |
+| `throw $class::make()`, `throw E::$method()` | ``The class and the method of an exception factory must be written by name: `throw $class::make()` and `throw Exception::$method()` are not supported.`` |
+| `throw new $class(...)`, an anonymous class | ``The class of a thrown exception must be written by name: `new $class(...)` and anonymous classes are not supported.`` |
+| `throw E::factory()` where `factory()` is not static | ``FactoryRangeException::instance() is not a static method, so it needs an object that is not known here. Make it static, or build the exception with `new`.`` |
+| `throw E::factory()` where `factory()` is private or protected and out of reach | `FactoryRangeException::hidden() is not accessible here.` |
+| `throw E::factory()` where the method does not exist | `FactoryRangeException has no method missing().` |
+| a factory with no native return type, or one that returns an interface, a union, a nullable type or `never` | `FactoryRangeException::noType() returns no declared type, which is not a single exception class. Declare the exception class, `self` or `static` as its native return type (an interface, a union, a nullable type, `never` and a missing type are not supported).` |
+| a factory that returns a class that is not an exception | `FactoryRangeException::notAnException() returns stdClass, which is not an exception class: declare a class that implements Throwable as its native return type.` |
+| a factory whose return class is not final, with a `#[Throws]` that has a `when` condition on a subclass | `FactoryBaseException::make() returns FactoryBaseException, which is not final: the object can be an instance of a subclass, and a #[Throws] with a `when` condition on FactorySpecificException depends on the class. Make FactoryBaseException final, or declare a final class as the return type.` |
+| a factory that carries `#[Requires]`, `#[Throws]` or `#[\Deprecated]` | `FactoryContractException::guarded() carries #[Requires]: the body of an exception factory is not inspected, so a precondition would not be checked at this call, and a factory that throws or triggers a deprecation does not return the exception that the proof assumes. Build the exception with `new`, or remove the attribute.` |
+| an argument of a factory that does not fit its parameter | `Argument $value of FactoryRangeException::atLeast() is float, but the parameter is int.` |
 | an exception class with its own constructor | `Cannot throw InvalidWebId: its constructor is not the one of Exception or Error, so it can run code that is not verified.` |
 | `$x++` on a string, null or bool variable (`"a"++` is `"b"`, not `"a" + 1`) | `Increment and decrement are only supported on an int or a float variable, not on a string.` |
 | `echo`, `global`, `static`, `unset` | `Side effects and global or static state are forbidden in verified methods.` |
@@ -647,8 +658,41 @@ What a `throw` can be:
 | Form | Condition |
 |---|---|
 | `throw new E('message', 3);` | A statement. `E` is a concrete `Throwable` whose constructor is the one of `Exception` or `Error`, which only stores its arguments: the built-in exceptions and the classes that extend them without a constructor of their own. The message must be a string, the code an int, the previous exception `null`. The arguments are translated like any expression. |
+| `throw E::factory($a, $b);` | A statement, with the rules below. |
 | `$value ?? throw new E()`, `$ok ? $x : throw new E()`, `default => throw new E()` | A whole branch of `??`, `?:` or `match`, whose value is returned or assigned to a variable. The path that throws stops there, so nothing is computed with the missing value. |
 
+**A static factory can build the exception.** Domain exceptions are often built by named factories, so `throw E::factory(...)` is accepted too, and `self::factory(...)` and `static::factory(...)` inside the exception class itself. `examples/RealWorld/CustomerCode.php` guards the same reserved range as `ErpCode`:
+
+```php
+#[Requires('$webId > -1000000000 && $webId < 1000000000')]
+#[Throws(CodeRangeException::class, when: '$webId < 0 || $webId >= self::RANGE_END - self::OFFSET')]
+#[Ensures('$result >= self::OFFSET && $result < self::RANGE_END')]
+public static function from(int $webId): int
+{
+    $code = self::OFFSET + $webId;
+    if ($code < self::OFFSET || $code >= self::RANGE_END) {
+        throw CodeRangeException::outOfReservedRange($webId, $code, self::OFFSET, self::RANGE_END);
+    }
+
+    return $code;
+}
+```
+
+`from()` is proven. `fromBroken()` lets the first code after the range through:
+
+```
+CustomerCode.php:42: #[Throws(CodeRangeException::class, when: '$webId < 0 || $webId >= self::RANGE_END - self::OFFSET')] is violated:
+the method can return although the condition holds. Counterexample: $webId = 1000000 => $result = 99000000 (return at line 50).
+```
+
+The rules for a factory:
+
+- It is a `static` method that the throwing method can access, and its **native** return type is one exception class: the class itself, `self` or `static`. `static` stands for the class that the call names. A PHPDoc `@return` is not enough, since PHP does not enforce it. An interface, a union, a nullable type, `never`, `stdClass` or no return type is rejected.
+- The class that is matched against `#[Throws]` is that return type. A `#[Throws]` on the class or on one of its parents allows the throw. A `#[Throws]` on a subclass only does not, since the object may be of the declared class and not of the subclass.
+- If the return class is not `final`, the object may also be an instance of a subclass, so a `#[Throws]` with a `when` condition on a subclass of it (or on an interface) is rejected: the proof cannot tell which condition the object falls under. Make the return class `final`, or declare a final subclass as the return type.
+- The arguments are translated like any expression, so an overflow or a division by zero in an argument is reported, and they are checked against the parameters like the arguments of a [call to a method of the same file](#calls-to-other-methods): an `int` converts to a parameter whose native type is `float`, and nothing else is converted. A parameter without a default value needs an argument. Named arguments work, and a variadic or by-reference parameter is rejected.
+- A factory that carries `#[Requires]`, `#[Throws]` or `#[\Deprecated]` is rejected: its precondition would not be checked, and the proof assumes that it returns normally.
+- **The body of the factory is never read**, and it may be in another file. The proof assumes that the factory returns an instance of its declared class without throwing anything itself, see [What it does not guarantee](limits-and-roadmap.md#what-it-does-not-guarantee).
 A `throw` inside an operation, such as `($n ?? throw new E()) + 1`, or in a condition, is rejected: the rest of the expression would be computed on a path that has already ended. `try`/`catch` is still rejected, so an exception always leaves the method.
 
 ## What is checked automatically
