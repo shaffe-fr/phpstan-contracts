@@ -10,6 +10,7 @@ use PhpstanContracts\Examples\RealWorld\Calendar;
 use PhpstanContracts\Examples\RealWorld\CancellationPolicy;
 use PhpstanContracts\Examples\RealWorld\Checkout;
 use PhpstanContracts\Examples\RealWorld\CurrencyParser;
+use PhpstanContracts\Examples\RealWorld\CustomerCode;
 use PhpstanContracts\Examples\RealWorld\DeliveryLabel;
 use PhpstanContracts\Examples\RealWorld\DiscountSplit;
 use PhpstanContracts\Examples\RealWorld\ErpCode;
@@ -162,6 +163,10 @@ final class ExamplesTest extends RuleFixtureTestCase
                 'from' => [],
                 'shard' => [],
                 'shardBroken' => ['contracts.unexpectedThrow: `throw new \\LogicException(\'Unknown shard.\')` can be reached where no #[Throws] allows it. Counterexample: $webId = '],
+                'fromBroken' => ['contracts.throwsViolated: the method can return although the condition holds. Counterexample: $webId = '],
+            ],
+            CustomerCode::class => [
+                'from' => [],
                 'fromBroken' => ['contracts.throwsViolated: the method can return although the condition holds. Counterexample: $webId = '],
             ],
             UserRole::class => [
