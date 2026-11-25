@@ -30,7 +30,6 @@ final class ThrowsRuleTest extends RuleFixtureTestCase
 
                 'throwInsideAnOperation' => ['contracts.unsupported: throw is only supported as a statement, or as a whole branch of match, ?: or ?? whose value is returned or assigned.'],
                 'throwInACondition' => ['contracts.unsupported: throw is only supported as a statement'],
-                'throwsSomethingBuiltElsewhere' => ['contracts.unsupported: Only `throw new Exception(...)` is supported'],
                 'anExceptionWithItsOwnConstructor' => ['contracts.unsupported: Cannot throw PhpstanContracts\Tests\Fixtures\ValidatingException: its constructor is not the one of Exception or Error'],
                 'anExceptionWithoutAConstructor' => [],
                 'aMessageThatIsNotAString' => ['contracts.unsupported: The message of an exception must be a string, not int.'],
@@ -52,7 +51,6 @@ final class ThrowsRuleTest extends RuleFixtureTestCase
                 'aPreviousExceptionThatIsNotNull' => ['contracts.unsupported: The previous exception can only be null here.'],
 
                 'guarded' => [],
-                'exception' => [],
             ],
         ]);
     }

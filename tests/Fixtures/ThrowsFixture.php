@@ -142,12 +142,6 @@ final class ThrowsFixture
         return 0;
     }
 
-    #[Throws(\LogicException::class)]
-    public static function throwsSomethingBuiltElsewhere(int $n): int
-    {
-        throw self::exception();
-    }
-
     #[Throws(ValidatingException::class)]
     public static function anExceptionWithItsOwnConstructor(int $n): int
     {
@@ -341,11 +335,6 @@ final class ThrowsFixture
         }
 
         return $n;
-    }
-
-    private static function exception(): \LogicException
-    {
-        return new \LogicException('Built elsewhere.');
     }
 }
 

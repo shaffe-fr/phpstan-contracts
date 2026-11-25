@@ -185,6 +185,26 @@ final class ReplayFixture
         return $x;
     }
 
+    #[Throws(\InvalidArgumentException::class, when: '$x < 0')]
+    public static function factoryThrownOutsideItsCondition(int $x): int
+    {
+        if ($x < 10) {
+            throw ReplayFactoryException::forValue($x);
+        }
+
+        return $x;
+    }
+
+    #[Throws(ReplayFactoryException::class, when: '$n < 0 || $n > 100')]
+    public static function factoryGuardThatLetsTheLastValueThrough(int $n): int
+    {
+        if ($n < 0 || $n > 101) {
+            throw ReplayFactoryException::forValue($n);
+        }
+
+        return $n;
+    }
+
     #[Throws(\InvalidArgumentException::class, when: '$n < 0 || $n > 100')]
     public static function guardThatLetsTheLastValueThrough(int $n): int
     {
@@ -556,5 +576,13 @@ final class ReplayFixture
     private static function halve(int $x): int
     {
         return intdiv($x, 2);
+    }
+}
+
+final class ReplayFactoryException extends \RuntimeException
+{
+    public static function forValue(int $value): self
+    {
+        return new self('Invalid value ' . $value);
     }
 }
