@@ -126,6 +126,8 @@ parameters:
 		methodBudgetMs: 60000
 		runBudgetMs: 0
 		rememberUndecided: true
+		costWarnings: false
+		timingReport: null
 ```
 
 | Parameter | Default | Meaning |
@@ -139,6 +141,8 @@ parameters:
 | `methodBudgetMs` | `60000` | Wall-clock time that one method may spend with Z3: the main run, the retries and the split by length. `0` removes the limit. A check that the budget stopped before it was tried in full is reported as `contracts.unknown`, never as proven. A method with many hard checks costs at most this, plus the time of a process that is being stopped. |
 | `runBudgetMs` | `0`, which is no limit | Wall-clock time that Z3 may spend in one PHPStan process, all methods together. Once it is spent, each method that would need Z3 gets one `contracts.unknown` saying so, until the next run. PHPStan workers do not share the count, so the total is at most the number of workers x this value. |
 | `rememberUndecided` | `true` | Remembers, in `cacheDirectory`, a check that stayed `unknown` after everything that is tried, under the limits of the run (`timeoutMs`, `methodBudgetMs`), the script and the Z3 build. The next run does not ask Z3 again and reports `contracts.unknown` saying so. A check that a budget cut short is never remembered. The memory is local, and what Z3 decides in a time limit depends on the machine: clear the cache directory or change a limit to try again. |
+| `costWarnings` | `false` | Reports `contracts.costly` on a method whose structure makes `contracts.unknown` likely: a loop unrolled over several divisions or modulos by a variable. It reads the code only, never a clock, so it is the same on every run. PHPStan has no warning level, so it is an error like the others: ignore it by identifier with `ignoreErrors`. It predicts an order of magnitude and a risk, not seconds, and never stops a method from being verified. |
+| `timingReport` | `null` | A file path. When set, each verified method appends one JSON line with its predicted structure, the measured milliseconds of the main run, the retry and the split, its verdicts and the state of its budget. This is the only place where measured time appears. The file is appended to under a lock, so parallel workers can share it: delete it before a run to start a new report.
 
 If the executable cannot be found, every checked method reports `contracts.solver` with the name that was looked up.
 
