@@ -14,7 +14,7 @@ A verified method can take and return the types below. Anything else is rejected
 | [lists](#lists) | `list<T>`, `non-empty-list<T>`, with `T` any type of this table except a list | a length and an SMT array of elements |
 | [array shapes](#array-shapes) | `array{net: int, vat: int}`, with string keys | a record of the fields |
 
-Not supported: arrays with arbitrary keys (`array`, `array<K, V>`), lists of lists, `mixed`, `object`, `callable`, closures, unions of different types (`int|string`, `int|float`), `iterable`, `void`, `never`, interfaces and abstract classes, and classes without any `public readonly` property. A class can have mutable properties as long as the proof does not read them.
+Not supported: arrays with arbitrary keys (`array`, `array<K, V>`), lists of lists, `mixed`, `object`, `callable`, closures, unions of different types (`int|string`, `int|float`), `iterable`, `void`, `never`, interfaces and abstract classes, and classes without any `public readonly` property that can be modelled. A class can have mutable properties as long as the proof does not read them.
 
 A class constant whose value is a single `int`, `float`, `string`, `bool` or enum case, such as `self::OFFSET` or `ErpCode::RANGE_END`, is inlined as that value, in the body and in contracts. `static::` needs a final class or a final constant. See [Class constants, `self` and `$this`](writing-contracts.md#class-constants-self-and-this).
 
@@ -659,7 +659,14 @@ The `public readonly` properties of a supported type are the model of an instanc
 PriceContext.php:53: Property PhpstanContracts\Examples\RealWorld\PriceContext::$state must be public and readonly: only immutable data classes are supported.
 ```
 
-A class whose properties are all left out is rejected as a type, with the reason of the first one.
+A class whose properties are all left out is rejected as a type. The message names the type first and what is supported. Then it lists the `public readonly` properties whose type is not supported, each with its type and the reason, and only after them the properties that are not public and readonly, which are often inherited. A data framework DTO that holds nothing but Eloquent models and a collection, `LoadedPricing` of [`tests/Fixtures/DataDiagnostics.php`](../tests/Fixtures/DataDiagnostics.php), says what to change instead of pointing at the state of the base class:
+```
+Type PhpstanContracts\Tests\Fixtures\LoadedPricing is not supported: only enums, readonly data classes, lists, array shapes with string keys and scalars are. None of the public readonly properties of PhpstanContracts\Tests\Fixtures\LoadedPricing can be modelled: $customer (PhpstanContracts\Tests\Fixtures\ModelLike|null): Type PhpstanContracts\Tests\Fixtures\ModelLike is not supported: Property PhpstanContracts\Tests\Fixtures\ModelLike::$attributes must be public and readonly: only immutable data classes are supported; $product (PhpstanContracts\Tests\Fixtures\ModelLike): Type PhpstanContracts\Tests\Fixtures\ModelLike is not supported: Property PhpstanContracts\Tests\Fixtures\ModelLike::$attributes must be public and readonly: only immutable data classes are supported; $lines (PhpstanContracts\Tests\Fixtures\CollectionLike): Type PhpstanContracts\Tests\Fixtures\CollectionLike is not supported: Property PhpstanContracts\Tests\Fixtures\CollectionLike::$items must be public and readonly: only immutable data classes are supported. Its properties that are not public and readonly are not modelled either: $_additional, $_dataContext
+```
+Five properties are listed at most, then the rest is counted. A class with one property that can be modelled is accepted, and the others are rejected when read, naming the type that is not supported and not a property of it (`PricingWithModel` of the same file has an int and a model):
+```
+Property PhpstanContracts\Tests\Fixtures\PricingWithModel::$customer cannot be read in a verified method: Type PhpstanContracts\Tests\Fixtures\ModelLike is not supported: only enums, readonly data classes, lists, array shapes with string keys and scalars are. Property PhpstanContracts\Tests\Fixtures\ModelLike::$attributes must be public and readonly: only immutable data classes are supported.
+```
 
 The classes of the examples:
 
@@ -736,14 +743,14 @@ Counterexample: $this = StockLine(onHand: 0, reserved: 1000000) => $result = -10
 A constructor that validates its arguments cannot be modelled, so the class can be received as a parameter but not built with `new`. The prover would otherwise skip a possible exception.
 
 ```
-Rejected.php:121: Cannot instantiate Percentage: its constructor contains logic, which is not verified.
-Rejected.php:128: Property PhpstanContracts\Examples\Counter::$count must be public and readonly: only immutable data classes are supported.
+Rejected.php:133: Cannot instantiate Percentage: its constructor contains logic, which is not verified.
+Rejected.php:140: Type PhpstanContracts\Examples\Counter is not supported: only enums, readonly data classes, lists, array shapes with string keys and scalars are. Property PhpstanContracts\Examples\Counter::$count must be public and readonly: only immutable data classes are supported.
 ```
 
 `new` also needs the constructor in the file that builds the object. PHPStan re-analyses a file when the signatures it uses change, not when the body of a constructor in another file does, so a proof that relied on an empty constructor elsewhere could stay green after that constructor gains a check. That is why `Receipt` is declared in `Checkout.php`, next to the methods that build it. A class of another file can still be received as a parameter, returned and read:
 
 ```
-Rejected.php:175: Cannot instantiate Receipt: its constructor is declared in another file. Only classes whose constructor is in the same file can be built: PHPStan re-analyses a file when the signatures it uses change, not when a body in another file does, so the proof would not be redone.
+Rejected.php:187: Cannot instantiate Receipt: its constructor is declared in another file. Only classes whose constructor is in the same file can be built: PHPStan re-analyses a file when the signatures it uses change, not when a body in another file does, so the proof would not be redone.
 ```
 
 ### Data classes and the return type
@@ -849,7 +856,7 @@ A `final` class with no instance property, of any visibility, inherited and from
 | `$this->helper($x)`, `$this->helper($x)->other()` | The call is translated with the body of the helper, and the helper sees the same `$this`. Only in a class without any instance property. |
 | the same in a class that is not final | Only for a `final` or `private` method, as for any call. |
 | `$this` compared, read for a property or used as a value | `contracts.unsupported`: `Class App\Guard has no instance property, so $this has no state to model: use it only as the receiver of a call, such as $this->helper(). Comparing it, passing it as an argument and reading a property of it are not supported.` |
-| `$this` passed as an argument | `contracts.unsupported`: `Class App\Guard has no properties to model.`, because the parameter would have the type of a class without state. |
+| `$this` passed as an argument | `contracts.unsupported`: `Type App\Guard is not supported: only enums, readonly data classes, lists, array shapes with string keys and scalars are. App\Guard has no properties to model.`, because the parameter would have the type of a class without state. |
 | a class with an instance property, such as a promoted `private readonly` dependency | `contracts.unsupported`: `Object state ($this) is only part of the verified subset in enums, readonly data classes and classes without instance properties. Class App\Guard has the instance property $rate, so $this has state.`, followed by the reason it is not data. |
 See [`ReconciliationDeltaGuard`](../examples/RealWorld/ReconciliationDeltaGuard.php) and [Calls to other methods](writing-contracts.md#calls-to-other-methods).
 ## Lists
