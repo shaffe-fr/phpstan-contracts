@@ -5,6 +5,7 @@ parameters:
 		loopUnroll: 10
 		maxLoopUnroll: 100
 		cacheDirectory: %tmpDir%/contracts
+		parallelism: null
 
 parametersSchema:
 	contracts: structure([
@@ -13,6 +14,7 @@ parametersSchema:
 		loopUnroll: int()
 		maxLoopUnroll: int()
 		cacheDirectory: schema(string(), nullable())
+		parallelism: schema(int(), nullable())
 	])
 
 services:
@@ -38,6 +40,7 @@ services:
 		arguments:
 			binary: %contracts.z3Binary%
 			timeoutMs: %contracts.timeoutMs%
+			parallelism: %contracts.parallelism%
 	-
 		class: PhpstanContracts\Rule\VerifyContractRule
 		arguments:
