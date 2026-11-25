@@ -24,8 +24,8 @@ final class RunBudgetRuleTest extends RuleFixtureTestCase
         $this->assertOutcomes([
             RunBudgetFixture::class => [
                 'first' => [],
-                'second' => ['contracts.unknown: Not verified: the solver budget of this run is exhausted ('],
-                'third' => ['contracts.unknown: ms spent, contracts.runBudgetMs is 1 ms), so Z3 was not asked about this method. Raise contracts.runBudgetMs'],
+                'second' => ['contracts.unknown: Not verified: the solver budget of this run is exhausted (contracts.runBudgetMs is 1 ms), so Z3 was not asked about this method.'],
+                'third' => ['contracts.unknown: Not verified: the solver budget of this run is exhausted (contracts.runBudgetMs is 1 ms), so Z3 was not asked about this method. Raise contracts.runBudgetMs'],
             ],
         ]);
     }

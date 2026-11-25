@@ -239,7 +239,8 @@ final class MethodSolverTest extends TestCase
 
         $answer = $this->solver()->solve($this->encoding());
 
-        self::assertSame(UnknownReason::Budget, $answer->results[1]->reason);
+        self::assertSame(UnknownReason::RunBudget, $answer->results[1]->reason);
+        self::assertSame(1, $answer->notTried());
         self::assertSame([], $this->runner->remembered);
     }
 
