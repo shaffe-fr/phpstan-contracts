@@ -514,6 +514,8 @@ DiscountSplit.php:48: Postcondition #[Ensures('array_sum($result) === $discountC
 Counterexample: $discountCents = 4, $lineCents = [5, 4, 8] => $result = [1, 1, 1] (return at line 57).
 ```
 
+The solver may print another valid counterexample, with other values, on another platform or Z3 version: the contract and the line stay the same, and the replay in PHP checks whichever one it prints.
+
 A loop that stops early works the same way. This one returns the position of the first line above a limit, skipping the lines that are free:
 
 ```php
