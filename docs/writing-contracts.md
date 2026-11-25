@@ -69,6 +69,7 @@ Available in contracts:
 | `in_array($x, [a, b, c])`, `in_array($x, [a, b, c], true)` over a list literal or a class constant holding one | `in_array($this, [self::Administrator, self::Validator])` |
 | `in_array($x, $list, true)` over a `list<T>` (a variable, a property or a call result) | `in_array($sku, $blockedSkus, true)` |
 | `count($list)` | `count($result) <= count($amounts) + 1` |
+| `array_sum($list)` over a `list<int>` | `array_sum($result) === $discountCents` |
 | `$list[$i]` with an `int` index; the read must be proven to exist | `count($amounts) > 0 && $amounts[0] >= 0`, `$result[0] >= 0` |
 | `isset($list[$i])`, `$list[$i] ?? $default` | `implies(isset($items[$i]), $result)` |
 | `$shape['key']` with a string literal key of the shape; write the key with double quotes inside the attribute | `$result["net"] + $result["vat"] === $grossCents` |
@@ -79,6 +80,8 @@ Available in contracts:
 PHP has no implication operator, so `implies($a, $b)` is provided. It means `!$a || $b`, and the conclusion is read under the premise: `implies($x !== null, $x > 0)` is accepted even when `$x` is nullable.
 
 **Contract arithmetic on `int` is mathematical.** In a contract, `$a * $b` is the true product, with no 64-bit limit, as in Dafny or Why3. Only the method body is held to PHP's `int` range. This is what lets you write `$result * $perPage >= $totalItems` without worrying about the multiplication in the contract itself overflowing.
+
+**`array_sum()` in a contract is mathematical too.** It is the true sum of the elements, with no 64-bit limit and no float: `array_sum($result) === $discountCents` says that the parts add up to the discount. In the body, `array_sum()` is PHP's, which becomes a float when a partial sum leaves the `int` range, so the extension checks that it does not (see [Loops](#loops)).
 
 **Contract arithmetic on `float` is not.** A float expression in a contract is computed in IEEE 754, exactly as in the body, so `$result === $a + ($b + $c)` is a statement about rounding.
 
@@ -113,11 +116,30 @@ A contract on a method without a body, in an interface or on an abstract method,
 | `$x = expr;` `$x += expr;` `$x -= expr;` `$x *= expr;` `$x .= expr;` `$x ??= expr;` | Local variables only. A variable keeps its type, except that a nullable variable can receive a value or `null`. |
 | `if` / `elseif` / `else` | A variable assigned in only one branch is not usable after the `if`. Null checks narrow the types inside the branches. |
 | `return expr;` | Early returns are fine. |
+| `foreach ($list as $item)`, `foreach ($list as $i => $item)` | Over a `list<T>`, by value. The body can hold everything above, `break`, `continue` and `return`. See [Loops](#loops). |
+| `break;`, `continue;`, `break 2;`, `continue 2;` | A literal level that does not exceed the number of `foreach` around the statement. |
 | `throw new E(...);`, and `throw` as a whole branch of `match`, `?:` or `??` whose value is returned or assigned | See [Exceptions](#exceptions). |
 
 | Rejected | Message |
 |---|---|
 | `while`, `for`, `do` | `Only foreach over a list is supported: a while, do or for loop needs a termination argument, which is not supported yet. Iterate the list with foreach ($list as $i => $item), or read it with count($list) and $list[$i].` |
+| `foreach ($list as &$item)`, `foreach ($list as $k => &$item)` | `foreach by reference (&$item) changes the list in place and leaves $item a reference to its last element, which is not modelled. Iterate by value and build a new list with $out[] = $value.` |
+| `foreach ($list as [$a, $b])`, `foreach ($list as list($a, $b))` | `Destructuring in foreach is not supported: iterate with foreach ($list as $item) and read the elements, such as $item['net'].` |
+| a key or a value of `foreach` that is not a local variable, such as `$this->x` | `The key and the value of a foreach must be local variables.` |
+| the same variable as key and value | `The key and the value of this foreach are both $x; use two different variables.` |
+| `foreach` over an array shape | `foreach over an array shape is not supported: its keys are not a list and its values can have different types. Read each key, such as $totals['net'].` |
+| `foreach` over a nullable list | `foreach over $amounts, which may be null here: PHP warns "foreach() argument must be of type array|object" and skips the loop. Check it first with !== null.` |
+| `foreach` over anything but a list, such as a string | `foreach is only supported over a list<T>, not over a string.` |
+| `foreach` over `[]`, or over a variable that is always `[]` | `This list is always empty, so the loop never runs; remove the loop.` |
+| `break 3;` with fewer loops around it, `continue 2;` in a single loop | `break 3 leaves more loops than enclose it here (1).` |
+| `break $n;` | `break needs a literal level, such as break 2.` |
+| `break 0;` | `break 0 is not valid: the level of break starts at 1.` |
+| `break;` or `continue;` outside a `foreach` | `break is only supported inside a foreach.` |
+| a `foreach` that would be unrolled more than `contracts.maxLoopUnroll` times | `This foreach would be unrolled 500 times, more than contracts.maxLoopUnroll (100). Bound the list more tightly with #[Requires], or raise contracts.maxLoopUnroll.` |
+| nested `foreach` whose product of bounds exceeds `contracts.maxLoopUnroll` | `These nested loops would be unrolled 20 × 20 = 400 times, more than contracts.maxLoopUnroll (100). Bound the lists more tightly with #[Requires], extract the inner loop into a smaller method of this file, or raise contracts.maxLoopUnroll.` |
+| a variable first assigned in the loop and read after it | `Variable $seen is not defined at this point.` (the list can be empty, and the loop then never runs) |
+| `array_sum()` of a `list<float>` | `array_sum() of a list<float> is not supported: it returns the int 0 for an empty list and a float otherwise. Add the elements in a foreach, starting from 0.0.` |
+| `array_sum()` of any other list, such as `list<?int>` or `list<bool>`, or of a shape | `array_sum() is only supported on a list<int>: PHP converts null, bools and numeric strings to numbers, which is not modelled. Add the elements in a foreach.` |
 | `switch` | `switch is not supported; use match.` |
 | `try` / `catch` | `try/catch is not supported: verified methods must not rely on exceptions.` |
 | `throw` inside an operation or a condition | `throw is only supported as a statement, or as a whole branch of match, ?: or ?? whose value is returned or assigned.` |
@@ -223,7 +245,7 @@ Everything in the table in [the contract language](#the-contract-language) works
 | `count()` of a shape, `count($list, COUNT_RECURSIVE)` | `count() of an array shape is not supported: the type array{...} does not rule out extra keys. count() is supported on lists.` and `count() takes exactly one argument here; COUNT_RECURSIVE is not supported. Write count($list).` |
 | `empty($list)`, `if ($list)` | `empty() relies on truthiness; write count($list) === 0.` |
 | `isset()` or `??` through a list element, such as `$lines[$i]['net'] ?? 0` | ``?? on `$lines[$i]['net']` reads through the list element `$lines[$i]`, which is not modelled: PHP treats a missing element in the middle of the chain as unset. Check `isset($lines[$i])` first, or read `$lines[$i]['net']` into a variable.`` |
-| any other array function, such as `array_sum()`, `array_map()`, `sort()`, `implode()`, `is_array()` | `Call to array_sum() is not part of the verified subset: of the array functions, only count() and in_array() are supported.` |
+| any other array function, such as `array_map()`, `array_product()`, `sort()`, `implode()`, `is_array()` | `Call to array_product() is not part of the verified subset: of the array functions, only count(), in_array() and array_sum() are supported. Visit the elements with foreach instead.` |
 | `in_array()` without `strict: true` on a string or a nullable value | `in_array() without strict: true compares with ==, which juggles a string; pass true as the third argument.` |
 | `in_array()` on anything but a list, a list literal or a constant holding one | `in_array() is only supported on a list<T>, or on a list literal such as [self::A, self::B] or a class constant holding one.` |
 | `in_array()` on a shape, or on a list of objects or shapes | `in_array() is only supported on a list or a list literal, not on an array shape; compare the values, such as $x === $totals['net'] || $x === $totals['vat'].` and `in_array() on a list of objects compares them by identity with strict: true and property by property without it, which is not modelled; compare a field instead.` |
@@ -352,6 +374,183 @@ A called method cannot throw yet: ``The call to PhpstanContracts\Tests\Fixtures\
 
 **Why the same file.** PHPStan's result cache re-analyses a file when it changes, and the files that depend on it only when a signature they use changes. A proof that read the body of a method in another file would not be redone when that body changes, and could stay green for code that is now wrong. The same holds for `new X(...)`, whose proof relies on the body of the constructor being empty: X's constructor must be declared in the same file. Calls to methods of other files need modular verification, where the caller relies on the callee's contract, which is on the [roadmap](limits-and-roadmap.md#roadmap).
 
+## Loops
+
+A `foreach` over a `list<T>` is supported, by value, with or without the key. A rule such as "the parts of a split add up to the total" or "the total of the lines is never negative" can then be proven over the lines of an order:
+
+```php
+/**
+ * @param list<OrderLine> $lines
+ */
+#[Requires('count($lines) <= 20')]
+#[Ensures('$result >= 0')]
+#[Ensures('implies(count($lines) === 0, $result === 0)')]
+public static function total(array $lines): int
+{
+    $total = 0;
+    foreach ($lines as $line) {
+        $total += $line->quantity * $line->unitCents;
+    }
+
+    return $total;
+}
+```
+
+This is proven for every order of up to 20 lines, quantities in `1..1000` and unit prices in `0..1000000`, and it includes the check that `$total += ...` never overflows, in every iteration. The whole file is [`examples/RealWorld/OrderTotals.php`](../examples/RealWorld/OrderTotals.php).
+
+What a loop body can hold:
+
+| In the body | Notes |
+|---|---|
+| assignments and compound assignments to local variables | An accumulator keeps its type: `$total = 0; ... $total += 0.5;` is rejected with `Variable $total changes type from int to float.` |
+| `if`, `elseif`, `else`, `match` | As anywhere else. |
+| `break`, `continue`, `break 2`, `continue 2` | The level must be an integer literal that does not exceed the number of loops around the statement. `continue 2` leaves the inner loops and ends the iteration of the outer one. |
+| `return` | The first element that matches, for example. The report says which `return` was taken, as usual. |
+| `throw` and `#[Throws]` | With the same "if and only if" meaning as outside a loop, see [Exceptions](#exceptions): the condition of a `throw` in the third iteration includes the two iterations before it. |
+| `$out[] = $x`, `$out = [...$out, $x]` | On a list built in the method, which is how a result list is built: `$parts = []; foreach (...) { $parts[] = ...; }`. |
+| another `foreach`, within the budget | See [The budget](#the-budget). |
+| a call to a method of the same file | Its own loops are unrolled in place, with the bound of its own `#[Requires]`. |
+
+After the loop, the key and the value hold the last values they had, as in PHP. A variable that is first assigned in the body is not defined after the loop, because the list can be empty: reading it is rejected with `Variable $seen is not defined at this point.`
+
+PHP iterates the array as it was when the loop started. The extension does the same: appending to a list that the loop iterates, which is allowed on a list built in the method, does not add iterations, and `$work = []` in the body does not stop the loop. Appending to a parameter is rejected as everywhere (`Appending to $amounts, a list received from outside the method, is not supported: ...`).
+
+### How a loop is proven
+
+The body is translated once per iteration, up to a bound `N`, and each iteration only runs if the list has an element for it. That is exact for every list of at most `N` elements. For a longer list, the unrolled code does not describe what PHP runs, so the extension adds one more obligation, `contracts.loopBound`: the list never has more than `N` elements. **The bound is never assumed.** A proof is only reported as complete when the obligation holds too, and when it does not, the method fails with the list that breaks it.
+
+A `foreach` always ends, since a list is finite, so no termination argument is needed.
+
+### The bound
+
+`N` is chosen, in this order, from:
+
+1. a conjunct of a `#[Requires]` of the form `count($lines) <= 20`, `count($lines) < 21`, `20 >= count($lines)`, `21 > count($lines)` or `count($lines) === 20`, joined by `&&` or `and` at the top level of the contract, with an integer literal or an integer class constant for the number. The loop over `$lines` uses the smallest bound given to `$lines`;
+2. otherwise the largest bound given to any list of the method, which covers a loop over a list built from a bounded one;
+3. otherwise the number of elements of a list literal;
+4. otherwise `contracts.loopUnroll`, `10` by default.
+
+With a bound from a `#[Requires]`, the obligation is trivial: the precondition says the same thing. Without one, the proof stops at ten elements and says so. Here is `OrderTotals::totalBroken()`, which has the same body as `total()` and no `#[Requires]`:
+
+```php
+#[Ensures('$result >= 0')]
+public static function totalBroken(array $lines): int
+```
+
+```
+OrderTotals.php:42: The proof unrolls this foreach up to 10 iterations, and $lines can have more. This is a limit of the proof, not a bug in the code.
+If the real maximum is known, add #[Requires('count($lines) <= 50')]; otherwise raise contracts.loopUnroll.
+Counterexample: $lines = a list of 11 elements starting with [OrderLine(quantity: 1000, unitCents: 999997), OrderLine(quantity: 1000, unitCents: 999996), ...].
+```
+
+This diagnostic is a limit of the proof and not a bug in the code: PHP runs the method fine on that list, and the extension only tells you that the proof does not cover it. There are two ways out:
+
+- **State the maximum** with `#[Requires('count($lines) <= 50')]`. A precondition is an assumption of the proof, so the callers have to respect it, as for any `#[Requires]`. This is the answer when the real maximum is known, such as the number of lines an order can have.
+- **Raise `contracts.loopUnroll`** when the lists are short but the bound is not written down. It costs time, see [The cost](#the-cost).
+
+When the loop is over a list that is not a parameter, a contract cannot name it, and the message suggests to bound the list it is built from with `#[Requires]`.
+
+Because the bound is checked and not assumed, a wrong bound can never turn into a wrong proof: the worst a missing `#[Requires]` does is a `contracts.loopBound` report.
+
+### The budget
+
+A loop nest is unrolled as many times as the product of the bounds along the nesting: two loops over 20 lines each are 400 iterations of the inner body. When a nest would be unrolled more than `contracts.maxLoopUnroll` times (100 by default), the method is rejected before anything is sent to Z3:
+
+```
+These nested loops would be unrolled 20 × 20 = 400 times, more than contracts.maxLoopUnroll (100). Bound the lists more tightly with #[Requires], extract the inner loop into a smaller method of this file, or raise contracts.maxLoopUnroll.
+```
+
+Extracting the inner loop into a method of the same file, with its own `#[Requires]`, keeps each unrolling small. Both parameters are described in [Getting started](getting-started.md#configuration).
+
+### The cost
+
+Unrolling multiplies the size of the problem by `N`, so a loop whose body is linear is nearly free and a loop whose body multiplies two variables is not. Measured with Z3 5.4.1 on the machine used for this documentation, for the whole method (every check of it):
+
+| Method | 10 elements | 20 | 50 | 100 |
+|---|---|---|---|---|
+| a sum of `list<int<0, 1000000>>` | 62 ms | 102 ms | 139 ms | 330 ms |
+| a search with `break` and `continue` | 61 ms | 115 ms | 148 ms | 365 ms |
+| a filter that builds a list | 123 ms | 394 ms | 2.7 s | 8.1 s |
+| the total of an order, `$line->quantity * $line->unitCents` per line | 112 ms | 3.7 s | 34 s | 90 s |
+| a discount split evenly, `array_sum($result) === $discountCents` | 405 ms | 821 ms | 3.9 s | 30 s, one check undecided |
+| a discount split by weight, with a division by the sum of the weights | 30 s | 95 s, three checks undecided | | |
+
+A loop over a hundred elements is fine when the body is linear. The split by weight takes 4.1 s at 5 lines, which is why the bundled examples do not include one. The cost is driven by non-linear arithmetic in the body times `N`: a product per line is comfortable up to 20 lines, the proportional split up to 5. Two nested loops of 5 elements take half a second, of 10 elements 26 seconds. A check that Z3 cannot settle within `timeoutMs` is reported as `contracts.unknown`, never as a pass.
+
+### Reading a diagnostic from a loop
+
+Every iteration has its own copy of each safety check of the body, but the copies are reported once, at the line of the code, with the first iteration that fails:
+
+```
+ForeachFixture.php:394: Possible integer overflow: `$total + $amount` can leave the PHP int range, in iteration 2 (key 1) of the foreach at line 393.
+Counterexample: $amounts = [9223372036854769954, 5854, -9223372036854775808, 0, 0, 0, 0, 0, 21656].
+```
+
+For nested loops, the message names the iteration of each: `in iteration 2 (key 1) of the foreach at line 341, in iteration 1 (key 0) of the foreach at line 340`. Lists are printed as PHP literals, a list of more than ten elements is shortened when a shorter one is also a counterexample, and every counterexample of a loop is replayed in PHP by the test suite, except `contracts.loopBound`, whose input the PHP method handles correctly (see [Testing](testing.md#counterexamples-are-replayed)).
+
+Here the discount split of [`examples/RealWorld/DiscountSplit.php`](../examples/RealWorld/DiscountSplit.php) is proven: the cents that do not divide evenly go to the first lines, and the parts add up to the discount, to the cent, for any discount from 0 to 10,000,000 cents and any list of 1 to 20 lines:
+
+```php
+#[Requires('count($lineCents) <= 20')]
+#[Ensures('count($result) === count($lineCents)')]
+#[Ensures('array_sum($result) === $discountCents')]
+public static function evenly(int $discountCents, array $lineCents): array
+{
+    $share = intdiv($discountCents, count($lineCents));
+    $remainder = $discountCents - $share * count($lineCents);
+    $parts = [];
+    foreach ($lineCents as $i => $cents) {
+        $parts[] = $i < $remainder ? $share + 1 : $share;
+    }
+
+    return $parts;
+}
+```
+
+Forgetting the remainder is refuted, with the smallest case that shows it:
+
+```
+DiscountSplit.php:48: Postcondition #[Ensures('array_sum($result) === $discountCents')] can be violated.
+Counterexample: $discountCents = 4, $lineCents = [5, 4, 8] => $result = [1, 1, 1] (return at line 57).
+```
+
+A loop that stops early works the same way. This one returns the position of the first line above a limit, skipping the lines that are free:
+
+```php
+#[Requires('count($lines) <= 20')]
+#[Ensures('$result >= -1')]
+#[Ensures('$result < count($lines)')]
+#[Ensures('implies(count($lines) === 0, $result === -1)')]
+public static function firstLineAbove(array $lines, int $limitCents): int
+{
+    foreach ($lines as $i => $line) {
+        if ($line->unitCents === 0) {
+            continue;
+        }
+        if ($line->quantity * $line->unitCents > $limitCents) {
+            return $i;
+        }
+    }
+
+    return -1;
+}
+```
+
+### `array_sum()`
+
+`array_sum($list)` is supported on a `list<int>` (a range of ints and `non-empty-list` included), in the body and in contracts. Any other list is rejected, with the reason: a list of floats returns the int `0` when it is empty and a float otherwise, and PHP converts `null`, booleans and numeric strings to numbers.
+
+In the body, PHP adds the elements from left to right and switches to a float as soon as a partial sum leaves the `int` range, even when a later element brings it back. The extension checks every partial sum:
+
+```
+ArraySumFixture.php:53: Possible integer overflow: `array_sum($amounts)` can leave the PHP int range. Counterexample: $amounts = [1, 9223372036854775807].
+```
+
+In a contract, `array_sum()` is the mathematical sum, as `+` is. For an input list whose elements have both a lower and an upper bound, the proof also knows that the sum of the first `n` elements is between `n` times the lower bound and `n` times the upper one, which Z3 cannot derive on its own for a list of any length.
+
+### Why not `while`, `for` and `do`
+
+A `foreach` over a list ends, since the list is finite. A `while`, a `for` or a `do` needs an argument that it ends, a quantity that decreases at every iteration, and the extension has no way to state or check one yet. They are rejected with a message that points to `foreach ($list as $i => $item)` and to `count($list)` with `$list[$i]`. Loops without a bound, with an invariant written by the author, are on the [roadmap](limits-and-roadmap.md#roadmap).
 ## Exceptions
 
 A guard that throws is the usual way to protect a method from an input it cannot handle. Moving the guard into a `#[Requires]` would change the method: it would no longer defend itself. `#[Throws]` keeps the guard and states when it fires:
@@ -461,7 +660,6 @@ Each condition is checked **under the path that reaches it**. In `$parts > 0 && 
 | `contracts.unhandledMatch` | A `match` can throw `UnhandledMatchError`. | Add the missing arm or a `default`. |
 | `contracts.missingReturn` | A path ends without returning. | Return on every path. |
 | `contracts.invalidEnumValue` | `from()` can throw `ValueError`. | Use `tryFrom()` for untrusted input. |
-
 | `contracts.invalidCast` | `(int)` of a float that can be `NAN`, infinite or out of range: PHP 8.3 and 8.4 wrap the value or return 0, PHP 8.5 also raises a warning. | Bound the float, or exclude `NAN` and infinities with `#[Requires]`. |
 | `contracts.undefinedKey` | A list read `$list[$i]` whose key may not exist. | Guard the read with `$i >= 0 && $i < count($list)` or `isset($list[$i])`, or state the range with `#[Requires]`. |
 | `contracts.loopBound` | A `foreach` over a list that can have more elements than the proof unrolls. This is a limit of the proof, not a bug in the code. | Bound the list with `#[Requires('count($list) <= 50')]`, or raise `contracts.loopUnroll`. |

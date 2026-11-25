@@ -856,6 +856,8 @@ A range on the elements, such as `list<int<0, 10000000>>`, and `non-empty-list` 
 | `[]`, `[$a, $b]`, `[...$list, $x]`, `[...$first, ...$second]` | A literal whose elements have the same type; `[1, null]` is a `list<?int>`. A spread must be a list. |
 | `$list[] = $x;` on a list built in the method | Copy-on-write, like PHP: another variable that held the same list keeps its elements. |
 | `in_array($x, $list, true)` | One `===` per element: `NAN` is never found and `-0.0` matches `0.0`, as in PHP. Without `strict: true`, the needle must be an `int`, a `float`, a `bool` or an enum case. |
+| `foreach ($list as $item)`, `foreach ($list as $i => $item)` | By value, with `break`, `continue`, `return` and `$out[] = $x` in the body. The proof unrolls the loop up to a bound that a `#[Requires('count($list) <= 20')]` gives, and `contracts.loopBound` says when a list can have more elements. See [Loops](writing-contracts.md#loops). |
+| `array_sum($list)` on a `list<int>` | In the body, PHP's sum, with a `contracts.overflow` check on every partial sum because PHP turns the sum into a float when one leaves the `int` range. In a contract, the mathematical sum. |
 | `$a === $b`, `!==`, `match ($list)` on lists of `int`, `bool`, `string`, enum cases and their nullable versions | The same count, and identical elements in the same order. |
 | passing a list to a method of the same file, returning it, a list in a property or in an array shape | The element type must be the same on both sides. |
 
@@ -863,14 +865,14 @@ Not supported, each with a message that says what to write instead:
 
 | Rejected | Why |
 |---|---|
-| `foreach` and every loop | Termination cannot be established. Read the list with `count()`, `$list[$i]` and `in_array()`. |
+| `while`, `for`, `do`, `foreach` by reference, `foreach` over a shape, a nullable list or anything that is not a list | A `foreach` over a list ends, since the list is finite. Any other loop needs a termination argument, which is not supported yet, and the other forms change the list in place or iterate values that are not modelled. Each message says what to write instead. |
 | `$list[$i] = $x`, `unset($list[$i])`, `[$a, $b] = $list` | A write at an index can create a key out of order, `unset()` leaves a gap, and destructuring is not modelled. Only `$list[] = $x` is. |
 | `$items[] = $x` on a parameter | PHP appends at the next free key, which can be past `count($items)` after an `unset()` by the caller. Write `$items = [...$items, $x]`, which always builds a list. |
 | `list<list<int>>`, `list<float\|string>`, `array<string, int>` | A list of lists, a union element type and arbitrary keys are not modelled. |
 | `list<float>` as an input | PHPStan accepts an `int` where the list declares a `float`, and PHP does not convert it. A list of floats can be built in the method and returned. |
 | `$a == $b`, `$a < $b` on arrays | Loose equality juggles every element (`[1] == [true]`), and ordering compares by count, then key by key. |
 | `$a === $b` on lists of floats, of data classes or of shapes | PHP compares identical arrays by reference first, so `[NAN] === [NAN]` is false, and it compares objects by identity. |
-| `array_sum()`, `array_map()`, `sort()` and the other array functions | Only `count()` and `in_array()` are supported. |
+| `array_map()`, `array_sum()` of anything but a `list<int>`, `sort()` and the other array functions | Only `count()`, `in_array()` and `array_sum()` over a `list<int>` are supported. `array_sum()` of floats returns the int `0` for an empty list and a float otherwise, and PHP converts `null`, booleans and numeric strings to numbers. |
 
 ### Real list bugs
 
@@ -965,6 +967,7 @@ public static function withLine(array $amounts, int $amount): array
 ```
 
 Searching a list with `in_array($sku, $blockedSkus, true)` is proven against `implies(count($blockedSkus) === 0, !$result)` in [`OrderLines.php`](../examples/RealWorld/OrderLines.php).
+Visiting every element is a loop: the total of an order, a discount split over its lines, the first line above a limit. [Loops](writing-contracts.md#loops) shows how they are proven, with [`OrderTotals.php`](../examples/RealWorld/OrderTotals.php) and [`DiscountSplit.php`](../examples/RealWorld/DiscountSplit.php), including the refuted version of each.
 
 A counterexample prints a list as the PHP literal one would write, `[10000001]`. A list longer than ten elements is printed as `a list of 28224 elements starting with [...]`, but the prover first looks for a shorter one, so this form is rare.
 

@@ -169,6 +169,25 @@ An array shape is a record, like a data class: one constructor, one accessor per
 
 A list can be long, and Z3 picks lengths freely: a goal on `count()` alone came back with a counterexample of 28224 elements. A counterexample is meant to be read and replayed, so every check asks for **probe terms**, the length of each list that is reachable from the inputs and the result and its first ten elements, and Z3 echoes each probe in the model. When a refuted check has a list longer than ten elements, the extension runs that single check once more with every length bounded by ten, which is sound because that model satisfies everything the first one did. The shorter model is printed when it exists, and the long form `a list of 28224 elements starting with [...]` only otherwise.
 
+## Loops
+
+A `foreach` over a list is **unrolled**. The list is translated once, under the path condition at the loop, into a constant that every iteration reads, so that writing the iterated variable in the body does not change what is iterated, as in PHP. Iteration `k` runs under `k < count($list)` and the paths before it, binds the key to `k` and the value to the element at `k`, and executes the body with the usual rules. The read of that element has no `contracts.undefinedKey` obligation, since the path condition already says that it exists.
+
+A path leaves the loop in one of three ways: it finds that the list has no element `k`, it takes a `break`, or it completes iteration `N`, the last one that was unrolled. The state after the loop is the merge of these exits, with an `ite` on each one's path condition, which is the merge of an `if` extended to several states. A variable that one exit does not define is dropped, which is why reading a variable that only the body assigns is rejected after the loop. `continue` ends the iteration by merging into the next one, and `break n` and `continue n` are recorded in the frame of the loop that they target. A `return` or a `throw` in the body records `pc => result = value` or ends the path with its obligation, with a path condition that contains the iterations before it.
+
+The unrolling is only exact for a list of at most `N` elements. That is what the path that completes iteration `N` is for: where it can be reached, it carries a `contracts.loopBound` obligation, `count($list) <= N`, checked in script order like every other obligation. **It is generated whether or not a `#[Requires]` gives `N`, and it is never assumed in place of being checked.** `N` is only a number chosen before translation, from the `#[Requires]` of the method or `contracts.loopUnroll`, and nothing in that choice adds an assertion. When `#[Requires('count($lines) <= 20')]` gives it, the obligation is proven at once, because the precondition says the same. Without a bound, it fails with a list of more than `N` elements, which is the diagnostic that says the proof does not cover the input. After a checked obligation, the later checks only see the paths where it holds, so they see the states on which the unrolled code is exact. This is the argument of [Safety obligations](#safety-obligations): a checked obligation is assumed afterwards, which is sound because a failing one already fails the method.
+
+The checks of an iteration are copies of the checks of the body. They stay separate in the script, one per iteration, so that each is a small question, and the report merges them: one diagnostic per line of code, with the counterexample of the first iteration that fails.
+
+`array_sum()` of a `list<int>` is a recursive definition, rendered once and only in a script that uses it:
+
+```smt
+(define-fun-rec sum_List_Int ((a (Array Int Int)) (n Int)) Int (ite (<= n 0) 0 (+ (sum_List_Int a (- n 1)) (select a (- n 1)))))
+```
+
+It is exact for a list of any length, so it needs no bound of its own. In the body, a `contracts.overflow` obligation states that every partial sum is an `int` (`forall j in 1..len`, with a pattern on the sum), because PHP switches to a float as soon as a partial sum leaves the range, even when a later element would bring it back. In a contract it has none, like `+`. For an input list whose elements have both bounds, the domain also carries `lo * n <= sum of the first n <= hi * n`, which is true by induction and which Z3 does not derive.
+
+**The solver option.** A script with a loop or an `array_sum()` starts with `(set-option :combined_solver.solver2_timeout 1000)`. The scripts use `push` and `pop`, so Z3 runs its incremental solver, which gives up on some checks with quantifiers (the domain of a list) that its other solver settles in a tenth of a second. With the option, Z3 changes solver after one second on a check. A check that is still `unknown` is asked again once, alone, with the default options and the whole `timeoutMs`, because the option can lose a refutation that the incremental solver finds. Both solvers are sound and only `sat` and `unsat` are read, so neither changes what an answer means. Scripts of methods without a loop or an `array_sum()` are unchanged, and so are their cached answers.
 ## Constants, `self` and `$this`
 
 None of these adds a theory. `self::` and `static::` are resolved to the declaring class before translation, `static::` only where late binding cannot change the target. A class constant is read from PHPStan's reflection: its initializer is folded to a type, and a type with a single int, float, string, bool or enum case value becomes that literal in the script. No symbol is declared for it.
@@ -214,6 +233,8 @@ After the body and the postconditions, one more check asks whether the returned 
 | `$l[] = $x`, `[...$l, $x]`, `[a, b]` | `store` at the old length with `len + 1`; a literal is a chain of `store` |
 | `in_array($x, $l, true)` | an `exists` over the keys below the length, with `===` (`fp.eq` for floats) |
 | `$a === $b` on two lists | the same length and a `forall` over the keys below it |
+| `foreach ($l as $i => $x)` | the body once per iteration, under `k < len`, with `$i := k` and `$x := (select items k)`, and a `contracts.loopBound` obligation `len <= N` |
+| `array_sum($l)` on a `list<int>` | `sum_List_Int items len`, with an overflow obligation on every partial sum in the body |
 | `array{net: int, vat: int}`, `$s['net']` | a datatype with one accessor per key, and the accessor |
 | `$enum->value`, `$enum->name` | functions defined by `ite` over the constructors |
 | `Enum::from($v)`, `Enum::tryFrom($v)` | an `ite` over the backing values, with a `contracts.invalidEnumValue` check for `from()`, and a nullable result for `tryFrom()` |

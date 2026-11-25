@@ -119,6 +119,8 @@ parameters:
 	contracts:
 		z3Binary: z3
 		timeoutMs: 10000
+		loopUnroll: 10
+		maxLoopUnroll: 100
 		cacheDirectory: %tmpDir%/contracts
 ```
 
@@ -126,6 +128,8 @@ parameters:
 |---|---|---|
 | `z3Binary` | `z3` | Executable name, looked up in `PATH`, or an absolute path. At the default value, the build installed by `phpstan-contracts-install-z3` takes precedence over `PATH`. |
 | `timeoutMs` | `10000` | Time Z3 may spend on each individual check. When it runs out, the check is reported as `contracts.unknown`. |
+| `loopUnroll` | `10` | Iterations unrolled for a `foreach` over a list that has no bound in a `#[Requires]`, such as `count($lines) <= 50`. A list that can have more elements is reported as `contracts.loopBound`. From `1` to `maxLoopUnroll`. See [Loops](writing-contracts.md#loops). |
+| `maxLoopUnroll` | `100` | The most iterations that one loop, or the product of the bounds of nested loops, may be unrolled. A method over the budget is rejected before Z3 runs. From `1` to `10000`. |
 | `cacheDirectory` | `%tmpDir%/contracts` | Where the answers of Z3 are remembered between runs. `null` turns the cache off. See [Cost](#cost). |
 
 If the executable cannot be found, every checked method reports `contracts.solver` with the name that was looked up.

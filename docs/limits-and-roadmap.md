@@ -4,7 +4,7 @@
 
 For every input that satisfies the native parameter types, the PHPDoc ranges and every `#[Requires]`, a method that passes (in an enum or a readonly data class, `$this` is one of the inputs):
 
-1. runs without integer overflow, division by zero, unhandled `match`, invalid `Enum::from()` value, unrepresentable `(int)` cast, missing `return` or read of a missing list key,
+1. runs without integer overflow, division by zero, unhandled `match`, invalid `Enum::from()` value, unrepresentable `(int)` cast, missing `return`, read of a missing list key or a loop that visits more elements than were checked,
 2. throws an exception only where a `#[Throws]` covers its class and the condition of every `#[Throws]` that covers it holds, and, for a `#[Throws(E::class, when: ...)]` with a condition, throws an `E` whenever the condition holds,
 3. returns a value that its declared return type allows, and
 4. satisfies every `#[Ensures]` when it returns.
@@ -23,7 +23,7 @@ The guarantee is **fail-closed**. A construct the translator does not know is re
 - **Calls and `new` are limited to the same file.** A verified method can call a method declared in the same file, whose body is then translated in place. A call to a method of another file is rejected, because PHPStan's result cache would not redo the proof when only that method's body changes. For the same reason, `new X(...)` is only accepted when the constructor of `X` is declared in the same file: the proof relies on its body being empty. A rule that spans files has to be a single self-contained method, or wait for modular verification.
 - **No model of the environment.** Time, randomness, I/O, memory and execution time are outside the verified subset. Methods that need them are rejected, not approximated.
 - **The translator is not itself verified.** It is tested (see [Testing](testing.md)): its PHP semantics are compared with PHP, every diagnostic has a fixture, and every counterexample is replayed in PHP. A test suite finds bugs, it does not prove their absence, and the answer of Z3 is taken at face value.
-- **No termination argument is needed today**, because loops are rejected. It will be needed the day loops are supported.
+- **Loops are unrolled up to a bound, and the bound is part of the proof.** A `foreach` over a list always terminates, so it needs no termination argument. It is proven by unrolling it up to a bound, taken from a `#[Requires('count($lines) <= 20')]` or from `contracts.loopUnroll`, and the proof reports `contracts.loopBound` when the list can have more elements, instead of assuming it cannot. A bound that a `#[Requires]` gives is a precondition like any other: a caller that passes a longer list breaks it, and nobody checks that yet (see the first item above). `while`, `for` and `do` are rejected because they need a termination argument, which the extension cannot state or check yet.
 
 ## What is still missing, and why
 
@@ -35,7 +35,7 @@ SMT solvers already reason about integers, bit-vectors, floating point, strings,
 
 | Type or feature | Encoding | What makes it more than a type mapping |
 |---|---|---|
-| general arrays `array<K, V>`, lists of lists, and loops over lists | an SMT array plus a length for lists, which is done | `list<T>` and array shapes are supported, with the operations that do not iterate (`count()`, reads by index, appending, `in_array()`). Arbitrary keys need the exact PHP rules for key conversion (`"1"` becomes `1`) and for ordering. Anything that visits every element needs a loop. |
+| general arrays `array<K, V>`, lists of lists, and the array functions that take a closure | an SMT array plus a length for lists, which is done | `list<T>` and array shapes are supported, with `count()`, reads by index, appending, `in_array()`, `foreach` over a list and `array_sum()` over a `list<int>`. Arbitrary keys need the exact PHP rules for key conversion (`"1"` becomes `1`) and for ordering. `array_map()` and `array_filter()` need closures, which are not supported. |
 | calls to methods of other files, and `new` of classes whose constructor is in another file | an uninterpreted function constrained by the callee's contract | Needs the callee's contract instead of its body, and the call-site check described above. Calls within a file are done, by translating the callee's body, and so is `new` of a class whose constructor is in the same file. |
 | `DateTimeImmutable`, `Money` and other library value objects | a record, as for data classes | The class has methods. The methods would need to be modelled or replaced by contracts. |
 | `substr()`, `strpos()`, `trim()`, `strtolower()`, `sprintf()` | the string theory has most of the primitives | Each PHP function has its own edge cases (negative offsets, locale, multibyte). Each one is a decision to reproduce its semantics exactly. |
@@ -47,7 +47,7 @@ SMT solvers already reason about integers, bit-vectors, floating point, strings,
 |---|---|
 | Multiplying two variables is non-linear integer arithmetic, which is undecidable. | Z3 may answer `unknown`. Bounded ranges make most real cases work, as the examples show, and an example of a failing case is [documented](real-world-examples.md#when-the-solver-gives-up). |
 | Floating-point multiplication and division are decidable but expensive, because the solver reasons about every bit of the mantissa. | A method with a few operations is decided in seconds. Two float variables multiplied together may not be decided at all within a reasonable time, see [what is slow](types.md#what-is-slow). |
-| Loops. Whether a loop terminates, and what it computes, cannot be decided in general. | Unbounded loops need an invariant and a variant supplied by the author. Bounded loops can be unrolled, which is decidable but multiplies the size of the problem. |
+| Loops. Whether a loop terminates, and what it computes, cannot be decided in general. | Unbounded loops need an invariant and a variant supplied by the author. Bounded loops are unrolled, which is decidable but multiplies the size of the problem by the bound: a loop with a product of two variables per iteration is comfortable up to 20 iterations, and two nested loops of 10 elements take 26 seconds (see [Loops](writing-contracts.md#the-cost)). |
 | Quantifiers, such as "for all elements of the array", combined with arithmetic. | Undecidable in general. Solvers use heuristics and answer `unknown` when they fail. |
 | String constraints that mix concatenation, length and replacement. | Hard, and undecidable for some combinations of operations. The operations supported today (length, prefix, suffix, containment, concatenation) are the ones that string solvers handle best. |
 
@@ -67,7 +67,7 @@ The whitelist exists for this reason. Each item that is added is a deliberate de
 
 ### The practical answer
 
-Most business rules fit a core of amounts, counts, flags, statuses, short strings and small immutable objects. Extracting that core into a method over such values, as shown in [Structuring real code](real-world-examples.md#structuring-real-code-for-verification), covers the rules in the examples. What does not fit, such as a rule that sums the lines of an order, is the next real frontier: lists are supported, but a rule that visits every element needs loops.
+Most business rules fit a core of amounts, counts, flags, statuses, short strings and small immutable objects. Extracting that core into a method over such values, as shown in [Structuring real code](real-world-examples.md#structuring-real-code-for-verification), covers the rules in the examples. A rule that sums the lines of an order or splits a discount over them fits too, as a `foreach` over a list with a bound on its length, see [Loops](writing-contracts.md#loops). What does not fit is a rule over an unbounded number of elements, which needs an invariant.
 
 ## Roadmap
 
@@ -75,7 +75,12 @@ These are directions in order of value for the effort, not commitments or dates.
 
 1. **Modular verification.** Check `#[Requires]` at every call site, and let a verified method call verified methods of other files using their contracts. Calls within a file already work, by translating the callee's body, and check the callee's `#[Requires]`. This closes the largest gap above.
 2. **A persistent Z3 process.** One long-lived process per PHPStan worker, reset between methods, to remove most of the process start-up cost that dominates a run for integer, string and data class methods (see [How it works](how-it-works.md#what-runs-where)). The cache of proofs keyed by script hash, which is the complement, is done: see [Cost](getting-started.md#cost).
-3. **Bounded loops over lists**, as an unrolling with an explicit bound, then with `#[Invariant]`. Lists, array shapes, reads by index, appending and `in_array()` are done; `foreach`, `array_map()`, `array_sum()` and the other array functions are the next step.
+3. **Invariants for unbounded loops**, written by the author as `#[Invariant]` and checked as a base case, a step and an exit, so that a list of any length is covered instead of the first `N` elements. Measured on hand-written scripts in the encoding the translator would produce: a linear sum, with the invariant `$total >= 0 && $total <= $i * 1000000`, is decided in all four of its checks in 97 ms, and the discount split over weights, whose invariant needs prefix sums and a division, is `unknown` on all three of its checks after 90 s. An invariant is cheap for a linear accumulation and out of reach for the split, and it needs things the contract language does not have yet (the loop counter, prefix sums, a library of lemmas that must each be justified). Unrolling covers the split up to 5 lines and the total of an order up to 20, with no annotation beyond the bound. `foreach` over a list and `array_sum()` over a `list<int>` are done; `while`, `for`, `do`, `array_map()` and the other array functions are the next step.
 4. **Calls to methods of data classes and enums declared in other files**, through their own contracts, which follows from modular verification. Within a file, `$this->level()` and `$other->level()` already work.
 5. **More string functions**, one at a time, each with its edge cases decided.
 6. **Cross-checking with a second solver** on `unsat` results, to reduce the trust placed in one solver.
+
+Smaller items, from the measurements behind the loops:
+
+- **Z3's fallback solver for every method.** A script with a loop or an `array_sum()` starts with `(set-option :combined_solver.solver2_timeout 1000)`, and a check that still comes back `unknown` is asked again once, alone, with the default options. Without the option, Z3's incremental solver gave up on checks that the other one settles in a tenth of a second: the discount split over weights at 10 lines went from 11 `unknown` checks in 127 s to none in 25 s, with 10 s per check. The same option on the bundled examples lowered the Z3 time from 90 s to 54 s and proved `SolverLimits::offsetDivisibility`, which is documented as the example of a statement Z3 does not settle. It is only on for loops for now, so that no verdict outside them changes, and adopting it for every method is in the backlog. Only `sat` and `unsat` are ever read, so this changes which questions get an answer and never what an answer means.
+- **One check per source line of a loop.** The copies of a check, one per iteration, are separate questions in the script and one diagnostic in the report. Merging them is up to 20 times faster on a body that is easy for Z3 (the total of an order at 50 lines: 33 s to 1.6 s) and loses proofs on one that is hard (the split went from no undecided check to two), so the separate checks stay.
