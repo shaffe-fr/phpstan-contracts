@@ -9,6 +9,8 @@ parameters:
 		methodBudgetMs: 60000
 		runBudgetMs: 0
 		rememberUndecided: true
+		costWarnings: false
+		timingReport: null
 
 parametersSchema:
 	contracts: structure([
@@ -21,6 +23,8 @@ parametersSchema:
 		methodBudgetMs: int()
 		runBudgetMs: int()
 		rememberUndecided: bool()
+		costWarnings: bool()
+		timingReport: schema(string(), nullable())
 	])
 
 services:
@@ -43,6 +47,10 @@ services:
 	- PhpstanContracts\Report\ValueFormatter
 	- PhpstanContracts\Report\CounterexampleFormatter
 	-
+		class: PhpstanContracts\Report\TimingReport
+		arguments:
+			path: %contracts.timingReport%
+	-
 		class: PhpstanContracts\Solver\ProofCache
 		arguments:
 			directory: %contracts.cacheDirectory%
@@ -64,6 +72,8 @@ services:
 			methodBudgetMs: %contracts.methodBudgetMs%
 			loopUnroll: %contracts.loopUnroll%
 			maxLoopUnroll: %contracts.maxLoopUnroll%
+			costWarnings: %contracts.costWarnings%
+			parallelism: %contracts.parallelism%
 		tags:
 			- phpstan.rules.rule
 	-

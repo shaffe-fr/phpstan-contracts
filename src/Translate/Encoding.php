@@ -51,6 +51,18 @@ final class Encoding
     /** @var array<'product'|'division'|'modulo', string> the first operation of each non-linear kind, as written */
     private array $nonLinearOperations = [];
 
+    /** @var array<int, int> the nesting depth of each unrolled loop by line, 0 for an outermost one */
+    private array $loopDepths = [];
+
+    /** @var int the copies of a loop body that the script holds, the iterations of the inner loops counted in each iteration of the outer ones */
+    private int $unrolledIterations = 0;
+
+    /** @var int the non-linear operations met while translating, once per copy of a loop body */
+    private int $nonLinearCount = 0;
+
+    /** @var int the divisions and modulos by a variable met inside an unrolled loop, once per copy of its body */
+    private int $divisionsInLoops = 0;
+
     /** @var array{string, int, string}|null the length of the list that drives the outermost unrolling, its bound and the list as written */
     private ?array $splitLength = null;
 
@@ -309,6 +321,7 @@ final class Encoding
     public function enterIteration(int $line, int $iteration, int $bound): void
     {
         $this->loops[] = [$line, $iteration, $bound];
+        ++$this->unrolledIterations;
     }
 
     public function leaveIteration(): void
@@ -332,6 +345,7 @@ final class Encoding
      */
     public function noteUnrolledLoop(int $line, LoopBound $loop): void
     {
+        $this->loopDepths[$line] = max($this->loopDepths[$line] ?? 0, count($this->loops));
         $known = $this->unrolledLoops[$line] ?? null;
         if ($known === null || $known->iterations < $loop->iterations) {
             $this->unrolledLoops[$line] = $loop;
@@ -379,6 +393,43 @@ final class Encoding
     public function noteNonLinear(string $kind, string $source): void
     {
         $this->nonLinearOperations[$kind] ??= $source;
+        ++$this->nonLinearCount;
+        if ($kind !== 'product' && $this->loops !== []) {
+            ++$this->divisionsInLoops;
+        }
+    }
+
+    /**
+     * @return array<int, int> the nesting depth of each unrolled loop by line, 0 for an outermost one
+     */
+    public function loopDepths(): array
+    {
+        return $this->loopDepths;
+    }
+
+    /**
+     * The copies of a loop body in the script: a loop of 5 iterations holding a loop of 5 has 30.
+     */
+    public function unrolledIterations(): int
+    {
+        return $this->unrolledIterations;
+    }
+
+    /**
+     * The non-linear operations in the translated body, one per copy of a loop body that holds them.
+     */
+    public function nonLinearCount(): int
+    {
+        return $this->nonLinearCount;
+    }
+
+    /**
+     * The divisions and modulos by a variable inside the copies of loop bodies, which are what makes
+     * a proof over a list of symbolic length hard: each one sits behind the choice of the length.
+     */
+    public function divisionsInLoops(): int
+    {
+        return $this->divisionsInLoops;
     }
 
     /**

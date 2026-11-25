@@ -57,15 +57,17 @@ final class MethodSolver
             }
         }
 
+        $started = $this->clock->nowMs();
         $results = count($skipped) === $checkCount
             ? array_fill(0, $checkCount, new SolverResult(Verdict::Unknown, [], UnknownReason::Remembered))
             : $this->runner->run($this->renderer->render($encoding, $skipped), $checkCount, $budget->deadlineMs(), $skipped);
+        $timings = ['main' => $this->clock->nowMs() - $started, 'retry' => 0, 'split' => 0];
 
         $undecidedLengths = [];
         /** @var array<int, true> $settled the checks that were tried in full and are still `unknown` */
         $settled = [];
         if ($encoding->needsSolverFallback) {
-            [$results, $undecidedLengths, $settled] = $this->retryUndecided($encoding, $results, $budget);
+            [$results, $undecidedLengths, $settled] = $this->retryUndecided($encoding, $results, $budget, $timings);
         } else {
             foreach ($results as $check => $result) {
                 if ($result->verdict === Verdict::Unknown && $result->reason === null) {
@@ -82,7 +84,7 @@ final class MethodSolver
             }
         }
 
-        return new MethodAnswer($results, $undecidedLengths);
+        return new MethodAnswer($results, $undecidedLengths, $timings['main'], $timings['retry'], $timings['split'], $budget->isExhausted());
     }
 
     /**
@@ -100,9 +102,10 @@ final class MethodSolver
      * each of them gets no more than what is left.
      *
      * @param list<SolverResult> $results
+     * @param array{main: int, retry: int, split: int} $timings the measured milliseconds, to which the time of the retries and of the splits is added
      * @return array{list<SolverResult>, array<int, list<int|string>>, array<int, true>} the results, by check number the cases of the split that were not decided, and the checks left `unknown` by the whole strategy
      */
-    private function retryUndecided(Encoding $encoding, array $results, MethodBudget $budget): array
+    private function retryUndecided(Encoding $encoding, array $results, MethodBudget $budget, array &$timings): array
     {
         $undecided = [];
         $settled = [];
@@ -119,7 +122,12 @@ final class MethodSolver
             }
             try {
                 $single = $this->renderer->renderSingleCheck($encoding, $check);
-                $results[$check] = $this->runner->run($single, 1, $budget->deadlineMs())[0];
+                $started = $this->clock->nowMs();
+                try {
+                    $results[$check] = $this->runner->run($single, 1, $budget->deadlineMs())[0];
+                } finally {
+                    $timings['retry'] += $this->clock->nowMs() - $started;
+                }
                 if ($results[$check]->verdict !== Verdict::Unknown || $results[$check]->reason !== null) {
                     continue;
                 }
@@ -133,12 +141,17 @@ final class MethodSolver
                     $results[$check] = $notTried;
                     continue;
                 }
-                $outcome = $this->runner->runSplit(
-                    $single,
-                    $cases,
-                    array_map(fn ($case): string => $this->renderer->renderSingleCheck($encoding, $check, $case), $cases),
-                    $budget->deadlineMs(),
-                );
+                $started = $this->clock->nowMs();
+                try {
+                    $outcome = $this->runner->runSplit(
+                        $single,
+                        $cases,
+                        array_map(fn ($case): string => $this->renderer->renderSingleCheck($encoding, $check, $case), $cases),
+                        $budget->deadlineMs(),
+                    );
+                } finally {
+                    $timings['split'] += $this->clock->nowMs() - $started;
+                }
             } catch (RunBudgetExhausted) {
                 $results[$check] = $notTried;
                 continue;

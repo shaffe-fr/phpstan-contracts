@@ -6,8 +6,11 @@ namespace PhpstanContracts\Rule;
 
 use PhpstanContracts\Contract\ContractReader;
 use PhpstanContracts\Exception\VerificationRejected;
+use PhpstanContracts\Report\CostPrediction;
 use PhpstanContracts\Report\CounterexampleFormatter;
+use PhpstanContracts\Report\TimingReport;
 use PhpstanContracts\Report\UnknownExplainer;
+use PhpstanContracts\Solver\MethodAnswer;
 use PhpstanContracts\Solver\MethodSolver;
 use PhpstanContracts\Solver\RunBudgetExhausted;
 use PhpstanContracts\Solver\ScriptRenderer;
@@ -49,10 +52,13 @@ final class VerifyContractRule implements Rule
         private readonly Z3Runner $z3,
         private readonly MethodSolver $solver,
         private readonly CounterexampleFormatter $formatter,
+        private readonly TimingReport $timingReport,
         private readonly int $timeoutMs,
         private readonly int $methodBudgetMs,
         int $loopUnroll = 10,
         int $maxLoopUnroll = 100,
+        private readonly bool $costWarnings = false,
+        private readonly ?int $parallelism = null,
     ) {
         // The translation uses these two numbers; they are checked here, where the other settings of the rule are.
         LoopBounds::validateLimits($loopUnroll, $maxLoopUnroll);
@@ -81,25 +87,41 @@ final class VerifyContractRule implements Rule
             }
 
             $encoding = $this->encoder->encode($node, $scope, $contract);
-            $answer = $this->solver->solve($encoding);
+            $prediction = CostPrediction::of($encoding, $this->renderer->checkCount($encoding), $this->timeoutMs, $this->methodBudgetMs, $this->parallelism);
+            $costly = $this->costWarnings && $prediction->isCostly()
+                ? [$this->error($this->explainer->costly($prediction, $encoding), 'contracts.costly', $method->getStartLine())]
+                : [];
+            $label = ($scope->getClassReflection()?->getName() ?? '') . '::' . $method->name->toString();
+            try {
+                $answer = $this->solver->solve($encoding);
+            } catch (RunBudgetExhausted $exhausted) {
+                $this->timingReport->append($label, $scope->getFile(), $prediction, null, 'runExhausted');
+
+                return [...$costly, $this->error($this->runBudgetMessage($exhausted, $prediction), 'contracts.unknown', $method->getStartLine())];
+            } catch (SolverFailure $failure) {
+                return [...$costly, $this->error($failure->getMessage(), 'contracts.solver', $method->getStartLine())];
+            }
         } catch (VerificationRejected $rejected) {
             return [$this->error($rejected->getMessage(), $rejected->identifier, $rejected->errorLine)];
-        } catch (RunBudgetExhausted $exhausted) {
-            return [$this->error($this->runBudgetMessage($exhausted), 'contracts.unknown', $method->getStartLine())];
-        } catch (SolverFailure $failure) {
-            return [$this->error($failure->getMessage(), 'contracts.solver', $method->getStartLine())];
         }
 
-        return $this->interpret($encoding, $answer->results, $method->getStartLine(), $answer->undecidedLengths);
+        $this->timingReport->append($label, $scope->getFile(), $prediction, $answer, match (true) {
+            $this->methodBudgetMs === 0 => 'unlimited',
+            $answer->budgetExhausted || $answer->notTried() > 0 => 'exhausted',
+            default => 'within',
+        });
+
+        return [...$costly, ...$this->interpret($encoding, $answer, $prediction, $method->getStartLine())];
     }
 
     /**
-     * @param list<SolverResult> $results
-     * @param array<int, list<int|string>> $undecidedLengths by check number, the cases of the split by length that were not decided
      * @return list<IdentifierRuleError>
      */
-    private function interpret(Encoding $encoding, array $results, int $methodLine, array $undecidedLengths = []): array
+    private function interpret(Encoding $encoding, MethodAnswer $answer, CostPrediction $prediction, int $methodLine): array
     {
+        $results = $answer->results;
+        $undecidedLengths = $answer->undecidedLengths;
+        $forecast = $this->explainer->forecast($prediction, $answer->notTried());
         $cursor = 0;
         $errors = [];
 
@@ -138,7 +160,7 @@ final class VerifyContractRule implements Rule
                     $obligation->line,
                 );
             } elseif ($result->verdict === Verdict::Unknown) {
-                $errors[] = $this->undecided($encoding, $this->claimOf($obligation), $obligation->line, $result, $undecidedLengths[$check] ?? []);
+                $errors[] = $this->undecided($encoding, $this->claimOf($obligation), $obligation->line, $result, $forecast, $undecidedLengths[$check] ?? []);
             }
         }
 
@@ -157,7 +179,7 @@ final class VerifyContractRule implements Rule
                     $ensures->line,
                 );
             } elseif ($result->verdict === Verdict::Unknown) {
-                $errors[] = $this->undecided($encoding, sprintf('#[Ensures(\'%s\')]', $ensures->source), $ensures->line, $result, $undecidedLengths[$check] ?? []);
+                $errors[] = $this->undecided($encoding, sprintf('#[Ensures(\'%s\')]', $ensures->source), $ensures->line, $result, $forecast, $undecidedLengths[$check] ?? []);
             }
         }
 
@@ -177,7 +199,7 @@ final class VerifyContractRule implements Rule
                     $throws->line,
                 );
             } elseif ($result->verdict === Verdict::Unknown) {
-                $errors[] = $this->undecided($encoding, $declaration, $throws->line, $result, $undecidedLengths[$check] ?? []);
+                $errors[] = $this->undecided($encoding, $declaration, $throws->line, $result, $forecast, $undecidedLengths[$check] ?? []);
             }
         }
 
@@ -197,7 +219,7 @@ final class VerifyContractRule implements Rule
                     $returnTypeCheck->line,
                 );
             } elseif ($result->verdict === Verdict::Unknown) {
-                $errors[] = $this->undecided($encoding, $this->claimOf($returnTypeCheck), $returnTypeCheck->line, $result, $undecidedLengths[$check] ?? []);
+                $errors[] = $this->undecided($encoding, $this->claimOf($returnTypeCheck), $returnTypeCheck->line, $result, $forecast, $undecidedLengths[$check] ?? []);
             }
         }
 
@@ -382,12 +404,12 @@ final class VerifyContractRule implements Rule
     /**
      * @param list<int|string> $undecidedLengths the cases of the split by length that were not decided: lengths, and the description of the case outside the bound
      */
-    private function undecided(Encoding $encoding, string $claim, int $line, SolverResult $result, array $undecidedLengths = []): IdentifierRuleError
+    private function undecided(Encoding $encoding, string $claim, int $line, SolverResult $result, string $forecast, array $undecidedLengths = []): IdentifierRuleError
     {
         $message = $this->unknownMessage($result, $claim);
         $cost = $this->explainer->explain($encoding, $undecidedLengths);
 
-        return $this->error($cost === '' ? $message : $message . ' ' . $cost, 'contracts.unknown', $line);
+        return $this->error(implode(' ', array_filter([$message, $cost, $forecast], static fn (string $part): bool => $part !== '')), 'contracts.unknown', $line);
     }
 
     /**
@@ -413,12 +435,13 @@ final class VerifyContractRule implements Rule
         };
     }
 
-    private function runBudgetMessage(RunBudgetExhausted $exhausted): string
+    private function runBudgetMessage(RunBudgetExhausted $exhausted, CostPrediction $prediction): string
     {
         return sprintf(
-            'Not verified: the solver budget of this run is exhausted (%d ms spent, contracts.runBudgetMs is %d ms), so Z3 was not asked about this method. Raise contracts.runBudgetMs, or set it to 0 for no limit. The next run starts again with a fresh budget.',
+            'Not verified: the solver budget of this run is exhausted (%d ms spent, contracts.runBudgetMs is %d ms), so Z3 was not asked about this method. Raise contracts.runBudgetMs, or set it to 0 for no limit. The next run starts again with a fresh budget. %s',
             $exhausted->spentMs,
             $exhausted->limitMs,
+            $this->explainer->forecast($prediction, $prediction->checks),
         );
     }
 

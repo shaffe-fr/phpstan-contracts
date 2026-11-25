@@ -19,7 +19,7 @@ final class Z3Runner implements CheckRunner
     private const MAXIMUM_PARALLELISM = 1000;
 
     /** Z3 processes per case of a split, each with its own random seed: the time Z3 takes has a heavy tail. */
-    private const SEEDS = 2;
+    public const SEEDS = 2;
 
     /** Z3 options of a case of a split. The first only changes how Z3 searches a non-linear problem, never what an answer means. */
     private const SPLIT_OPTIONS = ['smt.arith.nl.horner=false'];
