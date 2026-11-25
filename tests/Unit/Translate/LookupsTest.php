@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace PhpstanContracts\Tests\Unit\Translate;
 
-use PhpstanContracts\Tests\Fixtures\Lookups\LookupAliases;
 use PhpstanContracts\Tests\Fixtures\Lookups\LookupBase;
 use PhpstanContracts\Tests\Fixtures\Lookups\LookupChild;
 use PhpstanContracts\Tests\Fixtures\Lookups\LookupMarker;
@@ -58,13 +57,6 @@ final class LookupsTest extends PHPStanTestCase
         $this->lookups->hasConstant(new Name\FullyQualified('App\LIMIT'), null);
 
         self::assertSame(['function:app\abs', 'constant:App\LIMIT'], $this->lookups->drain()->symbols);
-    }
-
-    public function testTypeAliasImportsRecordTheClassTheyComeFrom(): void
-    {
-        $this->lookups->recordTypeAliasImports(self::createReflectionProvider()->getClass(LookupChild::class));
-
-        self::assertSame(self::filesOf(LookupAliases::class), $this->lookups->drain()->files);
     }
 
     public function testACapturedSetReplaysWhatTheFirstLookupRecorded(): void

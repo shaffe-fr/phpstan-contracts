@@ -47,6 +47,7 @@ final class TypeMapper
         private readonly EnumRegistry $enums,
         private readonly Lookups $lookups,
         private readonly SourceFiles $sources,
+        private readonly PhpDocReads $phpDocs,
     ) {
     }
 
@@ -267,8 +268,8 @@ final class TypeMapper
     private function buildRecord(ClassReflection $class, int $line): VarSpec
     {
         $className = $class->getName();
-        // The PHPDoc types of its properties can use aliases imported from other classes.
-        $this->lookups->recordTypeAliasImports($class);
+        // The PHPDoc types of its properties can name constants and aliases of other classes.
+        $this->phpDocs->record($class);
 
         if ($class->isInterface() || $class->isAbstract() || $class->isAnonymous() || $class->isEnum()) {
             throw new VerificationRejected(

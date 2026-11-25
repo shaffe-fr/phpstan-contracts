@@ -35,6 +35,7 @@ final class MethodEncoder
         private readonly InitializerExprTypeResolver $initializers,
         private readonly ContractReader $contracts,
         private readonly SourceFiles $sources,
+        private readonly PhpDocReads $phpDocs,
         private readonly int $loopUnroll = 10,
         private readonly int $maxLoopUnroll = 100,
     ) {
@@ -56,9 +57,8 @@ final class MethodEncoder
 
         $declaringClass = $scope->getClassReflection();
         if ($declaringClass !== null) {
-            // Its parents and traits can be in other files, and so can the aliases its PHPDoc imports.
-            $this->lookups->recordClass($declaringClass);
-            $this->lookups->recordTypeAliasImports($declaringClass);
+            // Its parents and traits can be in other files, and so can the constants and aliases its PHPDoc names.
+            $this->phpDocs->record($declaringClass);
         }
         $thisRefusal = $method->isStatic()
             ? 'There is no $this in a static method.'
@@ -170,6 +170,7 @@ final class MethodEncoder
             $this->enums,
             $this->lookups,
             $this->sources,
+            $this->phpDocs,
             $this->initializers,
             $this->contracts,
             $scope->getFile(),

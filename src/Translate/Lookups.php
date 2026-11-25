@@ -115,19 +115,6 @@ final class Lookups
     }
 
     /**
-     * `@phpstan-import-type X from Y` makes the PHPDoc types of a class depend on Y,
-     * whose file is not otherwise read.
-     */
-    public function recordTypeAliasImports(ClassReflection $class): void
-    {
-        foreach ([$class, ...array_values($class->getAncestors())] as $ancestor) {
-            foreach ($ancestor->getResolvedPhpDoc()?->getTypeAliasImportTags() ?? [] as $import) {
-                $this->hasClass($import->getImportedFrom());
-            }
-        }
-    }
-
-    /**
      * Runs $compute and returns its result with what it read, which is also recorded where
      * the call is made. What it read before throwing is recorded too.
      *

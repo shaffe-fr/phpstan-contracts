@@ -45,6 +45,7 @@ final class MethodInliner
         private readonly EnumRegistry $enums,
         private readonly Lookups $lookups,
         private readonly SourceFiles $sources,
+        private readonly PhpDocReads $phpDocs,
         private readonly InitializerExprTypeResolver $initializers,
         private readonly ContractReader $contracts,
         private readonly string $file,
@@ -105,8 +106,8 @@ final class MethodInliner
         }
 
         $owner = $method->getDeclaringClass();
-        // The PHPDoc types of its parameters and return value can use aliases imported from other classes.
-        $this->lookups->recordTypeAliasImports($owner);
+        // The PHPDoc types of its parameters and return value can name constants and aliases of other classes.
+        $this->phpDocs->record($owner);
         $label = sprintf('%s::%s()', $owner->getDisplayName(), $method->getName());
 
         $this->checkCallable($class, $method, $owner, $callerScope, $label, $onAnObject, $lateStatic, $line);

@@ -31,6 +31,7 @@ services:
 	- PhpstanContracts\Contract\ContractReader
 	- PhpstanContracts\Translate\Lookups
 	- PhpstanContracts\Translate\SourceFiles
+	- PhpstanContracts\Translate\PhpDocReads
 	- PhpstanContracts\Translate\ConstantGuard
 	- PhpstanContracts\Translate\EnumRegistry
 	- PhpstanContracts\Translate\TypeMapper
