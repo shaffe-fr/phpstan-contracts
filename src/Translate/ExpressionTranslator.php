@@ -82,6 +82,7 @@ final class ExpressionTranslator
      * @param int|null $fixedLine line reported for contract expressions, whose own line numbers are meaningless
      * @param list<string> $calls in an inlined method, the calls that lead to it from the verified method
      * @param string|null $file the analysed file, the only one whose constructor bodies `new` may rely on
+     * @param string|null $statelessThis the class whose `$this` is a value without state: it can only be the receiver of a call
      */
     public function __construct(
         private readonly Encoding $encoding,
@@ -97,6 +98,7 @@ final class ExpressionTranslator
         private readonly array $calls = [],
         private readonly ?ThrowPolicy $throws = null,
         private readonly ?string $file = null,
+        private readonly ?string $statelessThis = null,
     ) {
         $this->printer = new Standard();
     }
@@ -347,6 +349,7 @@ final class ExpressionTranslator
         }
         if ($expr->name === 'this') {
             // Present only in a method of an enum or a readonly data class, see MethodEncoder.
+            // A stateless class has no `$this` term: it is only the receiver of a call, see methodCall().
             return $env['this'] ?? throw $this->reject($expr, $this->thisRefusal);
         }
 
@@ -1629,6 +1632,10 @@ final class ExpressionTranslator
         }
         $this->requireInliner($expr);
 
+        if ($this->statelessThis !== null && $expr->var instanceof Variable && $expr->var->name === 'this') {
+            return $this->inline($expr, $this->statelessThis, $expr->name->toString(), null, false, $env, $pc, $this->statelessThis);
+        }
+
         $receiver = $this->translate($expr->var, $env, $pc);
         $className = match (true) {
             $receiver->sort->enum !== null => $receiver->sort->enum->className,
@@ -1643,7 +1650,7 @@ final class ExpressionTranslator
     /**
      * @param array<string, Term> $env
      */
-    private function inline(Expr\MethodCall|StaticCall $call, string $className, string $method, ?Term $receiver, bool $lateStatic, array $env, Term $pc): Term
+    private function inline(Expr\MethodCall|StaticCall $call, string $className, string $method, ?Term $receiver, bool $lateStatic, array $env, Term $pc, ?string $statelessThis = null): Term
     {
         $inliner = $this->requireInliner($call);
         if ($call->isFirstClassCallable()) {
@@ -1662,6 +1669,7 @@ final class ExpressionTranslator
             $call->args,
             $env,
             $pc,
+            $statelessThis,
         );
     }
 

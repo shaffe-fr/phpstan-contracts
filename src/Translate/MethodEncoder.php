@@ -16,6 +16,7 @@ use PhpParser\Node\Stmt\ClassMethod;
 use PhpParser\NodeFinder;
 use PHPStan\Analyser\Scope;
 use PHPStan\Node\InClassMethodNode;
+use PHPStan\Reflection\ClassReflection;
 use PHPStan\Reflection\InitializerExprTypeResolver;
 use PHPStan\Reflection\ReflectionProvider;
 use PHPStan\Type\VerbosityLevel;
@@ -58,6 +59,8 @@ final class MethodEncoder
             ? 'There is no $this in a static method.'
             : 'Object state ($this) is not part of the verified subset yet.';
 
+        $statelessThis = null;
+
         // `$this` is an implicit first parameter: its modelled properties are public readonly
         // and cannot change during the call, and reading any other property is rejected. It
         // is declared only when used, so that the counterexamples of other instance methods
@@ -67,10 +70,20 @@ final class MethodEncoder
                 $thisSpec = $this->types->mapClass($declaringClass->getName(), $method->getStartLine());
             } catch (VerificationRejected $notData) {
                 $thisSpec = null;
-                $thisRefusal = sprintf(
-                    'Object state ($this) is only part of the verified subset in enums and readonly data classes. %s',
-                    $notData->getMessage(),
-                );
+                $state = self::firstInstanceProperty($declaringClass);
+                if ($state === null) {
+                    // No state: `$this` is a value that can only be the receiver of a call, whose
+                    // dispatch MethodInliner checks like the one of any other call.
+                    $statelessThis = $declaringClass->getName();
+                    $thisRefusal = self::statelessRefusal($statelessThis);
+                } else {
+                    $thisRefusal = sprintf(
+                        'Object state ($this) is only part of the verified subset in enums, readonly data classes and classes without instance properties. Class %s has the instance property $%s, so $this has state. It cannot be modelled as data: %s',
+                        $declaringClass->getDisplayName(),
+                        $state,
+                        $notData->getMessage(),
+                    );
+                }
             }
 
             if ($thisSpec !== null) {
@@ -158,7 +171,7 @@ final class MethodEncoder
             $this->loopUnroll,
             $this->maxLoopUnroll,
         );
-        $body = new ExpressionTranslator($encoding, $this->types, $this->enums, $classes, $this->reflectionProvider, $this->initializers, false, null, $thisRefusal, $inliner, [], $policy, $scope->getFile());
+        $body = new ExpressionTranslator($encoding, $this->types, $this->enums, $classes, $this->reflectionProvider, $this->initializers, false, null, $thisRefusal, $inliner, [], $policy, $scope->getFile(), $statelessThis);
         $loopBounds = LoopBounds::of($contract->requires, $body, $this->loopUnroll, $this->maxLoopUnroll);
         $statements = new StatementTranslator($body, $encoding, $resultSpec->sort, $loopBounds, $entry);
         $final = $statements->execute($method->stmts ?? [], (new State($entry, Smt::bool(true)))->withView($view));
@@ -253,6 +266,32 @@ final class MethodEncoder
     private function translator(Encoding $encoding, ClassNameResolver $classes, bool $isContract, ?int $line, string $thisRefusal, string $file): ExpressionTranslator
     {
         return new ExpressionTranslator($encoding, $this->types, $this->enums, $classes, $this->reflectionProvider, $this->initializers, $isContract, $line, $thisRefusal, file: $file);
+    }
+
+    public static function statelessRefusal(string $class): string
+    {
+        return sprintf(
+            'Class %s has no instance property, so $this has no state to model: use it only as the receiver of a call, such as $this->helper(). Comparing it, passing it as an argument and reading a property of it are not supported.',
+            $class,
+        );
+    }
+
+    /**
+     * The first instance property the class holds, of any visibility, inherited and from a
+     * trait included: a private property of a parent class is state too. Static properties are
+     * not part of an object.
+     */
+    private static function firstInstanceProperty(ClassReflection $class): ?string
+    {
+        for ($native = $class->getNativeReflection(); $native !== false; $native = $native->getParentClass()) {
+            foreach ($native->getProperties() as $property) {
+                if (!$property->isStatic()) {
+                    return $property->getName();
+                }
+            }
+        }
+
+        return null;
     }
 
     private function usesThis(ClassMethod $method, MethodContract $contract): bool

@@ -66,6 +66,7 @@ final class MethodInliner
      * @param array<Node> $arguments
      * @param array<string, Term> $env the caller's environment, for the arguments
      * @param Term|null $receiver the object of an instance call, null for a static call
+     * @param string|null $statelessThis the class of `$this` in `$this->m()` when it has no state, in which case there is no receiver term
      * @param bool $lateStatic whether the call is `static::m()`, which PHP looks up in the called class
      */
     public function inline(
@@ -80,7 +81,9 @@ final class MethodInliner
         array $arguments,
         array $env,
         Term $pc,
+        ?string $statelessThis = null,
     ): Term {
+        $onAnObject = $receiver !== null || $statelessThis !== null;
         if (!$this->reflection->hasClass($className)) {
             throw new VerificationRejected(sprintf('Class %s cannot be resolved.', $className), $line);
         }
@@ -96,7 +99,7 @@ final class MethodInliner
         // that redeclares a private one, and then picks the private method of the
         // calling scope (zend_get_parent_private_method). Static calls do not do this.
         if (
-            $receiver !== null
+            $onAnObject
             && $callerScope !== null
             && $class->getName() !== $callerScope->getName()
             && $class->isSubclassOfClass($callerScope)
@@ -112,7 +115,7 @@ final class MethodInliner
         $owner = $method->getDeclaringClass();
         $label = sprintf('%s::%s()', $owner->getDisplayName(), $method->getName());
 
-        $this->checkCallable($class, $method, $owner, $callerScope, $label, $receiver !== null, $lateStatic, $line);
+        $this->checkCallable($class, $method, $owner, $callerScope, $label, $onAnObject, $lateStatic, $line);
         $node = $this->findBody($owner, $method, $label, $line);
 
         if (in_array($label, $this->stack, true)) {
@@ -124,7 +127,7 @@ final class MethodInliner
 
         $this->stack[] = $label;
         try {
-            return $this->translateBody($owner, $method, $node, $parameters, $values, $receiver, $label, $line, $pc);
+            return $this->translateBody($owner, $method, $node, $parameters, $values, $receiver, $statelessThis, $label, $line, $pc);
         } catch (VerificationRejected $rejected) {
             throw new VerificationRejected(
                 sprintf('The call to %s cannot be verified: %s', $label, $rejected->getMessage()),
@@ -352,6 +355,7 @@ final class MethodInliner
         array $parameters,
         array $values,
         ?Term $receiver,
+        ?string $statelessThis,
         string $label,
         int $line,
         Term $pc,
@@ -363,10 +367,15 @@ final class MethodInliner
         $namespace = ($position = strrpos($owner->getName(), '\\')) === false ? null : substr($owner->getName(), 0, $position);
         $classes = new ClassNameResolver($this->reflection, $namespace, ClassNameResolver::classesOf($signature), $owner);
 
-        $thisRefusal = $method->isStatic() ? 'There is no $this in a static method.' : 'Object state ($this) is not available here.';
+        $statelessThis = $method->isStatic() ? null : $statelessThis;
+        $thisRefusal = match (true) {
+            $method->isStatic() => 'There is no $this in a static method.',
+            $statelessThis !== null => MethodEncoder::statelessRefusal($statelessThis),
+            default => 'Object state ($this) is not available here.',
+        };
         // The calls that lead here from the verified method, outermost first, this one last.
         $calls = array_slice($this->stack, 1);
-        $body = new ExpressionTranslator($this->encoding, $this->types, $this->enums, $classes, $this->reflection, $this->initializers, false, $line, $thisRefusal, $this, $calls, file: $this->file);
+        $body = new ExpressionTranslator($this->encoding, $this->types, $this->enums, $classes, $this->reflection, $this->initializers, false, $line, $thisRefusal, $this, $calls, file: $this->file, statelessThis: $statelessThis);
 
         $entry = [];
         if ($receiver !== null && !$method->isStatic()) {
