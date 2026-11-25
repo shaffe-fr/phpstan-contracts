@@ -78,6 +78,14 @@ final class StatementFixture
     }
 
     #[Pure]
+    public static function incrementOnAString(string $s): string
+    {
+        $s++;
+
+        return $s;
+    }
+
+    #[Pure]
     public static function echoStatement(int $n): int
     {
         echo $n;

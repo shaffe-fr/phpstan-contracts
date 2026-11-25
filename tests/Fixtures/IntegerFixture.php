@@ -61,6 +61,35 @@ final class IntegerFixture
         return $x;
     }
 
+    /** @param int<0, 10> $x */
+    #[Ensures('$result === $x + 2')]
+    public static function incrementStatements(int $x): int
+    {
+        $x++;
+        ++$x;
+
+        return $x;
+    }
+
+    /** @param int<0, 10> $x */
+    #[Ensures('$result === $x - 2')]
+    public static function decrementStatements(int $x): int
+    {
+        $x--;
+        --$x;
+
+        return $x;
+    }
+
+    /** @param int<0, 10> $x */
+    #[Ensures('$result === $x')]
+    public static function incrementWrongResult(int $x): int
+    {
+        $x++;
+
+        return $x;
+    }
+
     /** @param int<0, 100> $x */
     #[Ensures('$result === ($x > 50 ? 1 : 0)')]
     public static function ternary(int $x): int

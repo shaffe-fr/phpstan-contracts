@@ -160,7 +160,21 @@ final class StatementTranslator
             return $this->assign($expr->var, $expr->expr, $state, $expr);
         }
         if ($expr instanceof Expr\PreInc || $expr instanceof Expr\PostInc || $expr instanceof Expr\PreDec || $expr instanceof Expr\PostDec) {
-            throw $this->expressions->reject($expr, 'Increment and decrement are not supported; write `$x += 1` or `$x -= 1`.');
+            // As a statement the value of the expression is discarded, so prefix and postfix are the same as `+= 1` / `-= 1`.
+            $current = $expr->var instanceof Variable && is_string($expr->var->name) ? ($state->view()[$expr->var->name] ?? null) : null;
+            if ($current !== null && !$current->sort->isNumeric()) {
+                // On null, a string or a bool, ++ and -- do not behave like + 1 and - 1.
+                throw $this->expressions->reject($expr, sprintf('Increment and decrement are only supported on an int or a float variable, not on a %s.', $current->sort->describe()));
+            }
+            $one = new Node\Scalar\Int_(1, $expr->getAttributes());
+            $isIncrement = $expr instanceof Expr\PreInc || $expr instanceof Expr\PostInc;
+
+            return $this->assign(
+                $expr->var,
+                $isIncrement ? new BinaryOp\Plus($expr->var, $one, $expr->getAttributes()) : new BinaryOp\Minus($expr->var, $one, $expr->getAttributes()),
+                $state,
+                $expr,
+            );
         }
         if ($expr instanceof Expr\Throw_) {
             $this->expressions->translateTail($expr, $state->view(), $state->reached);

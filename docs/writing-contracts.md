@@ -114,6 +114,7 @@ A contract on a method without a body, in an interface or on an abstract method,
 | Supported | Notes |
 |---|---|
 | `$x = expr;` `$x += expr;` `$x -= expr;` `$x *= expr;` `$x .= expr;` `$x ??= expr;` | Local variables only. A variable keeps its type, except that a nullable variable can receive a value or `null`. |
+| `$x++;` `++$x;` `$x--;` `--$x;` | As a statement, on an `int` or a `float` variable: the same as `$x += 1` or `$x -= 1`, with the same overflow check. Inside a larger expression (`$y = $x++`), it is rejected. |
 | `if` / `elseif` / `else` | A variable assigned in only one branch is not usable after the `if`. Null checks narrow the types inside the branches. |
 | `return expr;` | Early returns are fine. |
 | `foreach ($list as $item)`, `foreach ($list as $i => $item)` | Over a `list<T>`, by value. The body can hold everything above, `break`, `continue` and `return`. See [Loops](#loops). |
@@ -146,7 +147,7 @@ A contract on a method without a body, in an interface or on an abstract method,
 | `yield` or `yield from` anywhere in the body, even where no path reaches it | `Generators are not supported: a yield anywhere in the body, even in unreachable code, makes the method return a Generator.` |
 | `throw $exception`, `throw self::error()` | ``Only `throw new Exception(...)` is supported: the exception must be built where it is thrown.`` |
 | an exception class with its own constructor | `Cannot throw InvalidWebId: its constructor is not the one of Exception or Error, so it can run code that is not verified.` |
-| `$x++`, `--$x` | ``Increment and decrement are not supported; write `$x += 1` or `$x -= 1`.`` |
+| `$x++` on a string, null or bool variable (`"a"++` is `"b"`, not `"a" + 1`) | `Increment and decrement are only supported on an int or a float variable, not on a string.` |
 | `echo`, `global`, `static`, `unset` | `Side effects and global or static state are forbidden in verified methods.` |
 | assignment to a property or a variable variable | `Only assignments to local variables are allowed (no property, array or dynamic writes); appending is supported on a list built in the method ($list = []; $list[] = $value), or write $list = [...$list, $value].` |
 | `$list[$i] = $x`, `$list[$i] += $x` | `Only appending to a list ($list[] = $value) is supported: writing $list[$i] can add a key out of order, which turns the list into another kind of array.` |
