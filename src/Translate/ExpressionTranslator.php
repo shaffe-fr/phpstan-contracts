@@ -42,6 +42,8 @@ use PHPStan\Reflection\InitializerExprTypeResolver;
 use PHPStan\Reflection\ReflectionProvider;
 use PHPStan\Type\FloatType;
 use PHPStan\Type\IntegerType;
+use PHPStan\Type\MixedType;
+use PHPStan\Type\StaticType;
 use PHPStan\Type\Type;
 use PHPStan\Type\VerbosityLevel;
 
@@ -969,7 +971,7 @@ final class ExpressionTranslator
     }
 
     /**
-     * `throw new E(...)`. The path ends here, which the statement translator applies,
+     * `throw new E(...)` or `throw E::factory(...)`. The path ends here, which the statement translator applies,
      * and the throw must be allowed by a `#[Throws]` on that path.
      *
      * @param array<string, Term> $env
@@ -988,8 +990,17 @@ final class ExpressionTranslator
         }
 
         $new = $expr->expr;
-        if (!$new instanceof New_ || !$new->class instanceof Name) {
-            throw $this->reject($expr, 'Only `throw new Exception(...)` is supported: the exception must be built where it is thrown.');
+        if ($new instanceof StaticCall) {
+            return $this->throwFromFactory($expr, $new, $env, $pc);
+        }
+        if (!$new instanceof New_) {
+            throw $this->reject($expr, match (true) {
+                $new instanceof Expr\MethodCall, $new instanceof Expr\NullsafeMethodCall => 'throw of the result of a method call is not supported: the class of the object is not known here. Use a static factory, `throw Exception::factory(...)`, or `throw new Exception(...)`.',
+                default => 'Only `throw new Exception(...)` and `throw Exception::factory(...)` with a static factory are supported: the exception must be built where it is thrown, not taken from a variable or another expression.',
+            });
+        }
+        if (!$new->class instanceof Name) {
+            throw $this->reject($expr, 'The class of a thrown exception must be written by name: `new $class(...)` and anonymous classes are not supported.');
         }
 
         $className = $this->classes->resolve($new->class, $this->lineOf($expr));
@@ -1037,6 +1048,87 @@ final class ExpressionTranslator
 
         $this->obligate(ObligationKind::UnexpectedThrow, $expr, $pc, $this->throws->allowed($class), $this->throws->describeAllowed($class));
         $this->throws->record($pc);
+
+        return Smt::never();
+    }
+
+    /**
+     * `throw Exception::factory(...)`. The factory is a static method whose native return
+     * type is the exception class. Its body is never read: the proof takes it that it
+     * returns an instance of that class without throwing, and matches that class against
+     * the `#[Throws]` declarations.
+     *
+     * @param array<string, Term> $env
+     */
+    private function throwFromFactory(Expr\Throw_ $expr, StaticCall $call, array $env, Term $pc): Term
+    {
+        if (!$call->class instanceof Name || !$call->name instanceof Identifier) {
+            throw $this->reject($expr, 'The class and the method of an exception factory must be written by name: `throw $class::make()` and `throw Exception::$method()` are not supported.');
+        }
+        if ($call->isFirstClassCallable()) {
+            throw $this->reject($expr, 'First-class callable syntax builds a Closure, which cannot be thrown.');
+        }
+        $inliner = $this->requireInliner($call);
+        $throws = $this->throws ?? throw new LogicException('A throw is only translated with the #[Throws] declarations.');
+
+        $line = $this->lineOf($expr);
+        $className = $this->classes->resolve($call->class, $line);
+        if (!$this->reflection->hasClass($className)) {
+            throw $this->reject($expr, sprintf('Class %s cannot be resolved.', $className));
+        }
+        $class = $this->reflection->getClass($className);
+        $name = $call->name->toString();
+        if (!$class->hasNativeMethod($name)) {
+            throw $this->reject($expr, sprintf('%s has no method %s().', $class->getDisplayName(), $name));
+        }
+
+        $method = $class->getNativeMethod($name);
+        $label = sprintf('%s::%s()', $method->getDeclaringClass()->getDisplayName(), $method->getName());
+        if (!$method->isStatic()) {
+            throw $this->reject($expr, sprintf('%s is not a static method, so it needs an object that is not known here. Make it static, or build the exception with `new`.', $label));
+        }
+        // PHPStan reports an inaccessible method too, but a proof must not rest on a call that throws.
+        if (!$this->canAccess($method->getDeclaringClass(), $method->isPrivate(), $method->isPublic())) {
+            throw $this->reject($expr, sprintf('%s is not accessible here.', $label));
+        }
+
+        // Only the native type is enforced by PHP: a PHPDoc `@return` is not a guarantee.
+        $returned = $method->getOnlyVariant()->getNativeReturnType();
+        $thrown = match (true) {
+            $returned instanceof StaticType => $class,
+            $returned->isObject()->yes() && count($returned->getObjectClassReflections()) === 1 => $returned->getObjectClassReflections()[0],
+            default => null,
+        };
+        if ($thrown === null) {
+            throw $this->reject($expr, sprintf(
+                '%s returns %s, which is not a single exception class. Declare the exception class, `self` or `static` as its native return type (an interface, a union, a nullable type, `never` and a missing type are not supported).',
+                $label,
+                $returned instanceof MixedType && !$returned->isExplicitMixed() ? 'no declared type' : $returned->describe(VerbosityLevel::typeOnly()),
+            ));
+        }
+        if ($thrown->isInterface() || !$thrown->implementsInterface(\Throwable::class)) {
+            throw $this->reject($expr, sprintf(
+                '%s returns %s, which is not an exception class: declare a class that implements Throwable as its native return type.',
+                $label,
+                $thrown->getDisplayName(),
+            ));
+        }
+        $inheritor = $thrown->isFinalByKeyword() ? null : $throws->conditionOnASubclassOf($thrown, $this->reflection);
+        if ($inheritor !== null) {
+            throw $this->reject($expr, sprintf(
+                '%s returns %s, which is not final: the object can be an instance of a subclass, and a #[Throws] with a `when` condition on %s depends on the class. Make %s final, or declare a final class as the return type.',
+                $label,
+                $thrown->getDisplayName(),
+                $inheritor,
+                $thrown->getDisplayName(),
+            ));
+        }
+
+        $inliner->bindFactoryArguments($this, $call, $method, $call->args, $env, $pc, $line);
+
+
+        $this->obligate(ObligationKind::UnexpectedThrow, $expr, $pc, $throws->allowed($thrown), $throws->describeAllowed($thrown));
+        $throws->record($pc);
 
         return Smt::never();
     }

@@ -7,6 +7,7 @@ namespace PhpstanContracts\Translate;
 use PhpstanContracts\Smt\Smt;
 use PhpstanContracts\Smt\Term;
 use PHPStan\Reflection\ClassReflection;
+use PHPStan\Reflection\ReflectionProvider;
 
 /**
  * The exceptions a method declares with `#[Throws]`, each with its condition on
@@ -81,6 +82,30 @@ final class ThrowPolicy
     private function covers(string $class, ClassReflection $thrown): bool
     {
         return $thrown->getName() === $class || in_array($class, $thrown->getParentClassesNames(), true) || $thrown->implementsInterface($class);
+    }
+
+    /**
+     * A class named by a `#[Throws]` with a `when` condition that does not cover `$thrown`,
+     * but covers some subclass of it: an interface, or a subclass.
+     *
+     * When the exact class of the thrown object is not known, only that it is a `$thrown`
+     * or a subclass, allowed() decides for `$thrown` alone. That would be unsound if a
+     * subclass instance fell under another condition.
+     */
+    public function conditionOnASubclassOf(ClassReflection $thrown, ReflectionProvider $reflection): ?string
+    {
+        foreach ($this->declared as [$class, $when]) {
+            if ($when === null || $this->covers($class, $thrown) || !$reflection->hasClass($class)) {
+                continue;
+            }
+
+            $declared = $reflection->getClass($class);
+            if ($declared->isInterface() || $declared->isSubclassOfClass($thrown)) {
+                return $declared->getDisplayName();
+            }
+        }
+
+        return null;
     }
 
     public function record(Term $path): void

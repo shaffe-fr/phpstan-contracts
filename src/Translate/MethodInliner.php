@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace PhpstanContracts\Translate;
 
+use PhpstanContracts\Attribute\Requires;
+use PhpstanContracts\Attribute\Throws;
 use PhpstanContracts\Contract\ContractReader;
 use PhpstanContracts\Exception\VerificationRejected;
 use PhpstanContracts\Smt\Smt;
@@ -122,7 +124,7 @@ final class MethodInliner
             throw new VerificationRejected(sprintf('Recursive calls are not supported: %s is already being translated.', $label), $line);
         }
 
-        $parameters = $this->parameterSorts($method, $node, $label, $line);
+        $parameters = $this->parameterSorts($method, $label, $line);
         $values = $this->bindArguments($caller, $call, $arguments, $parameters, $label, $line, $env, $pc);
 
         $this->stack[] = $label;
@@ -136,6 +138,47 @@ final class MethodInliner
             );
         } finally {
             array_pop($this->stack);
+        }
+    }
+
+    /**
+     * The arguments of a static factory that builds a thrown exception: translated in the
+     * caller's context, so that their own obligations apply, and checked against the
+     * parameters with the coercions of an inlined call. The body of the factory is not
+     * read, and so nothing else of it is known.
+     *
+     * @param array<Node> $arguments
+     * @param array<string, Term> $env
+     */
+    public function bindFactoryArguments(
+        ExpressionTranslator $caller,
+        Expr $call,
+        ExtendedMethodReflection $method,
+        array $arguments,
+        array $env,
+        Term $pc,
+        int $line,
+    ): void {
+        $label = sprintf('%s::%s()', $method->getDeclaringClass()->getDisplayName(), $method->getName());
+        $native = $method->getDeclaringClass()->getNativeReflection()->getMethod($method->getName());
+
+        // A contract of the factory would be neither checked at this call nor assumed.
+        foreach ([Requires::class, Throws::class, 'Deprecated'] as $attribute) {
+            if ($native->getAttributes($attribute) !== []) {
+                throw new VerificationRejected(sprintf(
+                    '%s carries #[%s]: the body of an exception factory is not inspected, so a precondition would not be checked at this call, and a factory that throws or triggers a deprecation does not return the exception that the proof assumes. Build the exception with `new`, or remove the attribute.',
+                    $label,
+                    basename(str_replace("\\", "/", $attribute)),
+                ), $line);
+            }
+        }
+
+        $parameters = $this->parameterSorts($method, $label, $line);
+        $values = $this->bindArguments($caller, $call, $arguments, $parameters, $label, $line, $env, $pc);
+        foreach ($native->getParameters() as $parameter) {
+            if (!isset($values[$parameter->getName()]) && !$parameter->isOptional()) {
+                throw new VerificationRejected(sprintf('Every parameter of %s without a default value needs an argument.', $label), $line);
+            }
         }
     }
 
@@ -231,18 +274,19 @@ final class MethodInliner
     /**
      * @return array<string, Sort>
      */
-    private function parameterSorts(ExtendedMethodReflection $method, ClassMethod $node, string $label, int $line): array
+    private function parameterSorts(ExtendedMethodReflection $method, string $label, int $line): array
     {
+        $natives = $method->getDeclaringClass()->getNativeReflection()->getMethod($method->getName())->getParameters();
         $sorts = [];
         foreach ($method->getOnlyVariant()->getParameters() as $index => $parameter) {
-            $declared = $node->params[$index] ?? null;
-            if ($declared === null || $declared->variadic || $declared->byRef) {
+            $declared = $natives[$index] ?? null;
+            if ($declared === null || $declared->isVariadic() || $declared->isPassedByReference()) {
                 throw new VerificationRejected(sprintf('%s has a variadic or by-reference parameter, which is not supported.', $label), $line);
             }
 
             // PHP converts an argument by the native type only: an int stays an int for a
             // parameter typed `float` in PHPDoc alone, or natively `int|float`.
-            if ($declared->type === null) {
+            if (!$declared->hasType()) {
                 throw new VerificationRejected(sprintf(
                     'Parameter $%s of %s has no native type, so PHP passes its argument as it is; declare the type in the signature.',
                     $parameter->getName(),
