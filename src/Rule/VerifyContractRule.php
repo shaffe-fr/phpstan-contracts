@@ -8,6 +8,7 @@ use PhpstanContracts\Contract\ContractReader;
 use PhpstanContracts\Exception\VerificationRejected;
 use PhpstanContracts\Report\CounterexampleFormatter;
 use PhpstanContracts\Report\UnknownExplainer;
+use PhpstanContracts\Solver\CaseSplit;
 use PhpstanContracts\Solver\ScriptRenderer;
 use PhpstanContracts\Solver\SolverFailure;
 use PhpstanContracts\Solver\SolverResult;
@@ -77,8 +78,9 @@ final class VerifyContractRule implements Rule
 
             $encoding = $this->encoder->encode($node, $scope, $contract);
             $results = $this->z3->run($this->renderer->render($encoding), $this->renderer->checkCount($encoding));
+            $undecidedLengths = [];
             if ($encoding->needsSolverFallback) {
-                $results = $this->retryUndecided($encoding, $results);
+                [$results, $undecidedLengths] = $this->retryUndecided($encoding, $results);
             }
         } catch (VerificationRejected $rejected) {
             return [$this->error($rejected->getMessage(), $rejected->identifier, $rejected->errorLine)];
@@ -86,7 +88,7 @@ final class VerifyContractRule implements Rule
             return [$this->error($failure->getMessage(), 'contracts.solver', $method->getStartLine())];
         }
 
-        return $this->interpret($encoding, $results, $method->getStartLine());
+        return $this->interpret($encoding, $results, $method->getStartLine(), $undecidedLengths);
     }
 
     /**
@@ -95,27 +97,51 @@ final class VerifyContractRule implements Rule
      * only by the default solver. The new answer replaces `unknown`; if the retry fails or is
      * `unknown` too, the first answer stays, and `unknown` is never read as a proof.
      *
+     * A check that the retry leaves `unknown` is asked once more, once per length of the list that
+     * drives the unrolling, see {@see CaseSplit}, when the loop is bounded by few enough lengths.
+     * That is the same question cut into a partition, so its answer replaces `unknown` too, and the
+     * lengths that it could not decide are kept for the message.
+     *
      * @param list<SolverResult> $results
-     * @return list<SolverResult>
+     * @return array{list<SolverResult>, array<int, list<int|string>>} the results, and by check number the cases of the split that were not decided
      */
     private function retryUndecided(Encoding $encoding, array $results): array
     {
+        $undecided = [];
+        $split = $encoding->splitLength();
+        $cases = $split === null ? null : CaseSplit::cases($split[0], $split[1]);
         foreach ($results as $check => $result) {
             if ($result->verdict !== Verdict::Unknown) {
                 continue;
             }
             try {
-                $results[$check] = $this->z3->run($this->renderer->renderSingleCheck($encoding, $check), 1)[0];
+                $single = $this->renderer->renderSingleCheck($encoding, $check);
+                $results[$check] = $this->z3->run($single, 1)[0];
+                // The satisfiability of the assumptions is not about the body, so the length of an
+                // iterated list is not part of its script.
+                if ($results[$check]->verdict !== Verdict::Unknown || $cases === null || $check === 0) {
+                    continue;
+                }
+                $outcome = $this->z3->runSplit(
+                    $single,
+                    $cases,
+                    array_map(fn ($case): string => $this->renderer->renderSingleCheck($encoding, $check, $case), $cases),
+                );
             } catch (SolverFailure) {
                 continue;
             }
+            $results[$check] = $outcome->result;
+            if ($outcome->undecided !== []) {
+                $undecided[$check] = $outcome->undecided;
+            }
         }
-        return $results;
+
+        return [$results, $undecided];
     }
 
     /**
      * @param list<SolverResult> $results
-     * @param array<int, list<int>> $undecidedLengths by check number, the lengths of the iterated list that a split by length could not decide
+     * @param array<int, list<int|string>> $undecidedLengths by check number, the cases of the split by length that were not decided
      * @return list<IdentifierRuleError>
      */
     private function interpret(Encoding $encoding, array $results, int $methodLine, array $undecidedLengths = []): array
@@ -403,7 +429,7 @@ final class VerifyContractRule implements Rule
     }
 
     /**
-     * @param list<int> $undecidedLengths the lengths of the iterated list that a split by length did not decide
+     * @param list<int|string> $undecidedLengths the cases of the split by length that were not decided: lengths, and the description of the case outside the bound
      */
     private function undecided(Encoding $encoding, string $claim, int $line, array $undecidedLengths = []): IdentifierRuleError
     {

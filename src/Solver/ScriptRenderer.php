@@ -119,19 +119,31 @@ final class ScriptRenderer
      * The check has no `push`/`pop`: a script that never pushes is answered by Z3's non-incremental
      * solver, which decides some checks that the incremental one leaves `unknown`. It is the same
      * question, so the answer means the same; only the way Z3 searches changes.
+     *
+     * `$case` is one case of a split of the check by the length of a list, see {@see CaseSplit}. It is
+     * placed right after the commands, before the assumptions of the earlier obligations, where Z3
+     * decides the cases fastest; where it goes does not change what the script asks. A case only
+     * restricts the models of a check after the satisfiability of the assumptions, whose script does
+     * not hold the whole body: it takes none.
      */
-    public function renderSingleCheck(Encoding $encoding, int $check): string
+    public function renderSingleCheck(Encoding $encoding, int $check, ?SplitCase $case = null): string
     {
         $lines = ['(set-option :produce-models true)', ...$this->declarations($encoding), self::PRELUDE];
         $commands = $encoding->commands();
         $observed = implode(' ', $encoding->observedTerms());
         if ($check === 0) {
+            if ($case !== null) {
+                throw new \LogicException('The satisfiability of the assumptions is not split by length.');
+            }
             $boundary = $encoding->assumptionBoundary() ?? count($commands);
             array_push($lines, ...array_slice($commands, 0, $boundary));
             array_push($lines, '(echo "@@0")', '(check-sat)', "(get-value ($observed))");
             return implode("\n", $lines) . "\n";
         }
         array_push($lines, ...$commands);
+        if ($case !== null) {
+            $lines[] = $case->assertion;
+        }
         $violations = $this->violations($encoding);
         foreach (array_slice($violations, 0, $check - 1) as [, $assumed]) {
             if ($assumed !== null) {

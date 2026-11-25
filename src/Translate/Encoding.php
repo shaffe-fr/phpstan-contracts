@@ -51,6 +51,9 @@ final class Encoding
     /** @var array<'product'|'division'|'modulo', string> the first operation of each non-linear kind, as written */
     private array $nonLinearOperations = [];
 
+    /** @var array{string, int, string}|null the length of the list that drives the outermost unrolling, its bound and the list as written */
+    private ?array $splitLength = null;
+
     /** Whether the script holds a loop, which gets the solver option of the retry. */
     public bool $needsSolverFallback = false;
 
@@ -333,6 +336,27 @@ final class Encoding
         if ($known === null || $known->iterations < $loop->iterations) {
             $this->unrolledLoops[$line] = $loop;
         }
+    }
+
+    /**
+     * Notes the list that an outermost loop iterates, for a split of a check by its length. Among
+     * several, the one with the largest bound is kept: it is the one that costs the most.
+     *
+     * @param string $length the SMT term of the length of the list
+     */
+    public function noteSplitLength(string $length, int $bound, string $subject): void
+    {
+        if ($this->splitLength === null || $this->splitLength[1] < $bound) {
+            $this->splitLength = [$length, $bound, $subject];
+        }
+    }
+
+    /**
+     * @return array{string, int, string}|null the SMT term of the length, the bound of the unrolling and the list as written
+     */
+    public function splitLength(): ?array
+    {
+        return $this->splitLength;
     }
 
     /**

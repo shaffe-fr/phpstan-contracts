@@ -18,7 +18,7 @@ final class UnknownExplainer
     /**
      * Empty for a check whose method has neither a loop nor a non-linear operation.
      *
-     * @param list<int> $undecidedLengths the lengths of the iterated list that a split by length did not decide
+     * @param list<int|string> $undecidedLengths the cases of the split by length that were not decided: lengths, and the description of the case outside the bound
      */
     public function explain(Encoding $encoding, array $undecidedLengths = []): string
     {
@@ -53,13 +53,19 @@ final class UnknownExplainer
             $parts[] = sprintf('The code has %s, and Z3 decides non-linear arithmetic only in part.', $this->join($nonLinear));
         }
 
-        $first = $loops === [] ? null : reset($loops);
-        if ($undecidedLengths !== [] && $first !== null) {
-            $parts[] = sprintf(
-                'The split of the proof by the length of %s did not decide the lengths %s.',
-                $first->subject,
-                $this->join(array_map(strval(...), $undecidedLengths)),
-            );
+        $split = $encoding->splitLength();
+        $subject = $split[2] ?? ($loops === [] ? null : reset($loops)->subject);
+        if ($undecidedLengths !== [] && $subject !== null) {
+            $lengths = array_values(array_filter($undecidedLengths, is_int(...)));
+            $outside = array_values(array_filter($undecidedLengths, is_string(...)));
+            $named = [];
+            if ($lengths !== []) {
+                $named[] = sprintf('the length%s %s', count($lengths) > 1 ? 's' : '', $this->join(array_map(strval(...), $lengths)));
+            }
+            foreach ($outside as $description) {
+                $named[] = 'the lengths ' . $description;
+            }
+            $parts[] = sprintf('The split of the proof by the length of %s did not decide %s.', $subject, $this->join($named));
         }
 
         $ways = [];
