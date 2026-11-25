@@ -22,6 +22,7 @@ use PhpstanContracts\Examples\RealWorld\OrderTotals;
 use PhpstanContracts\Examples\RealWorld\OrderWorkflow;
 use PhpstanContracts\Examples\RealWorld\Pagination;
 use PhpstanContracts\Examples\RealWorld\PriceContext;
+use PhpstanContracts\Examples\RealWorld\ProportionalSplit;
 use PhpstanContracts\Examples\RealWorld\RateLimit;
 use PhpstanContracts\Examples\RealWorld\ReconciliationDeltaGuard;
 use PhpstanContracts\Examples\RealWorld\Shipping;
@@ -118,6 +119,10 @@ final class ExamplesTest extends RuleFixtureTestCase
                 'evenlyBroken' => ['contracts.ensuresViolated: Counterexample: $discountCents = '],
                 'cappedByLine' => [],
                 'cappedByLineBroken' => ['contracts.ensuresViolated: Counterexample: $discountCents = '],
+            ],
+            ProportionalSplit::class => [
+                'proportional' => [],
+                'proportionalBroken' => ['contracts.ensuresViolated: Counterexample: $totalDiscount = '],
             ],
             OrderTotals::class => [
                 'total' => [],
