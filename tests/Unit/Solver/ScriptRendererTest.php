@@ -308,17 +308,18 @@ final class ScriptRendererTest extends TestCase
                 '(assert return@3)',
                 '(assert (and (>= result@2 (- 100)) (<= result@2 100)))',
                 '(echo "@@0")',
-                '(push 1)',
                 '(assert (not (> result@2 0)))',
                 '(check-sat)',
                 '(get-value (x@1 result@2 return@3))',
-                '(pop 1)',
             ],
             $postcondition,
+            'the single check never pushes a scope, so Z3 answers it with its non-incremental solver',
         );
 
         $assumptions = $this->afterThePrelude($this->renderer->renderSingleCheck($encoding, 0));
         self::assertContains('(check-sat)', $assumptions);
+        self::assertNotContains('(push 1)', $assumptions, 'the satisfiability of the assumptions is asked without a scope too');
+        self::assertNotContains('(pop 1)', $assumptions);
         self::assertNotContains('(assert (and (>= result@2 (- 100)) (<= result@2 100)))', $assumptions);
 
         $this->expectException(\LogicException::class);

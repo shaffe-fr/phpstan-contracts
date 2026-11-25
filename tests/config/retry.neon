@@ -1,0 +1,4 @@
+parameters:
+	contracts:
+		timeoutMs: 5000
+		cacheDirectory: null
