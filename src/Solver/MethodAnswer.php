@@ -29,7 +29,7 @@ final readonly class MethodAnswer
      */
     public function notTried(): int
     {
-        return $this->count(UnknownReason::Budget);
+        return $this->count(UnknownReason::Budget) + $this->count(UnknownReason::RunBudget);
     }
 
     /**

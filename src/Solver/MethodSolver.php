@@ -13,7 +13,8 @@ use PhpstanContracts\Translate\Encoding;
  * The strategy is the main run, then, for a script with a loop, one retry of each check that is
  * still `unknown` and the split of that check by the length of the iterated list, see {@see CaseSplit}.
  * Only `sat` and `unsat` are ever read as an answer. A check that was not tried, because the budget
- * ran out or the run budget was spent, is `unknown` with the reason {@see UnknownReason::Budget}, and
+ * ran out, is `unknown` with the reason {@see UnknownReason::Budget}, or {@see UnknownReason::RunBudget} when
+ * the run budget was spent, and
  * so is a check that an earlier run left undecided, with the reason {@see UnknownReason::Remembered}.
  *
  * A check that stayed `unknown` after the whole strategy is remembered, see {@see ProofCache}. One
@@ -153,7 +154,7 @@ final class MethodSolver
                     $timings['split'] += $this->clock->nowMs() - $started;
                 }
             } catch (RunBudgetExhausted) {
-                $results[$check] = $notTried;
+                $results[$check] = new SolverResult(Verdict::Unknown, [], UnknownReason::RunBudget);
                 continue;
             } catch (SolverFailure) {
                 continue;

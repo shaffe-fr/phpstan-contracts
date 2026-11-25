@@ -425,6 +425,10 @@ final class VerifyContractRule implements Rule
                 $this->methodBudgetMs,
                 $claim,
             ),
+            UnknownReason::RunBudget => sprintf(
+                'Not proven: the solver budget of this run (contracts.runBudgetMs) ran out before Z3 decided %s. Raise contracts.runBudgetMs, or set it to 0 for no limit.',
+                $claim,
+            ),
             UnknownReason::Remembered => sprintf(
                 'Not proven: an earlier run, with the same limits (contracts.timeoutMs %d ms, contracts.methodBudgetMs %d ms), left %s undecided, so Z3 was not asked again. To try again, clear the cache directory (contracts.cacheDirectory) or change one of these limits.',
                 $this->timeoutMs,
@@ -438,8 +442,7 @@ final class VerifyContractRule implements Rule
     private function runBudgetMessage(RunBudgetExhausted $exhausted, CostPrediction $prediction): string
     {
         return sprintf(
-            'Not verified: the solver budget of this run is exhausted (%d ms spent, contracts.runBudgetMs is %d ms), so Z3 was not asked about this method. Raise contracts.runBudgetMs, or set it to 0 for no limit. The next run starts again with a fresh budget. %s',
-            $exhausted->spentMs,
+            'Not verified: the solver budget of this run is exhausted (contracts.runBudgetMs is %d ms), so Z3 was not asked about this method. Raise contracts.runBudgetMs, or set it to 0 for no limit. The next run starts again with a fresh budget. %s',
             $exhausted->limitMs,
             $this->explainer->forecast($prediction, $prediction->checks),
         );
