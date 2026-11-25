@@ -136,6 +136,23 @@ final class DocumentationTest extends TestCase
         self::assertSame([], $undocumented, 'These diagnostic identifiers are missing from docs/writing-contracts.md.');
     }
 
+    public function testEveryConfigurationParameterIsDocumentedInGettingStarted(): void
+    {
+        $extension = (string) file_get_contents(__DIR__ . '/../../extension.neon');
+        $schema = substr($extension, (int) strpos($extension, 'parametersSchema:'));
+        $schema = substr($schema, 0, (int) strpos($schema, 'services:'));
+        preg_match_all('/^\t\t(\w+): /m', $schema, $keys);
+        $documented = (string) file_get_contents(__DIR__ . '/../../docs/getting-started.md');
+
+        $undocumented = array_values(array_filter(
+            $keys[1],
+            static fn (string $key): bool => !str_contains($documented, '| `' . $key . '` |'),
+        ));
+
+        self::assertNotSame([], $keys[1], 'extension.neon should declare parameters.');
+        self::assertSame([], $undocumented, 'These parameters of extension.neon are missing from the table in docs/getting-started.md.');
+    }
+
     /**
      * @return list<string>
      */
