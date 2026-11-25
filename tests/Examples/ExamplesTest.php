@@ -22,6 +22,7 @@ use PhpstanContracts\Examples\RealWorld\OrderWorkflow;
 use PhpstanContracts\Examples\RealWorld\Pagination;
 use PhpstanContracts\Examples\RealWorld\PriceContext;
 use PhpstanContracts\Examples\RealWorld\RateLimit;
+use PhpstanContracts\Examples\RealWorld\ReconciliationDeltaGuard;
 use PhpstanContracts\Examples\RealWorld\Shipping;
 use PhpstanContracts\Examples\RealWorld\StockAvailability;
 use PhpstanContracts\Examples\RealWorld\StockLine;
@@ -140,6 +141,12 @@ final class ExamplesTest extends RuleFixtureTestCase
                 'refilledTokens' => [],
                 'refilledTokensUnbounded' => ['contracts.ensuresViolated', 'contracts.overflow'],
                 'secondsUntilAvailable' => [],
+            ],
+            ReconciliationDeltaGuard::class => [
+                'isMatched' => [],
+                'isMatchedBroken' => ['contracts.ensuresViolated'],
+                'deltaCents' => [],
+                'withinTolerance' => [],
             ],
             Shipping::class => [
                 'shippingCents' => [],
