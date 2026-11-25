@@ -29,4 +29,20 @@ final class A
     {
         return 5;
     }
+
+    /**
+     * @param int<0, Caps::MAX> $x
+     */
+    #[Ensures('$result <= 10')]
+    public static function capped(int $x): int
+    {
+        return $x;
+    }
+
+    // Box's PHPDoc bounds its amount by a constant of a third file.
+    #[Ensures('$result->amount <= 10')]
+    public static function boxed(Box $box): Box
+    {
+        return $box;
+    }
 }

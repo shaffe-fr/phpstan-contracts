@@ -57,6 +57,18 @@ final class ResultCacheTest extends TestCase
             "<?php\n\ndeclare(strict_types=1);\n\nnamespace CacheProject;\n\nfinal class Rate\n{\n    public const BASE = 6;\n}\n",
             'contracts.ensuresViolated: #[Ensures(\'$result === Rate::BASE\')]',
         ];
+        yield 'a class constant in the PHPDoc range of a parameter' => [
+            'src/Caps.php',
+            'public const MAX = 10;',
+            'public const MAX = 11;',
+            'contracts.ensuresViolated: #[Ensures(\'$result <= 10\')]',
+        ];
+        yield 'a class constant in the PHPDoc range of a data class property of a third file' => [
+            'src/Amounts.php',
+            'public const MAX = 10;',
+            'public const MAX = 11;',
+            'contracts.ensuresViolated: #[Ensures(\'$result->amount <= 10\')]',
+        ];
     }
 
     /**
