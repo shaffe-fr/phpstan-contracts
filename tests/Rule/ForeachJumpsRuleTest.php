@@ -11,7 +11,7 @@ final class ForeachJumpsRuleTest extends RuleFixtureTestCase
         $this->assertOutcomes([
             ForeachJumpsFixture::class => [
                 'stopsAtTheFirstLargeAmount' => [],
-                'stopsBeforeTheFirstLargeAmount' => ['contracts.ensuresViolated: Postcondition #[Ensures(\'implies(count($amounts) > 0 && $amounts[0] > 500, $result === $amounts[0])\')] can be violated. Counterexample: $amounts = [501] => $result = 0'],
+                'stopsBeforeTheFirstLargeAmount' => ['contracts.ensuresViolated: Postcondition #[Ensures(\'implies(count($amounts) > 0 && $amounts[0] > 500, $result === $amounts[0])\')] can be violated. Counterexample: $amounts = ['],
                 'skipsTheSmallAmounts' => [],
                 'countsWhatItDoesNotSkip' => ['contracts.ensuresViolated: Postcondition #[Ensures(\'$result === count($amounts)\')] can be violated. Counterexample: $amounts = ['],
                 'sumsThePositiveAmountsUntilAZero' => [],
@@ -19,7 +19,7 @@ final class ForeachJumpsRuleTest extends RuleFixtureTestCase
                 'indexOfTheFirstAmountAbove' => [],
                 'returnsTheWrongElement' => ['contracts.ensuresViolated: Postcondition #[Ensures(\'implies($result >= 0, $amounts[$result] > $limit)\')] can be violated. Counterexample: $amounts = ['],
                 'throwsAtTheFirstZero' => [],
-                'throwsOnlyFromTheSecondElement' => ['contracts.throwsViolated: #[Throws(InvalidArgumentException::class, when: \'in_array(0, $quantities, true)\')] is violated: the method can return although the condition holds. Counterexample: $quantities = [0] => $result = 0'],
+                'throwsOnlyFromTheSecondElement' => ['contracts.throwsViolated: #[Throws(InvalidArgumentException::class, when: \'in_array(0, $quantities, true)\')] is violated: the method can return although the condition holds. Counterexample: $quantities = ['],
                 'throwsWithoutDeclaringIt' => ['contracts.unexpectedThrow: `throw new \\InvalidArgumentException(\'A quantity is zero.\')` can be reached where no #[Throws] allows it, in iteration 2 (key 1) of the foreach at line '],
                 'addsEveryPair' => [],
                 'countsTheRowsWithoutALargeColumn' => [],

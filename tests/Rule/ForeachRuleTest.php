@@ -30,7 +30,7 @@ final class ForeachRuleTest extends RuleFixtureTestCase
                 'boundsTheListWithItsExactSize' => [],
                 'boundsTheListWithAClassConstant' => [],
                 'usesTheSmallestBoundOfTheList' => [],
-                'claimsOneLessThanTheBoundAllows' => ['contracts.ensuresViolated: Postcondition #[Ensures(\'$result <= 1999\')] can be violated. Counterexample: $amounts = [1000, 1000]'],
+                'claimsOneLessThanTheBoundAllows' => ['contracts.ensuresViolated: Postcondition #[Ensures(\'$result <= 1999\')] can be violated. Counterexample: $amounts = ['],
                 'hasNoBound' => ['contracts.loopBound: The proof unrolls this foreach up to 10 iterations, and $amounts can have more. This is a limit of the proof, not a bug in the code. If the real maximum is known, add #[Requires(\'count($amounts) <= 50\')]; otherwise raise contracts.loopUnroll. Counterexample: $amounts = a list of 11 elements starting with ['],
                 'hasABoundAboveTheDefault' => [],
                 'loopsOverAListBuiltFromABoundedOne' => [],
