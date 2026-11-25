@@ -436,6 +436,9 @@ final class ExpressionTranslator
         $this->requireNumber($expr->right, $right);
 
         if ($left->sort->isInt() && $right->sort->isInt()) {
+            if ($integerOperator === '*' && !$this->isConstant($left) && !$this->isConstant($right)) {
+                $this->encoding->noteNonLinear('product', $this->printer->prettyPrintExpr($expr));
+            }
             return $this->checked(Smt::arithmetic($integerOperator, $left, $right), $expr, $pc);
         }
 
@@ -464,6 +467,9 @@ final class ExpressionTranslator
         $this->requireInt($expr->left, $left, 'The "%" operator converts its operands to int; use it on ints.');
         $this->requireInt($expr->right, $right, 'The "%" operator converts its operands to int; use it on ints.');
         $this->requireNonZero($expr, $right, $pc);
+        if (!$this->isConstant($right)) {
+            $this->encoding->noteNonLinear('modulo', $this->printer->prettyPrintExpr($expr));
+        }
 
         return $this->encoding->define('mod', Smt::call('php_mod', Sort::int(), $left, $right));
     }
@@ -1251,6 +1257,9 @@ final class ExpressionTranslator
         $this->requireInt($call, $dividend);
         $this->requireInt($call, $divisor);
         $this->requireNonZero($call, $divisor, $pc);
+        if (!$this->isConstant($divisor)) {
+            $this->encoding->noteNonLinear('division', $this->printer->prettyPrintExpr($call));
+        }
 
         return $this->checked(Smt::call('php_intdiv', Sort::int(), $dividend, $divisor), $call, $pc);
     }
@@ -2143,6 +2152,14 @@ final class ExpressionTranslator
         }
 
         return $value;
+    }
+
+    /**
+     * Whether a term is an integer literal, so that a product or a division by it stays linear.
+     */
+    private function isConstant(Term $term): bool
+    {
+        return $term->atomic && preg_match('/^(\d+|\(- \d+\))$/', $term->smt) === 1;
     }
 
     private function requireNonZero(Expr $at, Term $divisor, Term $pc): void

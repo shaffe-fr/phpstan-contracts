@@ -545,6 +545,7 @@ final class StatementTranslator
 
         $line = $loop->getStartLine();
         $length = Smt::listLength($list);
+        $this->encoding->noteUnrolledLoop($line, new LoopBound($bound, $this->printer->prettyPrintExpr($loop->expr), $origin, $this->canBeNamedInContract($loop->expr, $state)));
         $exits = [];
         $current = $state;
         for ($k = 0; $k < $bound && !$current->reached->isFalse(); ++$k) {

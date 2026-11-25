@@ -45,6 +45,12 @@ final class Encoding
     /** @var list<array{int, int, int}> the loops being translated: line, iteration and bound */
     private array $loops = [];
 
+    /** @var array<int, LoopBound> the loops the script unrolls, by line */
+    private array $unrolledLoops = [];
+
+    /** @var array<'product'|'division'|'modulo', string> the first operation of each non-linear kind, as written */
+    private array $nonLinearOperations = [];
+
     /** Whether the script holds a loop, which gets the solver option of the retry. */
     public bool $needsSolverFallback = false;
 
@@ -315,6 +321,48 @@ final class Encoding
     public function enclosingBounds(): array
     {
         return array_map(static fn (array $frame): int => $frame[2], $this->loops);
+    }
+
+    /**
+     * Notes that the `foreach` at `$line` is unrolled. A loop inside another is met once per
+     * iteration of the outer one, and counts once, with its largest bound.
+     */
+    public function noteUnrolledLoop(int $line, LoopBound $loop): void
+    {
+        $known = $this->unrolledLoops[$line] ?? null;
+        if ($known === null || $known->iterations < $loop->iterations) {
+            $this->unrolledLoops[$line] = $loop;
+        }
+    }
+
+    /**
+     * The loops the script unrolls, which make the length of each iterated list part of every check.
+     *
+     * @return array<int, LoopBound> by line
+     */
+    public function unrolledLoops(): array
+    {
+        return $this->unrolledLoops;
+    }
+
+    /**
+     * Notes an operation that is not linear, which Z3 decides only in part: the product of two
+     * terms that are not constants, or a division or a modulo by one. `$source` is the code as
+     * written; the first one of each kind is kept to show in a message.
+     *
+     * @param 'product'|'division'|'modulo' $kind
+     */
+    public function noteNonLinear(string $kind, string $source): void
+    {
+        $this->nonLinearOperations[$kind] ??= $source;
+    }
+
+    /**
+     * @return array<'product'|'division'|'modulo', string> the first operation of each kind, as written
+     */
+    public function nonLinearOperations(): array
+    {
+        return $this->nonLinearOperations;
     }
 
     /**

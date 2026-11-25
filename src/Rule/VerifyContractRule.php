@@ -7,6 +7,7 @@ namespace PhpstanContracts\Rule;
 use PhpstanContracts\Contract\ContractReader;
 use PhpstanContracts\Exception\VerificationRejected;
 use PhpstanContracts\Report\CounterexampleFormatter;
+use PhpstanContracts\Report\UnknownExplainer;
 use PhpstanContracts\Solver\ScriptRenderer;
 use PhpstanContracts\Solver\SolverFailure;
 use PhpstanContracts\Solver\SolverResult;
@@ -36,6 +37,8 @@ final class VerifyContractRule implements Rule
 {
     private const BODILESS = 'Contracts on abstract and interface methods are not verified, and the methods that implement them do not inherit them: put the contract on each concrete method.';
 
+    private readonly UnknownExplainer $explainer;
+
     public function __construct(
         private readonly ContractReader $contracts,
         private readonly MethodEncoder $encoder,
@@ -48,6 +51,7 @@ final class VerifyContractRule implements Rule
     ) {
         // The translation uses these two numbers; they are checked here, where the other settings of the rule are.
         LoopBounds::validateLimits($loopUnroll, $maxLoopUnroll);
+        $this->explainer = new UnknownExplainer();
     }
 
     public function getNodeType(): string
@@ -111,9 +115,10 @@ final class VerifyContractRule implements Rule
 
     /**
      * @param list<SolverResult> $results
+     * @param array<int, list<int>> $undecidedLengths by check number, the lengths of the iterated list that a split by length could not decide
      * @return list<IdentifierRuleError>
      */
-    private function interpret(Encoding $encoding, array $results, int $methodLine): array
+    private function interpret(Encoding $encoding, array $results, int $methodLine, array $undecidedLengths = []): array
     {
         $cursor = 0;
         $errors = [];
@@ -156,7 +161,7 @@ final class VerifyContractRule implements Rule
                     $obligation->line,
                 );
             } elseif ($result->verdict === Verdict::Unknown) {
-                $errors[] = $this->undecided($this->claimOf($obligation), $obligation->line);
+                $errors[] = $this->undecided($encoding, $this->claimOf($obligation), $obligation->line, $undecidedLengths[$check] ?? []);
             }
         }
 
@@ -175,7 +180,7 @@ final class VerifyContractRule implements Rule
                     $ensures->line,
                 );
             } elseif ($result->verdict === Verdict::Unknown) {
-                $errors[] = $this->undecided(sprintf('#[Ensures(\'%s\')]', $ensures->source), $ensures->line);
+                $errors[] = $this->undecided($encoding, sprintf('#[Ensures(\'%s\')]', $ensures->source), $ensures->line, $undecidedLengths[$check] ?? []);
             }
         }
 
@@ -195,7 +200,7 @@ final class VerifyContractRule implements Rule
                     $throws->line,
                 );
             } elseif ($result->verdict === Verdict::Unknown) {
-                $errors[] = $this->undecided($declaration, $throws->line);
+                $errors[] = $this->undecided($encoding, $declaration, $throws->line, $undecidedLengths[$check] ?? []);
             }
         }
 
@@ -215,7 +220,7 @@ final class VerifyContractRule implements Rule
                     $returnTypeCheck->line,
                 );
             } elseif ($result->verdict === Verdict::Unknown) {
-                $errors[] = $this->undecided($this->claimOf($returnTypeCheck), $returnTypeCheck->line);
+                $errors[] = $this->undecided($encoding, $this->claimOf($returnTypeCheck), $returnTypeCheck->line, $undecidedLengths[$check] ?? []);
             }
         }
 
@@ -397,13 +402,15 @@ final class VerifyContractRule implements Rule
         return [$callee, $calls === [] ? null : implode(', through ', $calls)];
     }
 
-    private function undecided(string $claim, int $line): IdentifierRuleError
+    /**
+     * @param list<int> $undecidedLengths the lengths of the iterated list that a split by length did not decide
+     */
+    private function undecided(Encoding $encoding, string $claim, int $line, array $undecidedLengths = []): IdentifierRuleError
     {
-        return $this->error(
-            sprintf('Not proven: Z3 answered "unknown" after %d ms for %s.', $this->timeoutMs, $claim),
-            'contracts.unknown',
-            $line,
-        );
+        $message = sprintf('Not proven: Z3 answered "unknown" after %d ms for %s.', $this->timeoutMs, $claim);
+        $cost = $this->explainer->explain($encoding, $undecidedLengths);
+
+        return $this->error($cost === '' ? $message : $message . ' ' . $cost, 'contracts.unknown', $line);
     }
 
     private function error(string $message, string $identifier, int $line): IdentifierRuleError
