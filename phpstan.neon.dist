@@ -7,3 +7,6 @@ parameters:
 		- examples
 	contracts:
 		timeoutMs: 30000
+		# The examples include checks that stay unknown on purpose, and a slow runner must neither cut them by a budget nor have them remembered from an earlier run.
+		methodBudgetMs: 600000
+		rememberUndecided: false
