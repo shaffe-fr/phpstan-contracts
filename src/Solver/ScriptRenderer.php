@@ -115,6 +115,10 @@ final class ScriptRenderer
      * A script with one check, number 0, that asks again for the check `$check` of {@see self::render()},
      * alone and with Z3's default options. It holds what the main script assumes before that check: the
      * commands, and the obligations that come earlier, so its answer is the answer to the same question.
+     *
+     * The check has no `push`/`pop`: a script that never pushes is answered by Z3's non-incremental
+     * solver, which decides some checks that the incremental one leaves `unknown`. It is the same
+     * question, so the answer means the same; only the way Z3 searches changes.
      */
     public function renderSingleCheck(Encoding $encoding, int $check): string
     {
@@ -124,7 +128,7 @@ final class ScriptRenderer
         if ($check === 0) {
             $boundary = $encoding->assumptionBoundary() ?? count($commands);
             array_push($lines, ...array_slice($commands, 0, $boundary));
-            array_push($lines, '(echo "@@0")', '(push 1)', '(check-sat)', "(get-value ($observed))", '(pop 1)');
+            array_push($lines, '(echo "@@0")', '(check-sat)', "(get-value ($observed))");
             return implode("\n", $lines) . "\n";
         }
         array_push($lines, ...$commands);
@@ -135,7 +139,7 @@ final class ScriptRenderer
             }
         }
         [$violation] = $violations[$check - 1] ?? throw new \LogicException('There is no check number ' . $check . '.');
-        array_push($lines, ...$this->check(0, $violation, $observed));
+        array_push($lines, '(echo "@@0")', '(assert ' . $violation->smt . ')', '(check-sat)', "(get-value ($observed))");
         return implode("\n", $lines) . "\n";
     }
 
