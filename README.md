@@ -222,7 +222,7 @@ The run reports 73 errors, all intended: 68 from this extension (the examples th
 
 ## Status
 
-Early MVP, tested with Z3 5.4.1, PHP 8.3 to 8.5 and PHPStan 2.x. Feedback and real-world contracts are very welcome: open an issue.
+Early MVP, tested with Z3 5.4.1, PHP 8.3 to 8.5 and PHPStan 2.x. The CI runs the whole suite and the examples on Linux (PHP 8.3, 8.4, 8.5), Windows and macOS (PHP 8.5). Feedback and real-world contracts are very welcome: open an issue.
 
 ## License
 
