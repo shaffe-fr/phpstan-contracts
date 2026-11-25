@@ -6,6 +6,6 @@ namespace PhpstanContracts\Solver;
 
 use RuntimeException;
 
-final class SolverFailure extends RuntimeException
+class SolverFailure extends RuntimeException
 {
 }

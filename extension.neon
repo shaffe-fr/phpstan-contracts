@@ -6,6 +6,9 @@ parameters:
 		maxLoopUnroll: 100
 		cacheDirectory: %tmpDir%/contracts
 		parallelism: null
+		methodBudgetMs: 60000
+		runBudgetMs: 0
+		rememberUndecided: true
 
 parametersSchema:
 	contracts: structure([
@@ -15,6 +18,9 @@ parametersSchema:
 		maxLoopUnroll: int()
 		cacheDirectory: schema(string(), nullable())
 		parallelism: schema(int(), nullable())
+		methodBudgetMs: int()
+		runBudgetMs: int()
+		rememberUndecided: bool()
 	])
 
 services:
@@ -29,6 +35,11 @@ services:
 			loopUnroll: %contracts.loopUnroll%
 			maxLoopUnroll: %contracts.maxLoopUnroll%
 	- PhpstanContracts\Solver\ScriptRenderer
+	- PhpstanContracts\Solver\SystemClock
+	-
+		class: PhpstanContracts\Solver\RunBudget
+		arguments:
+			limitMs: %contracts.runBudgetMs%
 	- PhpstanContracts\Report\ValueFormatter
 	- PhpstanContracts\Report\CounterexampleFormatter
 	-
@@ -42,9 +53,15 @@ services:
 			timeoutMs: %contracts.timeoutMs%
 			parallelism: %contracts.parallelism%
 	-
+		class: PhpstanContracts\Solver\MethodSolver
+		arguments:
+			methodBudgetMs: %contracts.methodBudgetMs%
+			rememberUndecided: %contracts.rememberUndecided%
+	-
 		class: PhpstanContracts\Rule\VerifyContractRule
 		arguments:
 			timeoutMs: %contracts.timeoutMs%
+			methodBudgetMs: %contracts.methodBudgetMs%
 			loopUnroll: %contracts.loopUnroll%
 			maxLoopUnroll: %contracts.maxLoopUnroll%
 		tags:

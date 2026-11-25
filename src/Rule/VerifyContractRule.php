@@ -8,10 +8,12 @@ use PhpstanContracts\Contract\ContractReader;
 use PhpstanContracts\Exception\VerificationRejected;
 use PhpstanContracts\Report\CounterexampleFormatter;
 use PhpstanContracts\Report\UnknownExplainer;
-use PhpstanContracts\Solver\CaseSplit;
+use PhpstanContracts\Solver\MethodSolver;
+use PhpstanContracts\Solver\RunBudgetExhausted;
 use PhpstanContracts\Solver\ScriptRenderer;
 use PhpstanContracts\Solver\SolverFailure;
 use PhpstanContracts\Solver\SolverResult;
+use PhpstanContracts\Solver\UnknownReason;
 use PhpstanContracts\Solver\Verdict;
 use PhpstanContracts\Solver\Z3Runner;
 use PhpstanContracts\Translate\Encoding;
@@ -45,8 +47,10 @@ final class VerifyContractRule implements Rule
         private readonly MethodEncoder $encoder,
         private readonly ScriptRenderer $renderer,
         private readonly Z3Runner $z3,
+        private readonly MethodSolver $solver,
         private readonly CounterexampleFormatter $formatter,
         private readonly int $timeoutMs,
+        private readonly int $methodBudgetMs,
         int $loopUnroll = 10,
         int $maxLoopUnroll = 100,
     ) {
@@ -77,66 +81,16 @@ final class VerifyContractRule implements Rule
             }
 
             $encoding = $this->encoder->encode($node, $scope, $contract);
-            $results = $this->z3->run($this->renderer->render($encoding), $this->renderer->checkCount($encoding));
-            $undecidedLengths = [];
-            if ($encoding->needsSolverFallback) {
-                [$results, $undecidedLengths] = $this->retryUndecided($encoding, $results);
-            }
+            $answer = $this->solver->solve($encoding);
         } catch (VerificationRejected $rejected) {
             return [$this->error($rejected->getMessage(), $rejected->identifier, $rejected->errorLine)];
+        } catch (RunBudgetExhausted $exhausted) {
+            return [$this->error($this->runBudgetMessage($exhausted), 'contracts.unknown', $method->getStartLine())];
         } catch (SolverFailure $failure) {
             return [$this->error($failure->getMessage(), 'contracts.solver', $method->getStartLine())];
         }
 
-        return $this->interpret($encoding, $results, $method->getStartLine(), $undecidedLengths);
-    }
-
-    /**
-     * Asks again, alone and with Z3's default options, every check of a loop script that came
-     * back `unknown`: the option of the main script suits most checks, and a few are decided
-     * only by the default solver. The new answer replaces `unknown`; if the retry fails or is
-     * `unknown` too, the first answer stays, and `unknown` is never read as a proof.
-     *
-     * A check that the retry leaves `unknown` is asked once more, once per length of the list that
-     * drives the unrolling, see {@see CaseSplit}, when the loop is bounded by few enough lengths.
-     * That is the same question cut into a partition, so its answer replaces `unknown` too, and the
-     * lengths that it could not decide are kept for the message.
-     *
-     * @param list<SolverResult> $results
-     * @return array{list<SolverResult>, array<int, list<int|string>>} the results, and by check number the cases of the split that were not decided
-     */
-    private function retryUndecided(Encoding $encoding, array $results): array
-    {
-        $undecided = [];
-        $split = $encoding->splitLength();
-        $cases = $split === null ? null : CaseSplit::cases($split[0], $split[1]);
-        foreach ($results as $check => $result) {
-            if ($result->verdict !== Verdict::Unknown) {
-                continue;
-            }
-            try {
-                $single = $this->renderer->renderSingleCheck($encoding, $check);
-                $results[$check] = $this->z3->run($single, 1)[0];
-                // The satisfiability of the assumptions is not about the body, so the length of an
-                // iterated list is not part of its script.
-                if ($results[$check]->verdict !== Verdict::Unknown || $cases === null || $check === 0) {
-                    continue;
-                }
-                $outcome = $this->z3->runSplit(
-                    $single,
-                    $cases,
-                    array_map(fn ($case): string => $this->renderer->renderSingleCheck($encoding, $check, $case), $cases),
-                );
-            } catch (SolverFailure) {
-                continue;
-            }
-            $results[$check] = $outcome->result;
-            if ($outcome->undecided !== []) {
-                $undecided[$check] = $outcome->undecided;
-            }
-        }
-
-        return [$results, $undecided];
+        return $this->interpret($encoding, $answer->results, $method->getStartLine(), $answer->undecidedLengths);
     }
 
     /**
@@ -159,10 +113,7 @@ final class VerifyContractRule implements Rule
         }
         if ($assumptions === Verdict::Unknown) {
             $errors[] = $this->error(
-                sprintf(
-                    'Not proven: Z3 answered "unknown" after %d ms for the satisfiability of the parameter types and #[Requires], so every proof of this method may be vacuous.',
-                    $this->timeoutMs,
-                ),
+                $this->unknownMessage($results[0], 'the satisfiability of the parameter types and #[Requires], so every proof of this method may be vacuous'),
                 'contracts.unknown',
                 $methodLine,
             );
@@ -187,7 +138,7 @@ final class VerifyContractRule implements Rule
                     $obligation->line,
                 );
             } elseif ($result->verdict === Verdict::Unknown) {
-                $errors[] = $this->undecided($encoding, $this->claimOf($obligation), $obligation->line, $undecidedLengths[$check] ?? []);
+                $errors[] = $this->undecided($encoding, $this->claimOf($obligation), $obligation->line, $result, $undecidedLengths[$check] ?? []);
             }
         }
 
@@ -206,7 +157,7 @@ final class VerifyContractRule implements Rule
                     $ensures->line,
                 );
             } elseif ($result->verdict === Verdict::Unknown) {
-                $errors[] = $this->undecided($encoding, sprintf('#[Ensures(\'%s\')]', $ensures->source), $ensures->line, $undecidedLengths[$check] ?? []);
+                $errors[] = $this->undecided($encoding, sprintf('#[Ensures(\'%s\')]', $ensures->source), $ensures->line, $result, $undecidedLengths[$check] ?? []);
             }
         }
 
@@ -226,7 +177,7 @@ final class VerifyContractRule implements Rule
                     $throws->line,
                 );
             } elseif ($result->verdict === Verdict::Unknown) {
-                $errors[] = $this->undecided($encoding, $declaration, $throws->line, $undecidedLengths[$check] ?? []);
+                $errors[] = $this->undecided($encoding, $declaration, $throws->line, $result, $undecidedLengths[$check] ?? []);
             }
         }
 
@@ -246,7 +197,7 @@ final class VerifyContractRule implements Rule
                     $returnTypeCheck->line,
                 );
             } elseif ($result->verdict === Verdict::Unknown) {
-                $errors[] = $this->undecided($encoding, $this->claimOf($returnTypeCheck), $returnTypeCheck->line, $undecidedLengths[$check] ?? []);
+                $errors[] = $this->undecided($encoding, $this->claimOf($returnTypeCheck), $returnTypeCheck->line, $result, $undecidedLengths[$check] ?? []);
             }
         }
 
@@ -431,12 +382,44 @@ final class VerifyContractRule implements Rule
     /**
      * @param list<int|string> $undecidedLengths the cases of the split by length that were not decided: lengths, and the description of the case outside the bound
      */
-    private function undecided(Encoding $encoding, string $claim, int $line, array $undecidedLengths = []): IdentifierRuleError
+    private function undecided(Encoding $encoding, string $claim, int $line, SolverResult $result, array $undecidedLengths = []): IdentifierRuleError
     {
-        $message = sprintf('Not proven: Z3 answered "unknown" after %d ms for %s.', $this->timeoutMs, $claim);
+        $message = $this->unknownMessage($result, $claim);
         $cost = $this->explainer->explain($encoding, $undecidedLengths);
 
         return $this->error($cost === '' ? $message : $message . ' ' . $cost, 'contracts.unknown', $line);
+    }
+
+    /**
+     * Why the check is not proven. Z3 giving up at its limit, the budget of the method that ran out
+     * before the check was tried in full, and an earlier run that left it undecided are three different
+     * facts, each with its own way out.
+     */
+    private function unknownMessage(SolverResult $result, string $claim): string
+    {
+        return match ($result->reason) {
+            UnknownReason::Budget => sprintf(
+                'Not proven: the time budget of this method (contracts.methodBudgetMs, %d ms) ran out before Z3 decided %s. Raise contracts.methodBudgetMs, or set it to 0 for no limit.',
+                $this->methodBudgetMs,
+                $claim,
+            ),
+            UnknownReason::Remembered => sprintf(
+                'Not proven: an earlier run, with the same limits (contracts.timeoutMs %d ms, contracts.methodBudgetMs %d ms), left %s undecided, so Z3 was not asked again. To try again, clear the cache directory (contracts.cacheDirectory) or change one of these limits.',
+                $this->timeoutMs,
+                $this->methodBudgetMs,
+                $claim,
+            ),
+            null => sprintf('Not proven: Z3 answered "unknown" after %d ms for %s.', $this->timeoutMs, $claim),
+        };
+    }
+
+    private function runBudgetMessage(RunBudgetExhausted $exhausted): string
+    {
+        return sprintf(
+            'Not verified: the solver budget of this run is exhausted (%d ms spent, contracts.runBudgetMs is %d ms), so Z3 was not asked about this method. Raise contracts.runBudgetMs, or set it to 0 for no limit. The next run starts again with a fresh budget.',
+            $exhausted->spentMs,
+            $exhausted->limitMs,
+        );
     }
 
     private function error(string $message, string $identifier, int $line): IdentifierRuleError

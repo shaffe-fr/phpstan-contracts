@@ -8,10 +8,12 @@ final readonly class SolverResult
 {
     /**
      * @param array<string, string|list<mixed>> $values SMT constant name => raw S-expression value, only filled when satisfiable
+     * @param UnknownReason|null $reason for an `unknown` that Z3 did not give by itself at its time limit
      */
     public function __construct(
         public Verdict $verdict,
         public array $values = [],
+        public ?UnknownReason $reason = null,
     ) {
     }
 }

@@ -28,4 +28,27 @@ final class TimeLimits
     {
         return intdiv($perCheckMs * $checkCount + 999, 1000) + 10;
     }
+
+    /**
+     * Milliseconds after which the Z3 process of a run under a budget is killed, `$remainingMs` being
+     * what is left of the budget. It is the limit of {@see self::processSeconds()}, which never comes
+     * before the limits of the checks, unless the budget is spent first: then it is the budget that
+     * cuts the run, and the process is never kept beyond it.
+     *
+     * @param int<1, 86400000> $perCheckMs at most a day
+     * @param int<1, 100000> $checkCount
+     * @param int<1, 86400000> $remainingMs at most a day
+     */
+    #[Ensures('$result >= 1')]
+    #[Ensures('$result <= $remainingMs')]
+    #[Ensures('$result === $remainingMs || $result >= $perCheckMs * $checkCount + 10000')]
+    public static function killMs(int $perCheckMs, int $checkCount, int $remainingMs): int
+    {
+        $full = self::processSeconds($perCheckMs, $checkCount) * 1000;
+        if ($remainingMs < $full) {
+            return $remainingMs;
+        }
+
+        return $full;
+    }
 }

@@ -10,6 +10,11 @@ namespace PhpstanContracts\Solver;
  * Only scripts whose every check was settled are stored. An `unknown` depends on the time limit and may
  * turn into an answer with a longer one, so a script that holds one is always sent to Z3 again.
  *
+ * A check that stayed `unknown` after everything that is tried (see {@see MethodSolver}) is remembered
+ * apart, as undecided under the limits of that run: it is a mark that spares the next run the same
+ * work, never an answer, and `get()` does not read it. The time Z3 needs depends on the machine, and
+ * the cache is local to it.
+ *
  * The cache can only lose information, never invent it: an entry that cannot be read back exactly is
  * ignored, and a write that fails is skipped. Entries are trusted like the rest of PHPStan's temporary
  * directory, so a cache directory must not be writable by anyone who should not be able to turn a
@@ -18,6 +23,13 @@ namespace PhpstanContracts\Solver;
 final class ProofCache
 {
     private const FORMAT = 1;
+
+    /**
+     * Bump it whenever the way an undecided check is asked again changes: the retry, the split by
+     * length ({@see CaseSplit}), the seeds and the options of the cases ({@see Z3Runner}). What an
+     * earlier run left undecided was undecided by the old strategy, and the new one may decide it.
+     */
+    public const STRATEGY_VERSION = 1;
 
     public function __construct(
         private readonly ?string $directory,
@@ -31,9 +43,40 @@ final class ProofCache
 
     public function key(string $binary, string $script): string
     {
-        $identity = realpath($binary) . "\0" . filesize($binary) . "\0" . filemtime($binary);
+        return hash('sha256', self::FORMAT . "\0" . $this->identity($binary) . "\0" . $script);
+    }
 
-        return hash('sha256', self::FORMAT . "\0" . $identity . "\0" . $script);
+    /**
+     * The key under which a check that stayed `unknown` after the whole strategy is remembered. It holds
+     * everything that decides the outcome: the script of the check, the solver build, the two limits
+     * and the strategy. A run that changes any of them finds nothing.
+     */
+    public function undecidedKey(string $binary, string $script, int $timeoutMs, int $methodBudgetMs): string
+    {
+        return hash('sha256', implode("\0", ['undecided', self::FORMAT, self::STRATEGY_VERSION, $timeoutMs, $methodBudgetMs, $this->identity($binary), $script]));
+    }
+
+    public function isUndecided(string $key): bool
+    {
+        $path = $this->undecidedPathOf($key);
+        $json = $path === null || !is_file($path) ? false : @file_get_contents($path);
+        if ($json === false) {
+            return false;
+        }
+        $decoded = json_decode($json, true);
+
+        return is_array($decoded)
+            && ($decoded['format'] ?? null) === self::FORMAT
+            && ($decoded['kind'] ?? null) === 'undecided'
+            && ($decoded['key'] ?? null) === $key;
+    }
+
+    public function markUndecided(string $key): void
+    {
+        $json = json_encode(['format' => self::FORMAT, 'kind' => 'undecided', 'key' => $key]);
+        if ($json !== false) {
+            $this->write($this->undecidedPathOf($key), $json);
+        }
     }
 
     /**
@@ -96,6 +139,14 @@ final class ProofCache
             return;
         }
 
+        $this->write($path, $json);
+    }
+
+    private function write(?string $path, string $json): void
+    {
+        if ($path === null || $this->directory === null) {
+            return;
+        }
         if (!is_dir($this->directory) && !@mkdir($this->directory, 0777, true) && !is_dir($this->directory)) {
             return;
         }
@@ -111,9 +162,19 @@ final class ProofCache
         }
     }
 
+    private function identity(string $binary): string
+    {
+        return realpath($binary) . "\0" . filesize($binary) . "\0" . filemtime($binary);
+    }
+
     private function pathOf(string $key): ?string
     {
         return $this->directory === null ? null : $this->directory . DIRECTORY_SEPARATOR . $key . '.json';
+    }
+
+    private function undecidedPathOf(string $key): ?string
+    {
+        return $this->directory === null ? null : $this->directory . DIRECTORY_SEPARATOR . 'undecided-' . $key . '.json';
     }
 
     private function restore(mixed $entry): ?SolverResult

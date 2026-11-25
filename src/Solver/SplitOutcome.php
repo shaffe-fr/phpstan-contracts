@@ -27,8 +27,9 @@ final readonly class SplitOutcome
     /**
      * @param list<SplitCase> $cases a partition of the lengths
      * @param array<int, SolverResult|null> $answers by position in `$cases`, null when the case has no answer
+     * @param bool $cut whether the budget stopped a case that has no answer, which makes the check `unknown` for that reason
      */
-    public static function combine(array $cases, array $answers): self
+    public static function combine(array $cases, array $answers, bool $cut = false): self
     {
         if ($cases === []) {
             throw new LogicException('A split has at least one case.');
@@ -45,6 +46,10 @@ final readonly class SplitOutcome
             }
         }
 
-        return new self(new SolverResult($undecided === [] ? Verdict::Unsat : Verdict::Unknown), $undecided);
+        if ($undecided === []) {
+            return new self(new SolverResult(Verdict::Unsat));
+        }
+
+        return new self(new SolverResult(Verdict::Unknown, [], $cut ? UnknownReason::Budget : null), $undecided);
     }
 }

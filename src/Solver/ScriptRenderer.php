@@ -49,7 +49,11 @@ final class ScriptRenderer
         return 1 + count($encoding->obligations) + count($encoding->ensures) + count($encoding->throwsChecks) + ($encoding->returnTypeCheck === null ? 0 : 1);
     }
 
-    public function render(Encoding $encoding): string
+    /**
+     * @param list<int> $skipped the checks that are not asked: their assumptions stay, so that the others
+     *                           mean what they do in the whole script, and they have no answer in the output
+     */
+    public function render(Encoding $encoding, array $skipped = []): string
     {
         $lines = ['(set-option :produce-models true)'];
         if ($encoding->needsSolverFallback) {
@@ -64,13 +68,19 @@ final class ScriptRenderer
         array_push($lines, ...array_slice($commands, 0, $boundary));
 
         $index = 0;
-        array_push($lines, sprintf('(echo "@@%d")', $index++), '(check-sat)');
+        if (!in_array($index, $skipped, true)) {
+            array_push($lines, '(echo "@@0")', '(check-sat)');
+        }
+        ++$index;
         array_push($lines, ...array_slice($commands, $boundary));
 
         $observed = implode(' ', $encoding->observedTerms());
 
         foreach ($this->violations($encoding) as [$violation, $assumed]) {
-            array_push($lines, ...$this->check($index++, $violation, $observed));
+            if (!in_array($index, $skipped, true)) {
+                array_push($lines, ...$this->check($index, $violation, $observed));
+            }
+            ++$index;
             if ($assumed !== null) {
                 $lines[] = '(assert ' . $assumed->smt . ')';
             }
