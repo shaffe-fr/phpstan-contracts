@@ -4,3 +4,5 @@ parameters:
 		loopUnroll: 3
 		maxLoopUnroll: 8
 		cacheDirectory: null
+		# Far above any method here, so that a slow runner never turns an answer or an expected unknown into a budget cut.
+		methodBudgetMs: 600000

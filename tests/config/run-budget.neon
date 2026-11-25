@@ -1,0 +1,6 @@
+parameters:
+	contracts:
+		timeoutMs: 30000
+		cacheDirectory: null
+		# Below the time of any Z3 process, so that the first method that asks Z3 uses it up.
+		runBudgetMs: 1

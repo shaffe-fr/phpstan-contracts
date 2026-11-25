@@ -1,0 +1,6 @@
+parameters:
+	contracts:
+		timeoutMs: 30000
+		cacheDirectory: null
+		# Below the time of any Z3 process, so that no check of a method is tried in full.
+		methodBudgetMs: 1
