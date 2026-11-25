@@ -42,6 +42,11 @@ final class TypeMapper
 
     private ?VerificationRejected $recursion = null;
 
+    /** How many properties a message names before it counts the rest. */
+    private const LISTED_PROPERTIES = 5;
+
+    private const SUPPORTED_CLASSES = 'only enums, dates, readonly data classes, lists, array shapes with string keys and scalars are';
+
     /** @var array<string, string|null> class declaring a constructor => why its body cannot be modelled, null when it is empty */
     private array $constructorBodies = [];
 
@@ -270,6 +275,8 @@ final class TypeMapper
         try {
             $fieldSpecs = [];
             $unmodelled = [];
+            // The public readonly properties that could not be modelled, with their type and the reason.
+            $publicReadonly = [];
             foreach ($native->getProperties() as $property) {
                 if ($property->isStatic()) {
                     continue;
@@ -282,14 +289,17 @@ final class TypeMapper
                     );
                     continue;
                 }
+                $declared = $class->getNativeProperty($property->getName());
+                $fieldType = $declared->getReadableType();
+                // typeOnly() would print an array shape as array<string, int>, without its keys.
+                $typeName = $fieldType->describe(TypeCombinator::removeNull($fieldType)->isArray()->yes() ? VerbosityLevel::value() : VerbosityLevel::typeOnly());
                 $uninitialized = $this->uninitializedReason($class, $constructor, $property, $label);
                 if ($uninitialized !== null) {
                     $unmodelled[$property->getName()] = $uninitialized;
+                    $publicReadonly[$property->getName()] = sprintf('$%s (%s): %s', $property->getName(), $typeName, $uninitialized);
                     continue;
                 }
 
-                $declared = $class->getNativeProperty($property->getName());
-                $fieldType = $declared->getReadableType();
                 try {
                     $fieldSpec = $this->map($fieldType, $line, true);
                     if (self::holdsFloat($fieldSpec->sort) && !$this->convertsToFloat($declared->getNativeType())) {
@@ -299,6 +309,7 @@ final class TypeMapper
                             $fieldType->describe(VerbosityLevel::typeOnly()),
                             $declared->getNativeType()->describe(VerbosityLevel::typeOnly()),
                         );
+                        $publicReadonly[$property->getName()] = sprintf('$%s (%s): %s', $property->getName(), $typeName, $unmodelled[$property->getName()]);
                         continue;
                     }
                     $fieldSpecs[$property->getName()] = $fieldSpec;
@@ -313,6 +324,7 @@ final class TypeMapper
                         $label,
                         $unsupported->getMessage(),
                     );
+                    $publicReadonly[$property->getName()] = sprintf('$%s (%s): %s', $property->getName(), $typeName, $unsupported->getMessage());
                 }
             }
         } finally {
@@ -320,10 +332,7 @@ final class TypeMapper
         }
 
         if ($fieldSpecs === []) {
-            throw new VerificationRejected(
-                $unmodelled === [] ? sprintf('Class %s has no properties to model.', $className) : reset($unmodelled),
-                $line,
-            );
+            throw new VerificationRejected($this->noModelledProperty($class, $unmodelled, $publicReadonly), $line);
         }
 
         [$order, $refusal] = $this->constructorOrder($constructor, $fieldSpecs, $unmodelled);
@@ -341,6 +350,44 @@ final class TypeMapper
             Sort::record($record),
             fields: $fieldSpecs,
             description: $class->getDisplayName(),
+        );
+    }
+
+    /**
+     * Why a class that has no property to model is not a supported type. What the user can act
+     * on comes first: the public readonly properties whose type is not supported, each with its
+     * type and reason, and only then the properties that are not public and readonly, which
+     * come from a base class as often as not.
+     *
+     * @param array<string, string> $unmodelled
+     * @param array<string, string> $publicReadonly
+     */
+    private function noModelledProperty(ClassReflection $class, array $unmodelled, array $publicReadonly): string
+    {
+        $name = $class->getDisplayName();
+        $head = sprintf('Type %s is not supported: %s.', $name, self::SUPPORTED_CLASSES);
+
+        if ($unmodelled === []) {
+            return sprintf('%s %s has no properties to model.', $head, $name);
+        }
+        if ($publicReadonly === []) {
+            return sprintf('%s %s', $head, reset($unmodelled));
+        }
+
+        // The sentence about what is supported is said once, at the head of the message.
+        $listed = array_map(
+            static fn (string $reason): string => rtrim(str_replace(' ' . self::SUPPORTED_CLASSES . '.', '', $reason), '.'),
+            array_slice(array_values($publicReadonly), 0, self::LISTED_PROPERTIES),
+        );
+        $others = array_keys(array_diff_key($unmodelled, $publicReadonly));
+
+        return sprintf(
+            '%s None of the public readonly properties of %s can be modelled: %s%s%s',
+            $head,
+            $name,
+            implode('; ', $listed),
+            count($publicReadonly) > count($listed) ? sprintf('; and %d more', count($publicReadonly) - count($listed)) : '',
+            $others === [] ? '' : sprintf('. Its properties that are not public and readonly are not modelled either: %s', implode(', ', array_map(static fn (string $other): string => '$' . $other, array_slice($others, 0, self::LISTED_PROPERTIES)))),
         );
     }
 
