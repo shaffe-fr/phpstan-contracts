@@ -26,7 +26,7 @@ final class StatelessThisRuleTest extends RuleFixtureTestCase
                 'halved' => [],
                 'halvedWithoutPrecondition' => ['contracts.requiresViolated: The call to PhpstanContracts\Tests\Fixtures\StatelessGuard::half() can violate its precondition #[Requires(\'$amount >= 0\')]. Counterexample: $amount = -'],
                 'comparesThisToItself' => ['contracts.unsupported: Class PhpstanContracts\Tests\Fixtures\StatelessGuard has no instance property, so $this has no state to model: use it only as the receiver of a call, such as $this->helper(). Comparing it, passing it as an argument and reading a property of it are not supported.'],
-                'passesThisAsAnArgument' => ['contracts.unsupported: Class PhpstanContracts\Tests\Fixtures\StatelessGuard has no properties to model.'],
+                'passesThisAsAnArgument' => ['contracts.unsupported: PhpstanContracts\Tests\Fixtures\StatelessGuard has no properties to model.'],
                 'readsAProperty' => ['contracts.unsupported: Class PhpstanContracts\Tests\Fixtures\StatelessGuard has no instance property, so $this has no state to model'],
                 'measure' => [],
                 'isUnder' => [],
@@ -59,22 +59,22 @@ final class StatelessThisRuleTest extends RuleFixtureTestCase
     {
         $this->assertOutcomes([
             StatelessWithDependency::class => [
-                'callsAHelper' => ['contracts.unsupported: Object state ($this) is only part of the verified subset in enums, readonly data classes and classes without instance properties. Class PhpstanContracts\Tests\Fixtures\StatelessWithDependency has the instance property $rate, so $this has state. It cannot be modelled as data: Property PhpstanContracts\Tests\Fixtures\StatelessWithDependency::$rate must be public and readonly'],
+                'callsAHelper' => ['contracts.unsupported: Object state ($this) is only part of the verified subset in enums, readonly data classes and classes without instance properties. Class PhpstanContracts\Tests\Fixtures\StatelessWithDependency has the instance property $rate, so $this has state. It cannot be modelled as data: Type PhpstanContracts\Tests\Fixtures\StatelessWithDependency is not supported: only enums, readonly data classes, lists, array shapes with string keys and scalars are. Property PhpstanContracts\Tests\Fixtures\StatelessWithDependency::$rate must be public and readonly'],
                 'helper' => [],
             ],
             StatelessWithMutableProperty::class => [
-                'callsAHelper' => ['contracts.unsupported: Object state ($this) is only part of the verified subset in enums, readonly data classes and classes without instance properties. Class PhpstanContracts\Tests\Fixtures\StatelessWithMutableProperty has the instance property $count, so $this has state. It cannot be modelled as data: Property PhpstanContracts\Tests\Fixtures\StatelessWithMutableProperty::$count must be public and readonly'],
+                'callsAHelper' => ['contracts.unsupported: Object state ($this) is only part of the verified subset in enums, readonly data classes and classes without instance properties. Class PhpstanContracts\Tests\Fixtures\StatelessWithMutableProperty has the instance property $count, so $this has state. It cannot be modelled as data: Type PhpstanContracts\Tests\Fixtures\StatelessWithMutableProperty is not supported: only enums, readonly data classes, lists, array shapes with string keys and scalars are. Property PhpstanContracts\Tests\Fixtures\StatelessWithMutableProperty::$count must be public and readonly'],
                 'helper' => [],
             ],
             StatelessParentWithState::class => [
                 'hidden' => [],
             ],
             StatelessChildOfStatefulParent::class => [
-                'callsAHelper' => ['contracts.unsupported: Object state ($this) is only part of the verified subset in enums, readonly data classes and classes without instance properties. Class PhpstanContracts\Tests\Fixtures\StatelessChildOfStatefulParent has the instance property $hidden, so $this has state. It cannot be modelled as data: Class PhpstanContracts\Tests\Fixtures\StatelessChildOfStatefulParent has no properties to model.'],
+                'callsAHelper' => ['contracts.unsupported: Object state ($this) is only part of the verified subset in enums, readonly data classes and classes without instance properties. Class PhpstanContracts\Tests\Fixtures\StatelessChildOfStatefulParent has the instance property $hidden, so $this has state. It cannot be modelled as data: Type PhpstanContracts\Tests\Fixtures\StatelessChildOfStatefulParent is not supported: only enums, readonly data classes, lists, array shapes with string keys and scalars are. PhpstanContracts\Tests\Fixtures\StatelessChildOfStatefulParent has no properties to model.'],
                 'helper' => [],
             ],
             StatelessUsingTrait::class => [
-                'callsAHelper' => ['contracts.unsupported: Object state ($this) is only part of the verified subset in enums, readonly data classes and classes without instance properties. Class PhpstanContracts\Tests\Fixtures\StatelessUsingTrait has the instance property $fromTrait, so $this has state. It cannot be modelled as data: Property PhpstanContracts\Tests\Fixtures\StatelessUsingTrait::$fromTrait must be public and readonly'],
+                'callsAHelper' => ['contracts.unsupported: Object state ($this) is only part of the verified subset in enums, readonly data classes and classes without instance properties. Class PhpstanContracts\Tests\Fixtures\StatelessUsingTrait has the instance property $fromTrait, so $this has state. It cannot be modelled as data: Type PhpstanContracts\Tests\Fixtures\StatelessUsingTrait is not supported: only enums, readonly data classes, lists, array shapes with string keys and scalars are. Property PhpstanContracts\Tests\Fixtures\StatelessUsingTrait::$fromTrait must be public and readonly'],
                 'helper' => [],
             ],
         ]);

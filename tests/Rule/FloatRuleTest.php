@@ -52,7 +52,7 @@ final class FloatRuleTest extends RuleFixtureTestCase
             PhpDocFloat::class => [
                 'untypedParameter' => ['contracts.unsupported: Parameter $x has the PHPDoc type float but the native type mixed, which is what PHP converts its argument to: an int argument stays an int. Declare float in the signature.'],
                 'mixedParameter' => ['contracts.unsupported: Parameter $x has the PHPDoc type float but the native type mixed'],
-                'mixedField' => ['contracts.unsupported: Property PhpstanContracts\Tests\Fixtures\MixedMeasure::$amount cannot be read in a verified method: its PHPDoc type is float but its native type is mixed, so an int assigned to it stays an int. Declare float natively.'],
+                'mixedField' => ['contracts.unsupported: Type PhpstanContracts\Tests\Fixtures\MixedMeasure is not supported: only enums, readonly data classes, lists, array shapes with string keys and scalars are. None of the public readonly properties of PhpstanContracts\Tests\Fixtures\MixedMeasure can be modelled: $amount (float): Property PhpstanContracts\Tests\Fixtures\MixedMeasure::$amount cannot be read in a verified method: its PHPDoc type is float but its native type is mixed, so an int assigned to it stays an int. Declare float natively'],
                 'nativeNullableFloat' => [],
                 'nativeFloat' => [],
             ],

@@ -45,7 +45,7 @@ final class TypeMapper
     /** How many properties a message names before it counts the rest. */
     private const LISTED_PROPERTIES = 5;
 
-    private const SUPPORTED_CLASSES = 'only enums, dates, readonly data classes, lists, array shapes with string keys and scalars are';
+    private const SUPPORTED_CLASSES = 'only enums, readonly data classes, lists, array shapes with string keys and scalars are';
 
     /** @var array<string, string|null> class declaring a constructor => why its body cannot be modelled, null when it is empty */
     private array $constructorBodies = [];

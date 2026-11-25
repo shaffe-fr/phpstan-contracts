@@ -7,6 +7,7 @@ namespace PhpstanContracts\Tests\Rule;
 use PhpstanContracts\Tests\Fixtures\ClassNameCase;
 use PhpstanContracts\Tests\Fixtures\Construction;
 use PhpstanContracts\Tests\Fixtures\DataClassFixture;
+use PhpstanContracts\Tests\Fixtures\DataDiagnostics;
 use PhpstanContracts\Tests\Fixtures\Initialization;
 use PhpstanContracts\Tests\Fixtures\Interval;
 use PhpstanContracts\Tests\Fixtures\PriceContext;
@@ -57,13 +58,40 @@ final class DataClassRuleTest extends RuleFixtureTestCase
                 'buildsAnObjectWithAnUnmodelledProperty' => ['contracts.unsupported: Cannot instantiate PartlyMutable: its constructor sets $tags, which is not modelled'],
                 'nullsafeReadOfAMutableProperty' => ['contracts.unsupported: Property PhpstanContracts\Tests\Fixtures\PartlyMutable::$count must be public and readonly'],
                 'issetOfAMutableProperty' => ['contracts.unsupported: Property PhpstanContracts\Tests\Fixtures\PartlyMutable::$count must be public and readonly'],
-                'onlyAPropertyOfAnUnsupportedType' => ['contracts.unsupported: Property PhpstanContracts\Tests\Fixtures\OnlyTags::$tags cannot be read in a verified method: Type array<string, string> is not supported'],
+                'onlyAPropertyOfAnUnsupportedType' => ['contracts.unsupported: Type PhpstanContracts\Tests\Fixtures\OnlyTags is not supported: only enums, readonly data classes, lists, array shapes with string keys and scalars are. None of the public readonly properties of PhpstanContracts\Tests\Fixtures\OnlyTags can be modelled: $tags (array<string, string>): Type array<string, string> is not supported'],
                 'holdsARecursiveClass' => ['contracts.unsupported: Class PhpstanContracts\Tests\Fixtures\Recursive refers to itself; recursive types are not supported.'],
             ],
             PriceContext::class => [
                 'isBulk' => [],
                 'buildsAnObjectWithInheritedState' => [],
                 'readsInheritedState' => ['contracts.unsupported: Property PhpstanContracts\Tests\Fixtures\PriceContext::$_additional must be public and readonly'],
+            ],
+        ]);
+    }
+
+    /**
+     * A class with no property that can be modelled is reported with the public readonly
+     * properties whose type is not supported first, and the inherited state last. A class
+     * with one property that can be modelled stays accepted, and the others fail when read.
+     */
+    public function testAClassWithNoModelledPropertyNamesTheTypesThatAreNotSupported(): void
+    {
+        $unsupported = 'only enums, readonly data classes, lists, array shapes with string keys and scalars are.';
+        $model = 'Type PhpstanContracts\Tests\Fixtures\ModelLike is not supported: Property PhpstanContracts\Tests\Fixtures\ModelLike::$attributes must be public and readonly: only immutable data classes are supported';
+        $this->assertOutcomes([
+            DataDiagnostics::class => [
+                'takesADataClassWithNoSupportedProperty' => [
+                    'contracts.unsupported: Type PhpstanContracts\Tests\Fixtures\LoadedPricing is not supported: ' . $unsupported
+                    . ' None of the public readonly properties of PhpstanContracts\Tests\Fixtures\LoadedPricing can be modelled: $customer (PhpstanContracts\Tests\Fixtures\ModelLike|null): ' . $model
+                    . '; $product (PhpstanContracts\Tests\Fixtures\ModelLike): ' . $model
+                    . '; $lines (PhpstanContracts\Tests\Fixtures\CollectionLike): Type PhpstanContracts\Tests\Fixtures\CollectionLike is not supported: Property PhpstanContracts\Tests\Fixtures\CollectionLike::$items must be public and readonly: only immutable data classes are supported'
+                    . '. Its properties that are not public and readonly are not modelled either: $_additional, $_dataContext',
+                ],
+                'takesAModel' => ['contracts.unsupported: Type PhpstanContracts\Tests\Fixtures\ModelLike is not supported: ' . $unsupported . ' Property PhpstanContracts\Tests\Fixtures\ModelLike::$attributes must be public and readonly: only immutable data classes are supported.'],
+                'takesADataClassOfModelsOnly' => ['contracts.unsupported: Type PhpstanContracts\Tests\Fixtures\ModelsOnly is not supported: ' . $unsupported . ' None of the public readonly properties of PhpstanContracts\Tests\Fixtures\ModelsOnly can be modelled: $customer (PhpstanContracts\Tests\Fixtures\ModelLike): ' . $model . '; $product'],
+                'readsTheCountOfADataClassWithAModel' => [],
+                'takesADate' => ['contracts.unsupported: Type DateTimeImmutable is not supported: ' . $unsupported],
+                'readsTheModelOfADataClass' => ['contracts.unsupported: Property PhpstanContracts\Tests\Fixtures\PricingWithModel::$customer cannot be read in a verified method: Type PhpstanContracts\Tests\Fixtures\ModelLike is not supported: ' . $unsupported . ' Property PhpstanContracts\Tests\Fixtures\ModelLike::$attributes must be public and readonly'],
             ],
         ]);
     }
@@ -120,9 +148,9 @@ final class DataClassRuleTest extends RuleFixtureTestCase
     {
         $this->assertOutcomes([
             Initialization::class => [
-                'readsAPropertyOfANonFinalClass' => ['contracts.unsupported: Property PhpstanContracts\Tests\Fixtures\OpenPoint::$x may be uninitialized: PhpstanContracts\Tests\Fixtures\OpenPoint is not final and neither is its constructor, so a subclass constructor can skip the one that sets it. Make the class or the constructor final.'],
-                'readsAPropertyPromotedByAParentConstructor' => ['contracts.unsupported: Property PhpstanContracts\Tests\Fixtures\Origin::$x may be uninitialized: it is promoted by the constructor of PhpstanContracts\Tests\Fixtures\OpenPoint, which the constructor of PhpstanContracts\Tests\Fixtures\Origin does not have to call.'],
-                'readsAPropertyAssignedInTheConstructorBody' => ['contracts.unsupported: Property PhpstanContracts\Tests\Fixtures\LazyInit::$x may be uninitialized: only the properties promoted by the constructor are known to be set in every object.'],
+                'readsAPropertyOfANonFinalClass' => ['contracts.unsupported: Property PhpstanContracts\Tests\Fixtures\OpenPoint::$x may be uninitialized: PhpstanContracts\Tests\Fixtures\OpenPoint is not final and neither is its constructor, so a subclass constructor can skip the one that sets it. Make the class or the constructor final'],
+                'readsAPropertyPromotedByAParentConstructor' => ['contracts.unsupported: Property PhpstanContracts\Tests\Fixtures\Origin::$x may be uninitialized: it is promoted by the constructor of PhpstanContracts\Tests\Fixtures\OpenPoint, which the constructor of PhpstanContracts\Tests\Fixtures\Origin does not have to call'],
+                'readsAPropertyAssignedInTheConstructorBody' => ['contracts.unsupported: Property PhpstanContracts\Tests\Fixtures\LazyInit::$x may be uninitialized: only the properties promoted by the constructor are known to be set in every object'],
                 'readsAPropertyBehindAFinalConstructor' => [],
             ],
         ]);

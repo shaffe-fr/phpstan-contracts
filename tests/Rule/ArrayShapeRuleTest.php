@@ -72,7 +72,7 @@ final class ArrayShapeRuleTest extends RuleFixtureTestCase
                 'aUnionFieldType' => ['contracts.unsupported: Type float|string is not supported in verified methods'],
                 'aFloatFieldInAnInput' => ['contracts.unsupported: Type array{rate: float} is not supported for an input: PHP does not convert the values of an array'],
                 'aNullableFloatFieldInAnInput' => ['contracts.unsupported: Type array{rate: float|null} is not supported for an input'],
-                'readsAFloatShapePropertyOfADataClass' => ['contracts.unsupported: Property PhpstanContracts\\Tests\\Fixtures\\FloatShapeHolder::$rates cannot be read in a verified method: Type array{rate: float} is not supported for an input'],
+                'readsAFloatShapePropertyOfADataClass' => ['contracts.unsupported: Type PhpstanContracts\\Tests\\Fixtures\\FloatShapeHolder is not supported: only enums, readonly data classes, lists, array shapes with string keys and scalars are. None of the public readonly properties of PhpstanContracts\\Tests\\Fixtures\\FloatShapeHolder can be modelled: $rates (array{rate: float}): Type array{rate: float} is not supported for an input'],
                 'aFloatFieldBuiltInTheBody' => [],
                 'shapesWithDistinctNonUtf8KeysAreDistinctTypes' => ['contracts.unsupported: Branches have different types'],
             ],
