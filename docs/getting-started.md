@@ -18,9 +18,9 @@ Pick one of these. None of them needs Python.
 vendor/bin/phpstan-contracts-install-z3
 ```
 
-The command downloads the official Z3 5.4.1 release from the Z3 GitHub releases for your OS and CPU (Windows, Linux and macOS, x64 and arm64), unpacks the executable into `.z3/` inside the package, and runs it once to check that it starts. The extension then finds it by itself, so there is nothing to configure. It needs `ext-zip`, `ext-openssl` and `allow_url_fopen`.
+The command downloads the official Z3 5.4.1 release from the Z3 GitHub releases for your OS and CPU (Windows, Linux and macOS, x64 and arm64), unpacks the executable into a per-user cache shared by every project and every git worktree, and runs it once to check that it starts. The extension then finds it by itself, so there is nothing to configure. The cache is `%LOCALAPPDATA%\phpstan-contracts\z3\<version>` on Windows, and `$XDG_CACHE_HOME/phpstan-contracts/z3/<version>` or `~/.cache/phpstan-contracts/z3/<version>` elsewhere, macOS included. If the environment names none of these, the command refuses to guess and asks for `--dir`. It needs `ext-zip`, `ext-openssl` and `allow_url_fopen`.
 
-The archive is only accepted if its SHA-256 matches a hash written in the package source, so a compromised download or redirect cannot install anything else. The command never runs by itself: Composer does not run scripts of dependencies, and nothing is downloaded unless you run it. Run it again after `composer update` has replaced the package directory, or use `--dir=<path>` to install somewhere that survives, then set `parameters.contracts.z3Binary` to the path it prints.
+The archive is only accepted if its SHA-256 matches a hash written in the package source, so a compromised download or redirect cannot install anything else. The command never runs by itself: Composer does not run scripts of dependencies, and nothing is downloaded unless you run it. The cache is outside `vendor/`, so `composer update` does not remove it and a second checkout with its own `vendor/` reuses it. `--force` reinstalls over an existing version, and `--dir=<path>` installs under `<path>/<version>` instead; set `parameters.contracts.z3Binary` to the path it prints, since the extension does not look in a custom directory. Earlier versions installed into `.z3/` inside the package: such an install keeps working, but a new install goes to the cache.
 
 The official Linux builds require a recent glibc (2.38 on arm64, 2.39 on x64, so Ubuntu 24.04 or newer). On an older distribution or on Alpine, the command reports that the binary does not start, and you should use your package manager.
 
@@ -38,7 +38,7 @@ The extension uses the `z3` found in `PATH` when nothing was installed with the 
 
 Set `parameters.contracts.z3Binary` to a name looked up in `PATH`, or to an absolute path (see [Configuration](#configuration)).
 
-The lookup order is: the configured path, then the build installed by `phpstan-contracts-install-z3` (only when `z3Binary` is left at its default), then `PATH`.
+The lookup order is: the configured path, then the per-user cache, then the legacy `.z3/` inside the package when it exists, then `PATH`. The cache and the legacy directory are only searched when `z3Binary` is left at its default.
 ## Install the extension
 
 The package is not published on Packagist yet. Install it from a local or VCS repository:
@@ -126,7 +126,7 @@ parameters:
 
 | Parameter | Default | Meaning |
 |---|---|---|
-| `z3Binary` | `z3` | Executable name, looked up in `PATH`, or an absolute path. At the default value, the build installed by `phpstan-contracts-install-z3` takes precedence over `PATH`. |
+| `z3Binary` | `z3` | Executable name, looked up in `PATH`, or an absolute path. At the default value, the build installed by `phpstan-contracts-install-z3` (per-user cache, then legacy `.z3/`) takes precedence over `PATH`. |
 | `timeoutMs` | `10000` | Time Z3 may spend on each individual check. When it runs out, the check is reported as `contracts.unknown`. |
 | `loopUnroll` | `10` | Iterations unrolled for a `foreach` over a list that has no bound in a `#[Requires]`, such as `count($lines) <= 50`. A list that can have more elements is reported as `contracts.loopBound`. From `1` to `maxLoopUnroll`. See [Loops](writing-contracts.md#loops). |
 | `maxLoopUnroll` | `100` | The most iterations that one loop, or the product of the bounds of nested loops, may be unrolled. A method over the budget is rejected before Z3 runs. From `1` to `10000`. |

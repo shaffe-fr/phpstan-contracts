@@ -90,7 +90,7 @@ Point your agent at it: ask it to write the contract first, run `vendor/bin/phps
 
 ```bash
 composer require --dev shaffe-fr/phpstan-contracts
-vendor/bin/phpstan-contracts-install-z3      # downloads the official Z3 build, checked against pinned SHA-256 hashes
+vendor/bin/phpstan-contracts-install-z3      # downloads the official Z3 build into a per-user cache, checked against pinned SHA-256 hashes
 ```
 
 If you use `phpstan/extension-installer`, you are done. Otherwise add this to `phpstan.neon`:

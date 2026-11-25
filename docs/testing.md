@@ -12,7 +12,7 @@ composer test                       # everything except the examples, about a mi
 composer test:examples              # what the prover says about each example, under a minute
 ```
 
-Tests that need Z3 skip themselves when it is not installed. Set `CONTRACTS_REQUIRE_Z3=1` to make them fail instead, which is what the CI does, so that a missing solver can never look like a green run.
+Z3 is looked up like the extension does: the per-user cache (see [Install Z3](getting-started.md#install-z3)), then the legacy `.z3/` inside the package, then `PATH`. Tests that need Z3 skip themselves when it is not installed. Set `CONTRACTS_REQUIRE_Z3=1` to make them fail instead, which is what the CI does, so that a missing solver can never look like a green run.
 
 ## What each suite checks
 
@@ -160,7 +160,7 @@ That is a sample, not a measurement of coverage.
 
 ## What is not covered
 
-- **The installer.** `phpstan-contracts-install-z3` has no unit tests. Every CI job runs it before the suite, so the download, the checksum, the extraction and the first start are exercised on Linux x64, Windows x64 and macOS arm64. The Linux arm64, Windows arm64 and macOS x64 archives are pinned but never installed by the CI.
+- **The installer.** `tests/Unit/Solver/Z3InstallerTest.php` covers where Z3 is installed and searched (cache location per OS, environment variables, legacy fallback), with injected environments and temporary directories only: the installer tests never touch the real user cache. The download, the checksum, the extraction and the first start have no unit test, but every CI job runs the installer before the suite, so the download, the checksum, the extraction and the first start are exercised on Linux x64, Windows x64 and macOS arm64. The Linux arm64, Windows arm64 and macOS x64 archives are pinned but never installed by the CI.
 - **Other Z3 versions.** The tests run against the version that the installer provides. A different version may print counterexample values differently, which is why the rule tests match identifiers and message fragments and not whole messages.
 - **Every PHP version on every OS.** The CI runs the whole suite on Linux with PHP 8.3, 8.4 and 8.5, and on Windows and macOS (arm64) with PHP 8.5 only. The suite is developed on Windows.
 - **Performance.** The tests check answers, not times. Only the timeout path is exercised.
