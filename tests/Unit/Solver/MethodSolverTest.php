@@ -280,6 +280,51 @@ final class MethodSolverTest extends TestCase
         $this->solver(methodBudgetMs: -1);
     }
 
+    public function testTheAnswerKeepsTheMeasuredTimeOfTheMainRunTheRetriesAndTheSplits(): void
+    {
+        $encoding = $this->encoding();
+        $this->runner->onRun = function (string $script, int $count): array {
+            if ($count === 1) {
+                $this->clock->advance(70);
+
+                return [self::unknown()];
+            }
+            $this->clock->advance(500);
+
+            return [new SolverResult(Verdict::Unsat), self::unknown(), new SolverResult(Verdict::Unsat)];
+        };
+        $this->runner->onSplit = function (): SplitOutcome {
+            $this->clock->advance(9_000);
+
+            return new SplitOutcome(new SolverResult(Verdict::Unsat), []);
+        };
+
+        $answer = $this->solver()->solve($encoding);
+
+        self::assertSame(500, $answer->mainMs);
+        self::assertSame(70, $answer->retryMs);
+        self::assertSame(9_000, $answer->splitMs);
+        self::assertFalse($answer->budgetExhausted);
+        self::assertSame(0, $answer->notTried());
+    }
+
+    public function testTheAnswerSaysWhenTheBudgetWasSpentAndHowManyChecksWereNotTried(): void
+    {
+        $encoding = $this->encoding();
+        $this->runner->onRun = function (): array {
+            $this->clock->advance(61_000);
+
+            return [new SolverResult(Verdict::Unsat), self::unknown(), new SolverResult(Verdict::Unsat)];
+        };
+
+        $answer = $this->solver()->solve($encoding);
+
+        self::assertTrue($answer->budgetExhausted);
+        self::assertSame(1, $answer->notTried());
+        self::assertSame(UnknownReason::Budget, $answer->results[1]->reason);
+        self::assertSame(0, $answer->retryMs);
+    }
+
     private function solver(int $methodBudgetMs = 60_000, bool $rememberUndecided = true): MethodSolver
     {
         return new MethodSolver($this->runner, $this->renderer, $this->clock, $methodBudgetMs, $rememberUndecided);

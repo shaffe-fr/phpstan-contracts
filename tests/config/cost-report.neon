@@ -1,0 +1,8 @@
+parameters:
+	contracts:
+		timeoutMs: 30000
+		cacheDirectory: null
+		# Below the time of any Z3 process: the tests read the structure, the budget keeps Z3 out of the way.
+		methodBudgetMs: 1
+		costWarnings: true
+		timingReport: %tmpDir%/contracts-timing/report.jsonl

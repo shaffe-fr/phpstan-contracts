@@ -45,6 +45,15 @@ final class UnknownSplitMessageRuleTest extends RuleFixtureTestCase
         self::assertMatchesRegularExpression('/The split of the proof by the length of \$lineTotals did not decide the lengths? [\d, and]*\b8\. Try /', $message);
     }
 
+    public function testTheMessageEndsWithThePredictedWorstCaseOfTheMethodAndTheWaysOutOfTheBudget(): void
+    {
+        $message = $this->postconditionMessage(UnknownCostFixture::class);
+
+        // The worst case follows the formula of the strategy, within the 600 s budget of this configuration, so it is not cut.
+        self::assertMatchesRegularExpression('/Predicted worst case for this method: \d+ min, from its structure \(\d+ checks, 16 unrolled iterations\) and the limits, not a measure\. Other ways out: a larger contracts\.methodBudgetMs or simpler arithmetic/', $message);
+        self::assertStringNotContainsString('were not tried', $message);
+    }
+
     public function testAProofWithTooManyLengthsIsNotSplitAndSaysNothingOfLengths(): void
     {
         $message = $this->postconditionMessage(UnknownBeyondSplitFixture::class);
