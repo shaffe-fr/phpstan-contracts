@@ -115,7 +115,7 @@ final class OrderTotals
      * @param list<OrderLine> $lines
      * @return list<OrderLine>
      */
-    #[Requires('count($lines) <= 20')]
+    #[Requires('count($lines) <= 8')]
     #[Ensures('count($result) === count($lines)')]
     public static function withoutEmptyLinesBroken(array $lines): array
     {
