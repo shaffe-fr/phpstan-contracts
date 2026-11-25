@@ -842,6 +842,16 @@ public static function alwaysApplicable(Cart $cart): bool
     return $cart->coupon !== null && $cart->coupon->minimumCents === null;
 }
 ```
+## Services without state
+A `final` class with no instance property, of any visibility, inherited and from a trait included, holds no data, so `$this` has nothing to model. It is accepted as the receiver of a call to another method of the same file, which is how such services are written: a public method that delegates to private helpers. Static properties and class constants are not state.
+| Supported | Notes |
+|---|---|
+| `$this->helper($x)`, `$this->helper($x)->other()` | The call is translated with the body of the helper, and the helper sees the same `$this`. Only in a class without any instance property. |
+| the same in a class that is not final | Only for a `final` or `private` method, as for any call. |
+| `$this` compared, read for a property or used as a value | `contracts.unsupported`: `Class App\Guard has no instance property, so $this has no state to model: use it only as the receiver of a call, such as $this->helper(). Comparing it, passing it as an argument and reading a property of it are not supported.` |
+| `$this` passed as an argument | `contracts.unsupported`: `Class App\Guard has no properties to model.`, because the parameter would have the type of a class without state. |
+| a class with an instance property, such as a promoted `private readonly` dependency | `contracts.unsupported`: `Object state ($this) is only part of the verified subset in enums, readonly data classes and classes without instance properties. Class App\Guard has the instance property $rate, so $this has state.`, followed by the reason it is not data. |
+See [`ReconciliationDeltaGuard`](../examples/RealWorld/ReconciliationDeltaGuard.php) and [Calls to other methods](writing-contracts.md#calls-to-other-methods).
 ## Lists
 
 A `list<T>` is a PHP array whose keys are `0..n-1` in order. Declare it with `list<T>` or `non-empty-list<T>` in the PHPDoc of a parameter, a return type or a property, next to the native `array`. The element type `T` is any single supported type: `int` (with its range), `bool`, `string`, an enum, a readonly data class, an array shape, `float` (not as an input, see below), or a nullable version of these. The prover sees a length and one element per index.

@@ -198,7 +198,10 @@ Everything in the table in [the contract language](#the-contract-language) works
 | `new` on a class whose constructor is private or protected and not accessible from the verified method | `Cannot instantiate Sealed: its constructor is not accessible here.` |
 | `new` on a class whose constructor is marked `#[\Deprecated]` | `Cannot instantiate OldStyle: its constructor is #[\Deprecated], and calling it triggers E_USER_DEPRECATED, which runs the error handler.` |
 | `new` on a class with a destructor, its own or inherited | `Cannot instantiate Noisy: its destructor runs code that is not verified.` |
-| `$this` in a class that is not an enum or a readonly data class | `Object state ($this) is only part of the verified subset in enums and readonly data classes.`, followed by the reason, such as `Property Counter::$count must be public and readonly` |
+| `$this` in a class with an instance property, of any visibility, inherited or from a trait | `Object state ($this) is only part of the verified subset in enums, readonly data classes and classes without instance properties. Class App\Counter has the instance property $count, so $this has state.`, followed by `It cannot be modelled as data:` and the reason, such as `Property App\Counter::$count must be public and readonly` |
+| `$this` compared, read for a property or used as a value in a class without instance properties | `Class App\Guard has no instance property, so $this has no state to model: use it only as the receiver of a call, such as $this->helper(). Comparing it, passing it as an argument and reading a property of it are not supported.` |
+| `$this` passed as an argument, such as `self::measure($this)` | `Class App\Guard has no properties to model.`, because the parameter has the type of a class without state |
+| `$this->helper()` in a class that is not final, where `helper()` is neither `final` nor `private` | `App\Guard::helper() can be overridden: App\Guard is not final, so a subclass can replace the method. Make the class or the method final, or the method private.` |
 | reading a property that is not `public readonly`, or whose type is not supported | `Property Foo::$state must be public and readonly: only immutable data classes are supported.` |
 | reading a `public readonly` property that is not promoted by the constructor | `Property PhpstanContracts\Tests\Fixtures\LazyInit::$x may be uninitialized: only the properties promoted by the constructor are known to be set in every object.` |
 | reading a promoted property of a class that is not final and whose constructor is not final | `Property PhpstanContracts\Tests\Fixtures\OpenPoint::$x may be uninitialized: PhpstanContracts\Tests\Fixtures\OpenPoint is not final and neither is its constructor, so a subclass constructor can skip the one that sets it. Make the class or the constructor final.` |
@@ -259,7 +262,7 @@ A supported function is the built-in one. As in PHP, an unqualified call such as
 
 `in_array($x, [a, b, c], true)` is translated as `$x === a || $x === b || $x === c`, which is what PHP computes. Without `true`, PHP compares with `==`, so the needle must be an `int`, a `float`, a `bool` or an enum case, where `==` is exact: `1 == 1.0` is true, as in PHP, and enum cases compare by identity. A string or a nullable needle needs `strict: true`, because `"1e1" == "10"` and `null == 0` are true. The haystack is a list literal, whose elements can be any supported expression, or a class constant such as `self::VALIDATORS` whose value PHPStan folds to a list of scalars or enum cases.
 
-Instance methods of any class are fine as long as they never touch `$this`. In an enum or a readonly data class, `$this` is supported, see below. A method that reads `$this->state` on a class with mutable state is rejected.
+Instance methods of any class are fine as long as they never touch `$this`. In an enum or a readonly data class, `$this` is supported, see below. In a class without any instance property, `$this` is supported as the receiver of a call, see [Calls to other methods](#calls-to-other-methods). A method that reads `$this->state` on a class with state is rejected.
 
 ### Class constants, `self` and `$this`
 
@@ -311,7 +314,7 @@ CartLimits.php:22: static::MAX_ITEMS is late bound: a subclass of PhpstanContrac
 Use self::MAX_ITEMS, or make the class or the constant final.
 ```
 
-**`$this` in an enum** is one of the cases. An enum instance method is a function of an implicit parameter of the enum type, so `$this === self::InStock`, `match ($this)` with its exhaustiveness check, `$this->value` and `$this->name` all work. **`$this` in a readonly data class** is a record of its properties, read with `$this->onHand`, under the same conditions as a parameter of that class (see [Readonly data classes](types.md#readonly-data-classes)). In both cases `$this` is printed first in a counterexample, like a parameter. A call to another method on `$this`, such as `$this->isFinal()`, works when that method is declared in the same file, see below.
+**`$this` in an enum** is one of the cases. An enum instance method is a function of an implicit parameter of the enum type, so `$this === self::InStock`, `match ($this)` with its exhaustiveness check, `$this->value` and `$this->name` all work. **`$this` in a readonly data class** is a record of its properties, read with `$this->onHand`, under the same conditions as a parameter of that class (see [Readonly data classes](types.md#readonly-data-classes)). In both cases `$this` is printed first in a counterexample, like a parameter. A call to another method on `$this`, such as `$this->isFinal()`, works when that method is declared in the same file, see below. **`$this` in a class without any instance property** has no state to model, so it is accepted only as the receiver of such a call, see [Calls to other methods](#calls-to-other-methods).
 
 ### Calls to other methods
 
@@ -358,6 +361,22 @@ The same check in [`examples/RealWorld/DeliveryLabel.php`](../examples/RealWorld
 DeliveryLabel.php:76: The call to PhpstanContracts\Examples\RealWorld\DeliveryLabel::plural() can violate its precondition #[Requires('$days >= 2')]. Counterexample: $days = 1.
 ```
 
+**A service without state** is a `final` class with no instance property, such as `examples/RealWorld/ReconciliationDeltaGuard.php`: its methods call each other through `$this`, and there is nothing of `$this` to prove, so each call is translated with the body of its callee. Static properties and class constants do not count as state.
+```php
+#[Ensures('implies($ledgerCents === $bankCents, $result)')]
+#[Ensures('implies($result, abs($ledgerCents - $bankCents) <= 100)')]
+#[Ensures('implies(abs($ledgerCents - $bankCents) <= 100, $result)')]
+public function isMatched(int $ledgerCents, int $bankCents): bool
+{
+    return $this->withinTolerance($this->deltaCents($ledgerCents, $bankCents));
+}
+```
+`isMatchedBroken()` passes the signed difference instead, so a bank line far below the ledger line counts as matched:
+```
+ReconciliationDeltaGuard.php:39: Postcondition #[Ensures('implies($result, abs($ledgerCents - $bankCents) <= 100)')] can be violated.
+Counterexample: $ledgerCents = 99999899, $bankCents = 100000000 => $result = true (return at line 42).
+```
+A class with any instance property is rejected, even a `private readonly` dependency: the proof would have to model it, and a promoted constructor service is not data. `$this` itself, compared or passed as an argument, is rejected too, with a reason that says to use it as the receiver of a call. In a class that is not final, the same rule as for any call applies: only a `final` or `private` method can be called through `$this`.
 A safety check inside the callee is reported at the line of the call, and says which call it comes from: ``Possible integer overflow: `$x * 2` can leave the PHP int range, in the call to PhpstanContracts\Tests\Fixtures\CallFixture::double().`` When the callee calls another method, the message names the whole chain, from the call on the reported line to the method that holds the check: ``..., in the call to PhpstanContracts\Tests\Fixtures\CallFixture::quadruple(), through PhpstanContracts\Tests\Fixtures\CallFixture::double().``
 
 What can be called:
@@ -366,6 +385,7 @@ What can be called:
 |---|---|
 | `self::helper($x)`, `ClassName::helper($x)` | A static method. The call is bound at compile time. |
 | `$this->level()`, `$other->level()`, `$cart->coupon->total()` | The object is an enum case or a data object. PHP picks the method from the runtime class, so the class must be `final` (an enum always is), or the method `final` or `private`. A `private` method is the one of the class whose code makes the call: from a class that declares a private `m()`, `$object->m()` runs that `m()` even when the object is a subclass with a public `m()` of its own, and so does the proof. |
+| `$this->helper($x)`, `$this->helper($x)->other()` in a class without any instance property | `$this` has no state to model, so it is the receiver of the call and nothing else; the callee sees the same `$this`, so it can call `$this->other()` in turn, also when it is declared in a parent class of the same file. The dispatch rule is the one above: the class must be `final`, or the method `final` or `private`. A class with any instance property, of any visibility, inherited or from a trait included, is rejected, see below. |
 | `static::helper($x)` | `static::` looks the method up in the called class, where a subclass's own `helper()` wins even over a private one. So the class must be `final`, or the method `final` and not `private`. |
 | arguments | Positional or named. A missing argument takes its default value. An `int` is converted for a parameter whose native type is `float` or `?float`, as PHP does. PHP converts by the native type only, so a parameter without a native type, or whose native type does not match its PHPDoc type, is rejected. Any other mismatch of types is rejected. |
 
