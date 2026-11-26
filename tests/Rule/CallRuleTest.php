@@ -37,7 +37,8 @@ final class CallRuleTest extends RuleFixtureTestCase
                 'aPreconditionTwoCallsDeep' => ['contracts.requiresViolated: The call to PhpstanContracts\Tests\Fixtures\CallFixture::halve() can violate its precondition #[Requires(\'$x >= 0\')], in the call to PhpstanContracts\Tests\Fixtures\CallFixture::halveOf(). Counterexample: $x = -'],
 
                 'recursion' => ['contracts.unsupported: Recursive calls are not supported: PhpstanContracts\Tests\Fixtures\CallFixture::recursion() is already being translated.'],
-                'callsAMethodInAnotherFile' => ['contracts.unsupported: PhpstanContracts\Tests\Fixtures\Point::sum() is declared in another file.'],
+                // Point's coordinates are plain ints, so their sum can overflow.
+                'callsAMethodInAnotherFile' => ['contracts.overflow: `$this->x + $this->y` can leave the PHP int range, in the call to PhpstanContracts\Tests\Fixtures\Point::sum(). Counterexample: $point = Point(x: '],
                 'callsAMethodThatCanBeOverridden' => ['contracts.unsupported: PhpstanContracts\Tests\Fixtures\OpenShape::sides() can be overridden'],
                 'callsAMethodThatIsNotVerifiable' => ['contracts.unsupported: The call to PhpstanContracts\Tests\Fixtures\CallFixture::loops() cannot be verified: Only foreach over a list is supported: a while, do or for loop needs a termination argument'],
                 'callsWithATypeThatDoesNotFit' => ['contracts.unsupported: Argument $x of PhpstanContracts\Tests\Fixtures\CallFixture::double() is bool, but the parameter is int.'],

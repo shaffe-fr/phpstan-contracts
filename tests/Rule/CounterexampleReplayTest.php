@@ -9,6 +9,7 @@ use PhpstanContracts\Examples\RealWorld\DiscountSplit;
 use PhpstanContracts\Examples\RealWorld\OrderLines;
 use PhpstanContracts\Examples\RealWorld\OrderTotals;
 use PhpstanContracts\Examples\RealWorld\VatSplit;
+use PhpstanContracts\Tests\Fixtures\CrossFile\CrossFileReplay;
 use PhpstanContracts\Tests\Fixtures\ReplayFixture;
 use PhpstanContracts\Tests\Fixtures\ReplayStatus;
 use PhpstanContracts\Tests\Support\Diagnostic;
@@ -39,7 +40,7 @@ final class CounterexampleReplayTest extends RuleFixtureTestCase
     public function testEveryReportedCounterexampleIsReproducedByPhp(): void
     {
 
-        $classes = [ReplayFixture::class, ReplayStatus::class];
+        $classes = [ReplayFixture::class, ReplayStatus::class, CrossFileReplay::class];
         $diagnostics = $this->diagnose($classes);
         $replayed = 0;
 

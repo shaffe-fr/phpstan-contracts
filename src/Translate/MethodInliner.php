@@ -7,6 +7,7 @@ namespace PhpstanContracts\Translate;
 use PhpstanContracts\Attribute\Requires;
 use PhpstanContracts\Attribute\Throws;
 use PhpstanContracts\Contract\ContractReader;
+use PhpstanContracts\Exception\InliningLimitExceeded;
 use PhpstanContracts\Exception\VerificationRejected;
 use PhpstanContracts\Smt\Smt;
 use PhpstanContracts\Smt\Sort;
@@ -14,9 +15,7 @@ use PhpstanContracts\Smt\Term;
 use PhpParser\Node;
 use PhpParser\Node\Arg;
 use PhpParser\Node\Expr;
-use PhpParser\Node\Stmt\ClassLike;
 use PhpParser\Node\Stmt\ClassMethod;
-use PhpParser\NodeFinder;
 use PHPStan\Reflection\ClassReflection;
 use PHPStan\Reflection\ExtendedMethodReflection;
 use PHPStan\Reflection\InitializerExprTypeResolver;
@@ -24,18 +23,27 @@ use PHPStan\Type\TypeCombinator;
 use PHPStan\Type\VerbosityLevel;
 
 /**
- * A call to a method declared in the same file is translated by translating the
- * body of the callee, with its parameters bound to the arguments and `$this` to
- * the receiver. The proof then sees exactly what the callee computes, with its
- * own safety checks under the path that reaches the call, and its `#[Requires]`
- * become obligations of the caller.
+ * A call to a method is translated by translating the body of the callee, with its
+ * parameters bound to the arguments and `$this` to the receiver. The proof then sees
+ * exactly what the callee computes, with its own safety checks under the path that
+ * reaches the call, and its `#[Requires]` become obligations of the caller.
  *
- * Only the same file, because PHPStan re-analyses a file when it changes, and
- * the files that depend on it only when a signature changes: a proof that read
- * the body of a method in another file would not be redone when that body changes.
+ * The callee can be declared in any file on disk. The proof declares every file it
+ * read to PHPStan's result cache (see {@see Lookups}), so it is redone whenever the
+ * body of a callee changes, even though the signatures that PHPStan follows do not.
+ *
+ * One instance per verified method, shared by the translators of every nested call.
  */
 final class MethodInliner
 {
+    /** Nested calls below the verified method. */
+    public const MAX_DEPTH = 16;
+
+    /** Bodies inlined for one verified method, a method counted once per call that reaches it. */
+    public const MAX_CALLS = 256;
+
+    private int $inlined = 0;
+
     /**
      * @param list<string> $stack the methods being translated, outermost first
      */
@@ -48,7 +56,6 @@ final class MethodInliner
         private readonly PhpDocReads $phpDocs,
         private readonly InitializerExprTypeResolver $initializers,
         private readonly ContractReader $contracts,
-        private readonly string $file,
         private array $stack,
         private readonly int $loopUnroll = 10,
         private readonly int $maxLoopUnroll = 100,
@@ -116,6 +123,7 @@ final class MethodInliner
         if (in_array($label, $this->stack, true)) {
             throw new VerificationRejected(sprintf('Recursive calls are not supported: %s is already being translated.', $label), $line);
         }
+        $this->checkLimits($label, $line);
 
         $parameters = $this->parameterSorts($method, $label, $line);
         $values = $this->bindArguments($caller, $call, $arguments, $parameters, $label, $line, $env, $pc);
@@ -123,6 +131,9 @@ final class MethodInliner
         $this->stack[] = $label;
         try {
             return $this->translateBody($owner, $method, $node, $parameters, $values, $receiver, $statelessThis, $label, $line, $pc);
+        } catch (InliningLimitExceeded $exceeded) {
+            // Its message already names the whole chain, from the outermost call.
+            throw $exceeded;
         } catch (VerificationRejected $rejected) {
             throw new VerificationRejected(
                 sprintf('The call to %s cannot be verified: %s', $label, $rejected->getMessage()),
@@ -223,23 +234,72 @@ final class MethodInliner
         }
     }
 
+    /**
+     * Each call is translated by translating the body of the callee, so a chain of helpers
+     * that each call several others grows exponentially: these bounds keep a run from hanging
+     * on the translation.
+     */
+    private function checkLimits(string $label, int $line): void
+    {
+        $chain = implode(' -> ', [...$this->stack, $label]);
+        $outermost = $this->stack[1] ?? $label;
+
+        if (count($this->stack) > self::MAX_DEPTH) {
+            throw new InliningLimitExceeded(sprintf(
+                'The call to %s cannot be verified: the chain of calls %s is deeper than %d calls, the limit for translating the body of each called method in place. Call a method with a shorter chain of calls, or split the rule into smaller verified methods.',
+                $outermost,
+                $chain,
+                self::MAX_DEPTH,
+            ), $line);
+        }
+        if (++$this->inlined > self::MAX_CALLS) {
+            throw new InliningLimitExceeded(sprintf(
+                'The call to %s cannot be verified: %s would translate more than %d bodies of called methods, counting a method once per call that reaches it (this call is reached through %s). Split the rule into smaller verified methods, or call fewer helpers from it.',
+                $outermost,
+                $this->stack[0] ?? $label,
+                self::MAX_CALLS,
+                $chain,
+            ), $line);
+        }
+    }
+
     private function findBody(ClassReflection $owner, ExtendedMethodReflection $method, string $label, int $line): ClassMethod
     {
-        $native = $owner->getNativeReflection()->getMethod($method->getName());
-        $file = $native->getFileName();
-        if ($file === false || realpath($file) !== realpath($this->file)) {
+        if ($owner->isEnum() && strcasecmp($method->getName(), 'cases') === 0) {
+            throw new VerificationRejected(self::casesRefusal($owner), $line);
+        }
+
+        $nativeClass = $owner->getNativeReflection();
+        $file = $nativeClass->getMethod($method->getName())->getFileName();
+        if ($file === false) {
+            throw new VerificationRejected(sprintf('%s is built into PHP or an extension, so there is no body to translate.', $label), $line);
+        }
+        if (!is_file($file)) {
             throw new VerificationRejected(sprintf(
-                '%s is declared in another file. Only methods of the same file can be called: PHPStan re-analyses a file when the signatures it uses change, not when a body in another file does, so the proof would not be redone.',
+                '%s is declared in %s, which is not a file on disk, so its body cannot be read and followed for changes.',
                 $label,
+                $file,
             ), $line);
         }
 
-        $finder = new NodeFinder();
-        $classNode = $finder->findFirst(
-            $this->sources->parse($file, $line),
-            static fn (Node $node): bool => $node instanceof ClassLike && $node->namespacedName?->toString() === $owner->getName(),
-        );
-        $methodNode = $classNode instanceof ClassLike ? $classNode->getMethod($method->getName()) : null;
+        $declarations = SourceFiles::declarations($this->sources->parse($file, $line), $owner->getName());
+        if (count($declarations) > 1) {
+            throw new VerificationRejected(sprintf(
+                '%s cannot be verified: %s is declared more than once in %s, under conditions that only running the file decides, so the body that runs is not known. Call a method of a class declared once.',
+                $label,
+                $owner->getDisplayName(),
+                $file,
+            ), $line);
+        }
+        // By start line too, so that the body translated is the one of the class PHPStan reflects.
+        $startLine = $nativeClass->getStartLine();
+        $classNode = null;
+        foreach ($declarations as $declaration) {
+            if ($declaration->getStartLine() === $startLine) {
+                $classNode = $declaration;
+            }
+        }
+        $methodNode = $classNode?->getMethod($method->getName());
 
         if ($methodNode === null) {
             throw new VerificationRejected(sprintf('The body of %s cannot be found; methods that come from a trait are not supported.', $label), $line);
@@ -262,6 +322,25 @@ final class MethodInliner
         }
 
         return $methodNode;
+    }
+
+    /**
+     * `Enum::cases()` is provided by PHP: a list of the cases, written out, is what it returns.
+     */
+    private static function casesRefusal(ClassReflection $enum): string
+    {
+        $short = $enum->getNativeReflection()->getShortName();
+        $names = array_keys($enum->getEnumCases());
+        $example = implode(', ', array_map(static fn (string $case): string => $short . '::' . $case, array_slice($names, 0, 2)));
+        if (count($names) > 2) {
+            $example .= ', ...';
+        }
+
+        return sprintf(
+            '%s::cases() is built into PHP, so there is no body to translate; write the cases you need as a list%s.',
+            $enum->getDisplayName(),
+            $names === [] ? '' : sprintf(', such as [%s]', $example),
+        );
     }
 
     /**
@@ -412,7 +491,7 @@ final class MethodInliner
         };
         // The calls that lead here from the verified method, outermost first, this one last.
         $calls = array_slice($this->stack, 1);
-        $body = new ExpressionTranslator($this->encoding, $this->types, $this->enums, $classes, $this->lookups, $this->initializers, false, $line, $thisRefusal, $this, $calls, file: $this->file, statelessThis: $statelessThis);
+        $body = new ExpressionTranslator($this->encoding, $this->types, $this->enums, $classes, $this->lookups, $this->initializers, false, $line, $thisRefusal, $this, $calls, statelessThis: $statelessThis);
 
         $entry = [];
         if ($receiver !== null && !$method->isStatic()) {
@@ -433,7 +512,7 @@ final class MethodInliner
         // The callee was proven assuming its preconditions; here they are checked.
         $view = $entry;
         foreach ($this->contracts->read($node)->requires as $clause) {
-            $contract = new ExpressionTranslator($this->encoding, $this->types, $this->enums, $classes, $this->lookups, $this->initializers, true, $line, $thisRefusal, null, $calls, file: $this->file);
+            $contract = new ExpressionTranslator($this->encoding, $this->types, $this->enums, $classes, $this->lookups, $this->initializers, true, $line, $thisRefusal, null, $calls);
             $this->encoding->addObligation(new Obligation(
                 ObligationKind::RequiresViolated,
                 $line,

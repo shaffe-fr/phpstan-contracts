@@ -9,7 +9,7 @@ use RuntimeException;
 /**
  * The method leaves the verifiable subset (or its contract is malformed).
  */
-final class VerificationRejected extends RuntimeException
+class VerificationRejected extends RuntimeException
 {
     public function __construct(
         string $message,

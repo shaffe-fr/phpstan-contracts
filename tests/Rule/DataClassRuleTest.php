@@ -28,7 +28,7 @@ final class DataClassRuleTest extends RuleFixtureTestCase
                 'buildsAnObject' => [],
                 'namedArgumentsFollowTheirNames' => [],
                 'swapsTheCoordinates' => [],
-                'buildsAClassOfAnotherFile' => ['contracts.unsupported: Cannot instantiate Point: its constructor is declared in another file. Only classes whose constructor is in the same file can be built: PHPStan re-analyses a file when the signatures it uses change, not when a body in another file does, so the proof would not be redone.'],
+                'buildsAClassOfAnotherFile' => [],
                 'nullsafeRead' => [],
                 'nullCheckOnAField' => [],
                 'narrowedByANullCheck' => [],
@@ -47,7 +47,7 @@ final class DataClassRuleTest extends RuleFixtureTestCase
                 'classWithoutProperties' => ['contracts.unsupported: has no properties to model'],
                 'constructorThatDoesNotPromote' => ['contracts.unsupported: its constructor takes parameters that are not promoted properties'],
                 'identityOfObjects' => ['contracts.unsupported: compared by identity'],
-                'methodCallOnAnObject' => ['contracts.unsupported: PhpstanContracts\Tests\Fixtures\Point::sum() is declared in another file'],
+                'methodCallOnAnObject' => ['contracts.overflow: `$this->x + $this->y` can leave the PHP int range, in the call to PhpstanContracts\Tests\Fixtures\Point::sum().'],
                 'nullableObjectWithoutACheck' => ['contracts.unsupported: may be null here'],
                 'everyConstructorArgumentIsRequired' => ['contracts.unsupported: Every constructor argument of Position must be passed explicitly'],
 

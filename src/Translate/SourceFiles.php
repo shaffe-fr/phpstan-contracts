@@ -7,6 +7,8 @@ namespace PhpstanContracts\Translate;
 use PhpstanContracts\Exception\VerificationRejected;
 use PhpParser\Error;
 use PhpParser\Node;
+use PhpParser\Node\Stmt\ClassLike;
+use PhpParser\NodeFinder;
 use PhpParser\NodeTraverser;
 use PhpParser\NodeVisitor\NameResolver;
 use PhpParser\Parser;
@@ -66,6 +68,25 @@ final class SourceFiles
             self::UNPARSABLE => sprintf('%s cannot be parsed', $path),
             default => $statements,
         };
+    }
+
+    /**
+     * Every declaration of a class in parsed statements. More than one means the file
+     * declares it under conditions, which only running the file decides between, while
+     * PHPStan reflects the first.
+     *
+     * @param array<Node> $statements
+     * @return list<ClassLike>
+     */
+    public static function declarations(array $statements, string $className): array
+    {
+        /** @var list<ClassLike> */
+        return (new NodeFinder())->find(
+            $statements,
+            static fn (Node $node): bool => $node instanceof ClassLike
+                && $node->namespacedName !== null
+                && strcasecmp($node->namespacedName->toString(), $className) === 0,
+        );
     }
 
     /**

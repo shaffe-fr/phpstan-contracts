@@ -135,7 +135,7 @@ final class MethodEncoder
         // postconditions that the value is not null, just like an `if` would.
         $view = $entry;
         foreach ($contract->requires as $clause) {
-            $contractExpressions = $this->translator($encoding, $classes, true, $clause->line, $thisRefusal, $scope->getFile());
+            $contractExpressions = $this->translator($encoding, $classes, true, $clause->line, $thisRefusal);
             $encoding->assert($contractExpressions->translateBoolean($clause->expression, $view, Smt::bool(true)));
             $view = $contractExpressions->narrow($clause->expression, true, $view);
         }
@@ -154,7 +154,7 @@ final class MethodEncoder
             }
             $when = $throws->when === null
                 ? Smt::bool(true)
-                : $this->translator($encoding, $classes, true, $throws->line, $thisRefusal, $scope->getFile())->translateBoolean($throws->when->expression, $view, Smt::bool(true));
+                : $this->translator($encoding, $classes, true, $throws->line, $thisRefusal)->translateBoolean($throws->when->expression, $view, Smt::bool(true));
             $declaredThrows[] = [$thrown->getName(), $encoding->define('throws', $when), $throws];
         }
         $policy = new ThrowPolicy(array_map(fn (array $declared): array => [
@@ -173,12 +173,11 @@ final class MethodEncoder
             $this->phpDocs,
             $this->initializers,
             $this->contracts,
-            $scope->getFile(),
             [sprintf('%s::%s()', $methodReflection->getDeclaringClass()->getDisplayName(), $methodReflection->getName())],
             $this->loopUnroll,
             $this->maxLoopUnroll,
         );
-        $body = new ExpressionTranslator($encoding, $this->types, $this->enums, $classes, $this->lookups, $this->initializers, false, null, $thisRefusal, $inliner, [], $policy, $scope->getFile(), $statelessThis);
+        $body = new ExpressionTranslator($encoding, $this->types, $this->enums, $classes, $this->lookups, $this->initializers, false, null, $thisRefusal, $inliner, [], $policy, $statelessThis);
         $loopBounds = LoopBounds::of($contract->requires, $body, $this->loopUnroll, $this->maxLoopUnroll);
         $statements = new StatementTranslator($body, $encoding, $resultSpec->sort, $loopBounds, $entry);
         $final = $statements->execute($method->stmts ?? [], (new State($entry, Smt::bool(true)))->withView($view));
@@ -208,7 +207,7 @@ final class MethodEncoder
         // A postcondition is about the paths that return. Without a throw, every path does.
         $postconditionEnv = [...$view, 'result' => $result];
         foreach ($contract->ensures as $clause) {
-            $contractExpressions = $this->translator($encoding, $classes, true, $clause->line, $thisRefusal, $scope->getFile());
+            $contractExpressions = $this->translator($encoding, $classes, true, $clause->line, $thisRefusal);
             $term = $contractExpressions->translateBoolean($clause->expression, $postconditionEnv, $policy->anyThrow() ? $returnCondition : Smt::bool(true));
             $encoding->ensures[] = new EnsuresCheck(
                 $clause->source,
@@ -270,9 +269,9 @@ final class MethodEncoder
         return $this->lookups->getClass($class)->getDisplayName();
     }
 
-    private function translator(Encoding $encoding, ClassNameResolver $classes, bool $isContract, ?int $line, string $thisRefusal, string $file): ExpressionTranslator
+    private function translator(Encoding $encoding, ClassNameResolver $classes, bool $isContract, ?int $line, string $thisRefusal): ExpressionTranslator
     {
-        return new ExpressionTranslator($encoding, $this->types, $this->enums, $classes, $this->lookups, $this->initializers, $isContract, $line, $thisRefusal, file: $file);
+        return new ExpressionTranslator($encoding, $this->types, $this->enums, $classes, $this->lookups, $this->initializers, $isContract, $line, $thisRefusal);
     }
 
     public static function statelessRefusal(string $class): string

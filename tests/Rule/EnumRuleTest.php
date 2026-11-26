@@ -32,7 +32,7 @@ final class EnumRuleTest extends RuleFixtureTestCase
                 'fromAnUnboundedInteger' => ['contracts.invalidEnumValue: `\PhpstanContracts\Tests\Fixtures\Level::from($n)`'],
 
                 'valueOfAPureEnumDoesNotExist' => ['contracts.unsupported: not a backed enum'],
-                'casesIsNotSupported' => ['contracts.unsupported: PhpstanContracts\Tests\Fixtures\Suit::cases() is declared in another file'],
+                'casesIsNotSupported' => ['contracts.unsupported: PhpstanContracts\Tests\Fixtures\Suit::cases() is built into PHP, so there is no body to translate; write the cases you need as a list, such as [Suit::Hearts, Suit::Spades, ...].'],
                 'tryFromNeedsTheBackingType' => ['contracts.unsupported: Code::tryFrom() expects a string'],
             ],
         ]);

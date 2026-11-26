@@ -9,9 +9,6 @@ use PhpstanContracts\Smt\RecordSort;
 use PhpstanContracts\Smt\SmtName;
 use PhpstanContracts\Smt\ShapeSort;
 use PhpstanContracts\Smt\Sort;
-use PhpParser\Node;
-use PhpParser\Node\Stmt\ClassLike;
-use PhpParser\NodeFinder;
 use PHPStan\Reflection\ClassReflection;
 use PHPStan\Type\Constant\ConstantFloatType;
 use PHPStan\Type\Constant\ConstantIntegerType;
@@ -29,6 +26,8 @@ use PHPStan\Type\VerbosityLevel;
  */
 final class TypeMapper
 {
+    private const DECLARED_TWICE = 'under conditions that only running the file decides, so the constructor that runs is not known. Build a class declared once';
+
     /** @var array<string, array{VarSpec, Dependencies}> class => its record, and what building it read */
     private array $records = [];
 
@@ -461,7 +460,7 @@ final class TypeMapper
      * `new X(...)` can be modelled when the constructor only promotes every property
      * and does nothing else: then an instance is exactly its constructor arguments.
      * This checks the parameters, which are part of the signature; the body is checked
-     * by {@see constructorBodyRefusal()} for the file that builds the object.
+     * by {@see constructorBodyRefusal()}.
      *
      * The properties left out of the model keep their default value, or stay uninitialized,
      * and are never read, so they do not change what the instance is.
@@ -495,52 +494,81 @@ final class TypeMapper
     }
 
     /**
-     * Why the body of the constructor of a data class cannot be relied on in `$file`, or
-     * null when it is empty and declared in that file.
+     * Why the body of the constructor of a data class cannot be relied on, or null when
+     * it is empty.
      *
-     * Only that file: when a file changes, PHPStan re-analyses the files that depend on
-     * it only if its exported nodes change (ResultCacheManager), and an exported method
-     * keeps its signature, not its body (ExportedNodeResolver). A proof that read the
-     * constructor body of another file would not be redone when that body changes.
+     * The constructor can be declared in any file on disk: the file is recorded through
+     * {@see SourceFiles}, so the proof is redone when that body changes, which PHPStan does
+     * not follow on its own (an exported method keeps its signature, not its body).
      */
-    public function constructorBodyRefusal(string $className, ?string $file): ?string
+    public function constructorBodyRefusal(string $className): ?string
     {
         $constructor = $this->lookups->getClass($className)->getNativeReflection()->getConstructor();
-        $declaredIn = $constructor?->getFileName();
-        if ($constructor === null || !is_string($declaredIn) || $file === null || realpath($declaredIn) !== realpath($file)) {
-            return 'its constructor is declared in another file. Only classes whose constructor is in the same file can be built: PHPStan re-analyses a file when the signatures it uses change, not when a body in another file does, so the proof would not be redone';
+        if ($constructor === null) {
+            return 'it has no constructor';
+        }
+        $declaredIn = $constructor->getFileName();
+        if ($declaredIn === false) {
+            return 'its constructor is built into PHP or an extension, so there is no body to read';
+        }
+        if (!is_file($declaredIn)) {
+            return sprintf('its constructor is declared in %s, which is not a file on disk, so its body cannot be read and followed for changes', $declaredIn);
         }
 
-        $declaringClass = $constructor->getDeclaringClass()->getName();
-        if (array_key_exists($declaringClass, $this->constructorBodies)) {
-            [$refusal, $dependencies] = $this->constructorBodies[$declaringClass];
+        $declaringClass = $constructor->getDeclaringClass();
+        $key = $declaringClass->getName();
+        // PHPStan reflects the first declaration of a class declared twice in a file, PHP runs the one its conditions pick.
+        $class = $this->lookups->getClass($className);
+        $classFile = $class->getFileName();
+        if ($classFile !== null && $this->declaredMoreThanOnce($classFile, $class->getName())) {
+            return sprintf('it is declared more than once in %s, %s', $classFile, self::DECLARED_TWICE);
+        }
+        if ($key !== $class->getName() && $this->declaredMoreThanOnce($declaredIn, $key)) {
+            return sprintf('its constructor is declared in %s, which is declared more than once in %s, %s', $declaringClass->getShortName(), $declaredIn, self::DECLARED_TWICE);
+        }
+        if (array_key_exists($key, $this->constructorBodies)) {
+            [$refusal, $dependencies] = $this->constructorBodies[$key];
             $this->lookups->replay($dependencies);
 
             return $refusal;
         }
 
-        $this->constructorBodies[$declaringClass] = $this->lookups->capture(fn (): ?string => $this->readConstructorBody($declaredIn, $declaringClass));
+        $startLine = (int) $declaringClass->getStartLine();
+        $this->constructorBodies[$key] = $this->lookups->capture(fn (): ?string => $this->readConstructorBody($declaredIn, $key, $startLine));
 
-        return $this->constructorBodies[$declaringClass][0];
+        return $this->constructorBodies[$key][0];
     }
 
-    private function readConstructorBody(string $file, string $className): ?string
+    private function readConstructorBody(string $file, string $className, int $startLine): ?string
     {
         $statements = $this->sources->tryParse($file);
         if (is_string($statements)) {
             return $statements;
         }
 
-        $class = (new NodeFinder())->findFirst(
-            $statements,
-            static fn (Node $node): bool => $node instanceof ClassLike && $node->namespacedName?->toString() === $className,
-        );
-        $constructor = $class instanceof ClassLike ? $class->getMethod('__construct') : null;
+        // By start line too, so that the body read is the one of the class PHPStan reflects.
+        $class = null;
+        foreach (SourceFiles::declarations($statements, $className) as $declaration) {
+            if ($declaration->getStartLine() === $startLine) {
+                $class = $declaration;
+            }
+        }
+        $constructor = $class?->getMethod('__construct');
 
         return match (true) {
             $constructor === null => 'the body of its constructor cannot be found; constructors that come from a trait are not supported',
             $constructor->stmts !== [] => 'its constructor contains logic, which is not verified',
             default => null,
         };
+    }
+
+    private function declaredMoreThanOnce(string $file, string $className): bool
+    {
+        if (!is_file($file)) {
+            return false;
+        }
+        $statements = $this->sources->tryParse($file);
+
+        return is_array($statements) && count(SourceFiles::declarations($statements, $className)) > 1;
     }
 }
