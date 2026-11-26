@@ -16,7 +16,14 @@ use PhpstanContracts\Tests\Fixtures\CrossFile\Steps;
 use PhpstanContracts\Tests\Fixtures\CrossFile\Tariff;
 use PhpstanContracts\Tests\Fixtures\CrossFile\TariffNonStrict;
 use PhpstanContracts\Tests\Fixtures\CrossFile\Twice;
+use PhpstanContracts\Tests\Fixtures\CrossFile\TwiceBase;
 use PhpstanContracts\Tests\Fixtures\CrossFile\TwiceData;
+use PhpstanContracts\Tests\Fixtures\CrossFile\TwiceDataBase;
+use PhpstanContracts\Tests\Fixtures\CrossFile\TwiceDataKid;
+use PhpstanContracts\Tests\Fixtures\CrossFile\TwiceKid;
+use PhpstanContracts\Tests\Fixtures\CrossFile\TwiceLeaf;
+use PhpstanContracts\Tests\Fixtures\CrossFile\TwiceMiddle;
+use PhpstanContracts\Tests\Fixtures\CrossFile\TwiceTop;
 use PhpstanContracts\Tests\Support\RuleFixtureTestCase;
 
 final class CrossFileRuleTest extends RuleFixtureTestCase
@@ -42,12 +49,23 @@ final class CrossFileRuleTest extends RuleFixtureTestCase
                 // PHPStan reflects the first declaration, PHP runs the second: proving `$result === 1` would be false.
                 'callsAClassDeclaredTwice' => ['contracts.unsupported: Twice.php, under conditions that only running the file decides, so the body that runs is not known. Call a method of a class declared once.'],
                 'buildsAClassDeclaredTwice' => ['contracts.unsupported: Twice.php, under conditions that only running the file decides, so the constructor that runs is not known. Build a class declared once.'],
+                'callsThroughASubclassDeclaredTwice' => ['contracts.unsupported: PhpstanContracts\Tests\Fixtures\CrossFile\TwiceBase::value() cannot be verified: PhpstanContracts\Tests\Fixtures\CrossFile\TwiceKid, through which it is called, is declared more than once in '],
+                'callsAnInheritedMethodOfADataClassDeclaredTwice' => ['contracts.unsupported: PhpstanContracts\Tests\Fixtures\CrossFile\TwiceDataBase::amount() cannot be verified: PhpstanContracts\Tests\Fixtures\CrossFile\TwiceDataKid, through which it is called, is declared more than once in '],
+                'buildsAClassWhoseParentIsDeclaredTwice' => ['contracts.unsupported: Cannot instantiate TwiceLeaf: its parent class TwiceMiddle is declared more than once in '],
                 'callsAClassDeclaredOnceInAnIf' => [],
                 'buildsAClassDeclaredOnceInAnIf' => [],
             ],
             Twice::class => ['value' => []],
             TwiceData::class => [],
             Once::class => ['value' => []],
+            TwiceBase::class => ['value' => []],
+            TwiceDataBase::class => ['amount' => []],
+            TwiceTop::class => [],
+            // Listed as PHP runs them: the second declarations override value() and amount().
+            TwiceKid::class => ['value' => []],
+            TwiceDataKid::class => ['amount' => []],
+            TwiceMiddle::class => [],
+            TwiceLeaf::class => [],
             CrossFileReplay::class => [
                 'surchargeIsIgnored' => ['contracts.ensuresViolated: Counterexample: $percent = '],
                 'surchargeOfAnyAmount' => ['contracts.requiresViolated: The call to PhpstanContracts\Tests\Fixtures\CrossFile\Tariff::withSurcharge() can violate its precondition'],

@@ -517,14 +517,19 @@ final class TypeMapper
 
         $declaringClass = $constructor->getDeclaringClass();
         $key = $declaringClass->getName();
-        // PHPStan reflects the first declaration of a class declared twice in a file, PHP runs the one its conditions pick.
+        // PHPStan reflects the first declaration of a class declared twice in a file, PHP runs the one its
+        // conditions pick: the constructor, the destructor and the properties can come from any ancestor.
         $class = $this->lookups->getClass($className);
-        $classFile = $class->getFileName();
-        if ($classFile !== null && $this->declaredMoreThanOnce($classFile, $class->getName())) {
-            return sprintf('it is declared more than once in %s, %s', $classFile, self::DECLARED_TWICE);
+        $twice = $this->sources->declaredMoreThanOnce($class);
+        if (is_string($twice)) {
+            return sprintf('%s, so whether it and its ancestors are declared once cannot be checked', $twice);
         }
-        if ($key !== $class->getName() && $this->declaredMoreThanOnce($declaredIn, $key)) {
-            return sprintf('its constructor is declared in %s, which is declared more than once in %s, %s', $declaringClass->getShortName(), $declaredIn, self::DECLARED_TWICE);
+        if ($twice !== null) {
+            [$twiceClass, $twiceFile] = $twice;
+
+            return $twiceClass->getName() === $class->getName()
+                ? sprintf('it is declared more than once in %s, %s', $twiceFile, self::DECLARED_TWICE)
+                : sprintf('its %s %s is declared more than once in %s, %s', SourceFiles::relation($twiceClass, $class), $twiceClass->getNativeReflection()->getShortName(), $twiceFile, self::DECLARED_TWICE);
         }
         if (array_key_exists($key, $this->constructorBodies)) {
             [$refusal, $dependencies] = $this->constructorBodies[$key];
@@ -560,15 +565,5 @@ final class TypeMapper
             $constructor->stmts !== [] => 'its constructor contains logic, which is not verified',
             default => null,
         };
-    }
-
-    private function declaredMoreThanOnce(string $file, string $className): bool
-    {
-        if (!is_file($file)) {
-            return false;
-        }
-        $statements = $this->sources->tryParse($file);
-
-        return is_array($statements) && count(SourceFiles::declarations($statements, $className)) > 1;
     }
 }

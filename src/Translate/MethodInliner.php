@@ -93,6 +93,7 @@ final class MethodInliner
         }
 
         $method = $class->getNativeMethod($methodName);
+        $called = $class;
 
         // `$x->m()` from a class S runs the private S::m() when $x is an instance of a
         // subclass of S, even if the subclass declares a public m(): PHP flags a method
@@ -118,7 +119,7 @@ final class MethodInliner
         $label = sprintf('%s::%s()', $owner->getDisplayName(), $method->getName());
 
         $this->checkCallable($class, $method, $owner, $callerScope, $label, $onAnObject, $lateStatic, $line);
-        $node = $this->findBody($owner, $method, $label, $line);
+        $node = $this->findBody($called, $owner, $method, $label, $line);
 
         if (in_array($label, $this->stack, true)) {
             throw new VerificationRejected(sprintf('Recursive calls are not supported: %s is already being translated.', $label), $line);
@@ -263,7 +264,10 @@ final class MethodInliner
         }
     }
 
-    private function findBody(ClassReflection $owner, ExtendedMethodReflection $method, string $label, int $line): ClassMethod
+    /**
+     * @param ClassReflection $called the class named in the call or of the receiver, whose ancestors include the owner
+     */
+    private function findBody(ClassReflection $called, ClassReflection $owner, ExtendedMethodReflection $method, string $label, int $line): ClassMethod
     {
         if ($owner->isEnum() && strcasecmp($method->getName(), 'cases') === 0) {
             throw new VerificationRejected(self::casesRefusal($owner), $line);
@@ -282,15 +286,33 @@ final class MethodInliner
             ), $line);
         }
 
-        $declarations = SourceFiles::declarations($this->sources->parse($file, $line), $owner->getName());
-        if (count($declarations) > 1) {
+        // PHPStan reflects the first declaration of a class declared twice in a file, PHP runs
+        // the one its conditions pick: the method that runs can come from any class on the way.
+        $twice = $this->sources->declaredMoreThanOnce($called);
+        if (is_string($twice)) {
+            throw new VerificationRejected(sprintf(
+                '%s cannot be verified: %s, so whether %s and its ancestors are declared once cannot be checked.',
+                $label,
+                $twice,
+                $called->getDisplayName(),
+            ), $line);
+        }
+        if ($twice !== null) {
+            [$twiceClass, $twiceFile] = $twice;
+            $relation = SourceFiles::relation($twiceClass, $called);
+            $which = match ($twiceClass->getName()) {
+                $owner->getName() => $twiceClass->getDisplayName(),
+                $called->getName() => sprintf('%s, through which it is called,', $twiceClass->getDisplayName()),
+                default => sprintf('%s, %s %s of %s,', $twiceClass->getDisplayName(), in_array($relation[0], ['a', 'i'], true) ? 'an' : 'a', $relation, $called->getDisplayName()),
+            };
             throw new VerificationRejected(sprintf(
                 '%s cannot be verified: %s is declared more than once in %s, under conditions that only running the file decides, so the body that runs is not known. Call a method of a class declared once.',
                 $label,
-                $owner->getDisplayName(),
-                $file,
+                $which,
+                $twiceFile,
             ), $line);
         }
+        $declarations = SourceFiles::declarations($this->sources->parse($file, $line), $owner->getName());
         // By start line too, so that the body translated is the one of the class PHPStan reflects.
         $startLine = $nativeClass->getStartLine();
         $classNode = null;

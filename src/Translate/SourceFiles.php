@@ -13,6 +13,7 @@ use PhpParser\NodeTraverser;
 use PhpParser\NodeVisitor\NameResolver;
 use PhpParser\Parser;
 use PhpParser\ParserFactory;
+use PHPStan\Reflection\ClassReflection;
 
 /**
  * The PHP files the translation reads directly: the bodies of called methods and
@@ -87,6 +88,48 @@ final class SourceFiles
                 && $node->namespacedName !== null
                 && strcasecmp($node->namespacedName->toString(), $className) === 0,
         );
+    }
+
+    /**
+     * The first of a class and its ancestors (parents, interfaces, traits) that its file
+     * declares more than once, with that file. The method, constructor, destructor,
+     * properties and constants that PHPStan reflects can come from any of them, so any of
+     * them declared twice makes the code that runs unknown.
+     *
+     * @return array{ClassReflection, string}|string|null the class and its file, why a file cannot be had (see {@see tryParse()}), or null when each is declared once
+     */
+    public function declaredMoreThanOnce(ClassReflection $class): array|string|null
+    {
+        foreach ($class->getAncestors() as $candidate) {
+            // Null for a class built into PHP or an extension, or not in a file on disk.
+            $file = $candidate->getFileName();
+            if ($file === null) {
+                continue;
+            }
+            $statements = $this->tryParse($file);
+            if (is_string($statements)) {
+                return $statements;
+            }
+            if (count(self::declarations($statements, $candidate->getName())) > 1) {
+                return [$candidate, $file];
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * How an ancestor returned by {@see declaredMoreThanOnce()} relates to the class, such
+     * as `parent class` or `trait`.
+     */
+    public static function relation(ClassReflection $ancestor, ClassReflection $class): string
+    {
+        return match (true) {
+            $ancestor->isInterface() => 'interface',
+            $ancestor->isTrait() => 'trait',
+            $class->getParentClass()?->getName() === $ancestor->getName() => 'parent class',
+            default => 'ancestor class',
+        };
     }
 
     /**

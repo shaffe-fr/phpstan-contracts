@@ -114,6 +114,27 @@ final class CrossFileFixture
         return new TwiceData($amount);
     }
 
+    // PHP returns 2: the second declaration of TwiceKid overrides the method of TwiceBase.
+    #[Ensures('$result === 1')]
+    public static function callsThroughASubclassDeclaredTwice(): int
+    {
+        return TwiceKid::value();
+    }
+
+    // PHP returns 2: the second declaration of TwiceDataKid overrides the method of TwiceDataBase.
+    #[Ensures('$result === 1')]
+    public static function callsAnInheritedMethodOfADataClassDeclaredTwice(TwiceDataKid $kid): int
+    {
+        return $kid->amount();
+    }
+
+    // PHP throws for a negative amount: the second declaration of TwiceMiddle has its own constructor.
+    #[Ensures('$result->amount === $amount')]
+    public static function buildsAClassWhoseParentIsDeclaredTwice(int $amount): TwiceLeaf
+    {
+        return new TwiceLeaf($amount);
+    }
+
     #[Ensures('$result === 2')]
     public static function callsAClassDeclaredOnceInAnIf(): int
     {
