@@ -11,19 +11,39 @@ use PHPStan\Reflection\ClassReflection;
 /**
  * The exceptions a method declares with `#[Throws]`, each with its condition on
  * the inputs, and the paths on which the body throws.
+ *
+ * A called method gets a child policy ({@see forCall()}): an exception thrown there
+ * leaves the verified method too, so it is checked against the verified method's
+ * declarations, while the callee's own statements stop the paths that threw in it.
  */
 final class ThrowPolicy
 {
     /** @var list<Term> */
     private array $pending = [];
 
+    /** @var list<Term> every path recorded, taken or not */
+    private array $thrown = [];
+
     private bool $throws = false;
 
     /**
      * @param list<array{string, Term|null, string}> $declared class name, condition (null when none is given), and the declaration as messages print it
      */
-    public function __construct(private readonly array $declared)
+    public function __construct(private readonly array $declared, private readonly ?self $parent = null)
     {
+    }
+
+    /**
+     * The policy of the body of a method called from here.
+     */
+    public function forCall(): self
+    {
+        return new self([], $this);
+    }
+
+    private function root(): self
+    {
+        return $this->parent === null ? $this : $this->parent->root();
     }
 
     /**
@@ -38,6 +58,10 @@ final class ThrowPolicy
      */
     public function allowed(ClassReflection $thrown): Term
     {
+        if ($this->parent !== null) {
+            return $this->root()->allowed($thrown);
+        }
+
         $covered = false;
         $conditions = [];
         foreach ($this->declared as [$class, $when]) {
@@ -61,6 +85,10 @@ final class ThrowPolicy
      */
     public function describeAllowed(ClassReflection $thrown): ?string
     {
+        if ($this->parent !== null) {
+            return $this->root()->describeAllowed($thrown);
+        }
+
         $covered = false;
         $holds = [];
         $doesNotHold = [];
@@ -93,6 +121,10 @@ final class ThrowPolicy
      */
     public function conditionOnASubclassOf(ClassReflection $thrown, Lookups $reflection): ?string
     {
+        if ($this->parent !== null) {
+            return $this->root()->conditionOnASubclassOf($thrown, $reflection);
+        }
+
         foreach ($this->declared as [$class, $when]) {
             if ($when === null || $this->covers($class, $thrown) || !$reflection->hasClass($class)) {
                 continue;
@@ -107,10 +139,25 @@ final class ThrowPolicy
         return null;
     }
 
+    /**
+     * A path that throws here. It also throws in every method that leads here.
+     */
     public function record(Term $path): void
     {
         $this->pending[] = $path;
-        $this->throws = true;
+        $this->thrown[] = $path;
+        for ($policy = $this; $policy !== null; $policy = $policy->parent) {
+            $policy->throws = true;
+        }
+    }
+
+    /**
+     * The paths on which this body threw, whether its statements stopped them or not:
+     * the paths on which a call to it throws.
+     */
+    public function thrown(): Term
+    {
+        return Smt::any(...$this->thrown);
     }
 
     /**

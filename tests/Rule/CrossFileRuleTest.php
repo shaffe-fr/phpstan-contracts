@@ -24,6 +24,7 @@ use PhpstanContracts\Tests\Fixtures\CrossFile\TwiceKid;
 use PhpstanContracts\Tests\Fixtures\CrossFile\TwiceLeaf;
 use PhpstanContracts\Tests\Fixtures\CrossFile\TwiceMiddle;
 use PhpstanContracts\Tests\Fixtures\CrossFile\TwiceTop;
+use PhpstanContracts\Tests\Fixtures\CrossFile\WebId;
 use PhpstanContracts\Tests\Support\RuleFixtureTestCase;
 
 final class CrossFileRuleTest extends RuleFixtureTestCase
@@ -54,7 +55,17 @@ final class CrossFileRuleTest extends RuleFixtureTestCase
                 'buildsAClassWhoseParentIsDeclaredTwice' => ['contracts.unsupported: Cannot instantiate TwiceLeaf: its parent class TwiceMiddle is declared more than once in '],
                 'callsAClassDeclaredOnceInAnIf' => [],
                 'buildsAClassDeclaredOnceInAnIf' => [],
+                'fromIdDeclared' => [],
+                'fromIdUndeclared' => ['contracts.unexpectedThrow: `throw new \InvalidArgumentException(\'The web id is out of range.\')` can be reached where no #[Throws] allows it, in the call to PhpstanContracts\Tests\Fixtures\CrossFile\WebId::from(). Counterexample: $id = '],
+                'fromIdGuarded' => [],
+                'fromIdTooNarrow' => ['contracts.unexpectedThrow: can be reached where the #[Throws] declarations do not allow it: they allow it only where #[Throws(InvalidArgumentException::class, when: \'$id < 0\')] holds, in the call to PhpstanContracts\Tests\Fixtures\CrossFile\WebId::from(). Counterexample: $id = '],
+                'fromIdTooWide' => ['contracts.throwsViolated: #[Throws(InvalidArgumentException::class, when: \'$id < 0 || $id >= 999\')] is violated: the method can return although the condition holds. Counterexample: $id = 999 => $result = 999'],
+                'fromIdInAnOperation' => ['contracts.unsupported: The call to PhpstanContracts\Tests\Fixtures\CrossFile\WebId::from() can throw, which is only supported where the call is the whole value of a return or an assignment: assign its result to a variable first, such as $value = WebId::from($id);'],
+                'throughAHelper' => [],
+                'throughAHelperInAnOperation' => ['contracts.unsupported: The call to PhpstanContracts\Tests\Fixtures\CrossFile\WebId::checked() can throw, which is only supported where the call is the whole value of a return or an assignment: assign its result to a variable first, such as $value = WebId::checked($id);'],
+                'assignedThenUsed' => [],
             ],
+            WebId::class => ['from' => [], 'checked' => []],
             Twice::class => ['value' => []],
             TwiceData::class => [],
             Once::class => ['value' => []],
@@ -72,6 +83,10 @@ final class CrossFileRuleTest extends RuleFixtureTestCase
                 'scaledPastTheIntRange' => ['contracts.overflow: in the call to PhpstanContracts\Tests\Fixtures\CrossFile\Tariff::scaled().'],
                 'doubledClampOverThreeFiles' => ['contracts.ensuresViolated: => $result = 2000000'],
                 'nonStrictSurchargeIsIgnored' => ['contracts.ensuresViolated: Counterexample: $percent = '],
+                'webIdWithoutThrows' => ['contracts.unexpectedThrow: can be reached where no #[Throws] allows it, in the call to PhpstanContracts\Tests\Fixtures\CrossFile\WebId::from(). Counterexample: $id = '],
+                'webIdThrowsTooNarrow' => ['contracts.unexpectedThrow: they allow it only where #[Throws(InvalidArgumentException::class, when: \'$id < 0\')] holds, in the call to PhpstanContracts\Tests\Fixtures\CrossFile\WebId::from(). Counterexample: $id = '],
+                'webIdThrowsTooWide' => ['contracts.throwsViolated: Counterexample: $id = 999 => $result = 999'],
+                'webIdThroughAHelperWithoutThrows' => ['contracts.unexpectedThrow: can be reached where no #[Throws] allows it, in the call to PhpstanContracts\Tests\Fixtures\CrossFile\WebId::checked(), through PhpstanContracts\Tests\Fixtures\CrossFile\WebId::from(). Counterexample: $id = '],
             ],
             Tariff::class => ['withSurcharge' => [], 'scaled' => [], 'clamp' => []],
             TariffNonStrict::class => ['withSurcharge' => [], 'clampOf' => []],

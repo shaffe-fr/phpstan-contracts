@@ -159,6 +159,7 @@ final class SourceFiles
             unset($this->parsed[array_key_first($this->parsed)]);
         }
 
-        return $this->parsed[$key] = (new NodeTraverser(new NameResolver()))->traverse($statements);
+        // Original names too, so that a message can quote a call as it is written.
+        return $this->parsed[$key] = (new NodeTraverser(new NameResolver(null, ['preserveOriginalNames' => true])))->traverse($statements);
     }
 }

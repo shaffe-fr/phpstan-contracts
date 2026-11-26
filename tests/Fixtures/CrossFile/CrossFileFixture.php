@@ -7,6 +7,7 @@ namespace PhpstanContracts\Tests\Fixtures\CrossFile;
 use PhpstanContracts\Attribute\Ensures;
 use PhpstanContracts\Attribute\Pure;
 use PhpstanContracts\Attribute\Requires;
+use PhpstanContracts\Attribute\Throws;
 
 /**
  * Calls to methods, and `new` of classes, declared in the other files of this directory.
@@ -145,5 +146,69 @@ final class CrossFileFixture
     public static function buildsAClassDeclaredOnceInAnIf(int $amount): Once
     {
         return new Once($amount);
+    }
+
+    #[Throws(\InvalidArgumentException::class, when: '$id < 0 || $id >= 1000')]
+    #[Ensures('$result === $id')]
+    public static function fromIdDeclared(int $id): int
+    {
+        return WebId::from($id);
+    }
+
+    #[Pure]
+    public static function fromIdUndeclared(int $id): int
+    {
+        return WebId::from($id);
+    }
+
+    // The throw is dead under the precondition.
+    #[Requires('$id >= 0 && $id < 1000')]
+    #[Ensures('$result === $id')]
+    public static function fromIdGuarded(int $id): int
+    {
+        return WebId::from($id);
+    }
+
+    #[Throws(\InvalidArgumentException::class, when: '$id < 0')]
+    public static function fromIdTooNarrow(int $id): int
+    {
+        return WebId::from($id);
+    }
+
+    // At $id = 999 the declaration holds, but the guard returns.
+    #[Throws(\InvalidArgumentException::class, when: '$id < 0 || $id >= 999')]
+    public static function fromIdTooWide(int $id): int
+    {
+        return WebId::from($id);
+    }
+
+    #[Throws(\InvalidArgumentException::class, when: '$id < 0 || $id >= 1000')]
+    public static function fromIdInAnOperation(int $id): int
+    {
+        return WebId::from($id) + 1;
+    }
+
+    #[Throws(\InvalidArgumentException::class, when: '$id < 0 || $id >= 1000')]
+    #[Ensures('$result === $id')]
+    public static function throughAHelper(int $id): int
+    {
+        return WebId::checked($id);
+    }
+
+    // WebId::checked() has no throw of its own: it throws through WebId::from().
+    #[Throws(\InvalidArgumentException::class, when: '$id < 0 || $id >= 1000')]
+    public static function throughAHelperInAnOperation(int $id): int
+    {
+        return WebId::checked($id) + 1;
+    }
+
+    // Only the ids the guard accepts reach the multiplication, which cannot overflow for them.
+    #[Throws(\InvalidArgumentException::class, when: '$id < 0 || $id >= 1000')]
+    #[Ensures('$result === $id * 1000000000000000')]
+    public static function assignedThenUsed(int $id): int
+    {
+        $checked = WebId::from($id);
+
+        return $checked * 1000000000000000;
     }
 }

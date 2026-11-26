@@ -7,6 +7,7 @@ namespace PhpstanContracts\Tests\Fixtures\CrossFile;
 use PhpstanContracts\Attribute\Ensures;
 use PhpstanContracts\Attribute\Pure;
 use PhpstanContracts\Attribute\Requires;
+use PhpstanContracts\Attribute\Throws;
 
 /**
  * Every method is refuted through a call to, or an object of, another file, and takes
@@ -47,5 +48,29 @@ final class CrossFileReplay
     public static function nonStrictSurchargeIsIgnored(int $percent, int $cents): int
     {
         return (new TariffNonStrict(0, $percent))->withSurcharge($cents);
+    }
+
+    #[Pure]
+    public static function webIdWithoutThrows(int $id): int
+    {
+        return WebId::from($id);
+    }
+
+    #[Throws(\InvalidArgumentException::class, when: '$id < 0')]
+    public static function webIdThrowsTooNarrow(int $id): int
+    {
+        return WebId::from($id);
+    }
+
+    #[Throws(\InvalidArgumentException::class, when: '$id < 0 || $id >= 999')]
+    public static function webIdThrowsTooWide(int $id): int
+    {
+        return WebId::from($id);
+    }
+
+    #[Pure]
+    public static function webIdThroughAHelperWithoutThrows(int $id): int
+    {
+        return WebId::checked($id);
     }
 }

@@ -15,7 +15,12 @@ use PhpstanContracts\Smt\Term;
 use PhpParser\Node;
 use PhpParser\Node\Arg;
 use PhpParser\Node\Expr;
+use PhpParser\Node\Name;
 use PhpParser\Node\Stmt\ClassMethod;
+use PhpParser\NodeTraverser;
+use PhpParser\NodeVisitor\CloningVisitor;
+use PhpParser\NodeVisitorAbstract;
+use PhpParser\PrettyPrinter\Standard;
 use PHPStan\Reflection\ClassReflection;
 use PHPStan\Reflection\ExtendedMethodReflection;
 use PHPStan\Reflection\InitializerExprTypeResolver;
@@ -68,6 +73,7 @@ final class MethodInliner
      * @param Term|null $receiver the object of an instance call, null for a static call
      * @param string|null $statelessThis the class of `$this` in `$this->m()` when it has no state, in which case there is no receiver term
      * @param bool $lateStatic whether the call is `static::m()`, which PHP looks up in the called class
+     * @param bool $tail whether the call is the whole value of the caller's statement, where it may throw
      */
     public function inline(
         ExpressionTranslator $caller,
@@ -81,6 +87,7 @@ final class MethodInliner
         array $arguments,
         array $env,
         Term $pc,
+        bool $tail,
         ?string $statelessThis = null,
     ): Term {
         $onAnObject = $receiver !== null || $statelessThis !== null;
@@ -129,9 +136,14 @@ final class MethodInliner
         $parameters = $this->parameterSorts($method, $label, $line);
         $values = $this->bindArguments($caller, $call, $arguments, $parameters, $label, $line, $env, $pc);
 
+        // A throw in the callee leaves the verified method too: it is checked against the
+        // verified method's #[Throws], and the caller's statement stops the paths that threw.
+        $callerPolicy = $caller->throwPolicy();
+        $policy = $callerPolicy?->forCall();
+
         $this->stack[] = $label;
         try {
-            return $this->translateBody($owner, $method, $node, $parameters, $values, $receiver, $statelessThis, $label, $line, $pc);
+            $result = $this->translateBody($owner, $method, $node, $parameters, $values, $receiver, $statelessThis, $label, $line, $pc, $policy);
         } catch (InliningLimitExceeded $exceeded) {
             // Its message already names the whole chain, from the outermost call.
             throw $exceeded;
@@ -144,6 +156,42 @@ final class MethodInliner
         } finally {
             array_pop($this->stack);
         }
+
+        if ($callerPolicy !== null && $policy !== null && $policy->anyThrow()) {
+            // Elsewhere the rest of the caller's expression would be computed with no value.
+            // Decided by the translation, before the solver runs: even a throw that the
+            // caller's path makes dead needs the tail position.
+            if (!$tail) {
+                throw new VerificationRejected(sprintf(
+                    'The call to %s can throw, which is only supported where the call is the whole value of a return or an assignment: assign its result to a variable first, such as $value = %s;',
+                    $label,
+                    self::asWritten($call),
+                ), $line);
+            }
+            $callerPolicy->record($policy->thrown());
+        }
+
+        return $result;
+    }
+
+    /**
+     * The call printed with its names as the source writes them, not as they resolve.
+     */
+    private static function asWritten(Expr $call): string
+    {
+        $copy = (new NodeTraverser(new CloningVisitor()))->traverse([$call]);
+        $copy = (new NodeTraverser(new class extends NodeVisitorAbstract {
+            public function leaveNode(Node $node): ?Node
+            {
+                $original = $node->getAttribute('originalName');
+
+                return $node instanceof Name && $original instanceof Name ? $original : null;
+            }
+        }))->traverse($copy);
+
+        $printed = $copy[0] ?? $call;
+
+        return (new Standard())->prettyPrintExpr($printed instanceof Expr ? $printed : $call);
     }
 
     /**
@@ -497,6 +545,7 @@ final class MethodInliner
         string $label,
         int $line,
         Term $pc,
+        ?ThrowPolicy $policy,
     ): Term {
         $resultSort = $this->types->map($method->getOnlyVariant()->getReturnType(), $line)->sort;
 
@@ -513,7 +562,7 @@ final class MethodInliner
         };
         // The calls that lead here from the verified method, outermost first, this one last.
         $calls = array_slice($this->stack, 1);
-        $body = new ExpressionTranslator($this->encoding, $this->types, $this->enums, $classes, $this->lookups, $this->initializers, false, $line, $thisRefusal, $this, $calls, statelessThis: $statelessThis);
+        $body = new ExpressionTranslator($this->encoding, $this->types, $this->enums, $classes, $this->lookups, $this->initializers, false, $line, $thisRefusal, $this, $calls, $policy, statelessThis: $statelessThis);
 
         $entry = [];
         if ($receiver !== null && !$method->isStatic()) {

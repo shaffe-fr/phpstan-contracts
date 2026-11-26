@@ -124,8 +124,8 @@ final class ExpressionTranslator
             $expr instanceof Expr\Throw_ => $this->throwExpression($expr, $env, $pc, $tail),
             $expr instanceof FuncCall => $this->functionCall($expr, $env, $pc),
             $expr instanceof ClassConstFetch => $this->classConstant($expr),
-            $expr instanceof StaticCall => $this->staticCall($expr, $env, $pc),
-            $expr instanceof Expr\MethodCall => $this->methodCall($expr, $env, $pc),
+            $expr instanceof StaticCall => $this->staticCall($expr, $env, $pc, $tail),
+            $expr instanceof Expr\MethodCall => $this->methodCall($expr, $env, $pc, $tail),
             $expr instanceof PropertyFetch => $this->propertyFetch($expr, $env, $pc),
             $expr instanceof NullsafePropertyFetch => $this->nullsafePropertyFetch($expr, $env, $pc),
             $expr instanceof New_ => $this->construct($expr, $env, $pc),
@@ -160,6 +160,15 @@ final class ExpressionTranslator
     public function takeThrows(): array
     {
         return $this->throws?->take() ?? [];
+    }
+
+    /**
+     * The exceptions this body may throw and the paths that threw, null where a
+     * `throw` cannot appear.
+     */
+    public function throwPolicy(): ?ThrowPolicy
+    {
+        return $this->throws;
     }
 
     /**
@@ -984,7 +993,6 @@ final class ExpressionTranslator
         if ($this->throws === null) {
             throw $this->reject($expr, match (true) {
                 $this->isContract => 'throw cannot appear in a contract.',
-                $this->calls !== [] => 'throw is not supported in a called method yet: the exception would leave the caller from inside an expression.',
                 default => 'throw is not supported here.',
             });
         }
@@ -1646,7 +1654,7 @@ final class ExpressionTranslator
      *
      * @param array<string, Term> $env
      */
-    private function staticCall(StaticCall $expr, array $env, Term $pc): Term
+    private function staticCall(StaticCall $expr, array $env, Term $pc, bool $tail): Term
     {
         if (!$expr->class instanceof Name || !$expr->name instanceof Identifier) {
             throw $this->reject($expr, 'Dynamic static calls are forbidden in verified methods.');
@@ -1674,6 +1682,7 @@ final class ExpressionTranslator
                 $this->classes->isLateStatic($expr->class),
                 $env,
                 $pc,
+                $tail,
             );
         }
         if ($enum->backingType === null) {
@@ -1726,7 +1735,7 @@ final class ExpressionTranslator
      *
      * @param array<string, Term> $env
      */
-    private function methodCall(Expr\MethodCall $expr, array $env, Term $pc): Term
+    private function methodCall(Expr\MethodCall $expr, array $env, Term $pc, bool $tail): Term
     {
         if (!$expr->name instanceof Identifier) {
             throw $this->reject($expr, 'Dynamic method calls are forbidden in verified methods.');
@@ -1734,7 +1743,7 @@ final class ExpressionTranslator
         $this->requireInliner($expr);
 
         if ($this->statelessThis !== null && $expr->var instanceof Variable && $expr->var->name === 'this') {
-            return $this->inline($expr, $this->statelessThis, $expr->name->toString(), null, false, $env, $pc, $this->statelessThis);
+            return $this->inline($expr, $this->statelessThis, $expr->name->toString(), null, false, $env, $pc, $tail, $this->statelessThis);
         }
 
         $receiver = $this->translate($expr->var, $env, $pc);
@@ -1745,13 +1754,14 @@ final class ExpressionTranslator
             default => throw $this->reject($expr, sprintf('Method calls are only supported on enums and data classes, not on a %s.', $receiver->sort->describe())),
         };
 
-        return $this->inline($expr, $className, $expr->name->toString(), $this->encoding->define('recv', $receiver), false, $env, $pc);
+        return $this->inline($expr, $className, $expr->name->toString(), $this->encoding->define('recv', $receiver), false, $env, $pc, $tail);
     }
 
     /**
      * @param array<string, Term> $env
+     * @param bool $tail whether the call is in tail position, the only place where it may throw
      */
-    private function inline(Expr\MethodCall|StaticCall $call, string $className, string $method, ?Term $receiver, bool $lateStatic, array $env, Term $pc, ?string $statelessThis = null): Term
+    private function inline(Expr\MethodCall|StaticCall $call, string $className, string $method, ?Term $receiver, bool $lateStatic, array $env, Term $pc, bool $tail, ?string $statelessThis = null): Term
     {
         $inliner = $this->requireInliner($call);
         if ($call->isFirstClassCallable()) {
@@ -1770,6 +1780,7 @@ final class ExpressionTranslator
             $call->args,
             $env,
             $pc,
+            $tail,
             $statelessThis,
         );
     }

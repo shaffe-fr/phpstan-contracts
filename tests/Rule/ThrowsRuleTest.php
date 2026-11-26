@@ -35,7 +35,8 @@ final class ThrowsRuleTest extends RuleFixtureTestCase
                 'aMessageThatIsNotAString' => ['contracts.unsupported: The message of an exception must be a string, not int.'],
                 'alwaysThrows' => ['contracts.unsupported: This expression always throws; write a throw statement.'],
                 'declaresSomethingThatIsNotThrowable' => ['contracts.invalidContract: PhpstanContracts\Tests\Fixtures\Point is not a Throwable class.'],
-                'callsAMethodThatThrows' => ['contracts.unsupported: The call to PhpstanContracts\Tests\Fixtures\ThrowsFixture::guarded() cannot be verified: throw is not supported in a called method yet'],
+                // The LogicException of guarded() leaves the method, which declares it without a condition.
+                'callsAMethodThatThrows' => [],
 
                 'twoDisjointDeclarations' => [],
                 'aGeneralAndASpecificDeclaration' => [],
