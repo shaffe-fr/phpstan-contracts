@@ -140,6 +140,42 @@ final class ResultCacheTest extends TestCase
             'public const TOP = 4;',
             'contracts.ensuresViolated: Counterexample: $level = 4',
         ];
+        yield 'the body of a called method of another file' => [
+            'src/B.php',
+            'return $value;',
+            'return $value === 0 ? 1 : $value;',
+            'contracts.ensuresViolated: Counterexample: $bodied = 0',
+        ];
+        yield 'a private constant read by the body of a called method' => [
+            'src/B.php',
+            'private const STEP = 7;',
+            'private const STEP = 8;',
+            'contracts.ensuresViolated: #[Ensures(\'$result === 7\')]',
+        ];
+        yield 'the constructor of a class built with new gains a statement' => [
+            'src/R.php',
+            "public int \$amount)\n    {\n    }",
+            "public int \$amount)\n    {\n        assert(\$amount >= 0);\n    }",
+            'contracts.unsupported: Cannot instantiate R: its constructor contains logic, which is not verified.',
+        ];
+        yield 'the parent of a class built with new, in a third file, gains a private destructor' => [
+            'src/StampBase.php',
+            'public const KIND = 1;',
+            "public const KIND = 1;\n\n    private function __destruct()\n    {\n    }",
+            'contracts.unsupported: Cannot instantiate Stamp: its destructor runs code that is not verified.',
+        ];
+        yield 'a trait used by a class built with new gains a destructor' => [
+            'src/Tags.php',
+            'public const KIND = 1;',
+            "public const KIND = 1;\n\n    public function __destruct()\n    {\n    }",
+            'contracts.unsupported: Cannot instantiate Tagged: its destructor runs code that is not verified.',
+        ];
+        yield 'the body of a called method in a scanned directory, outside the analysed paths' => [
+            'lib/Tax.php',
+            'return $value;',
+            'return $value === 0 ? 1 : $value;',
+            'contracts.ensuresViolated: Counterexample: $taxed = 0',
+        ];
         yield '@extends of a data class naming a constant (not read by the proof)' => [
             'lib/LibGrades.php',
             'public const MAX = 10;',

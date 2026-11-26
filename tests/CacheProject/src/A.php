@@ -178,4 +178,45 @@ final class A
     {
         return $level;
     }
+
+    // The body of B::same() is translated in place.
+    #[Ensures('$result === $bodied')]
+    public static function body(int $bodied): int
+    {
+        return B::same($bodied);
+    }
+
+    // B::step() reads a private constant of B.
+    #[Ensures('$result === 7')]
+    public static function secret(): int
+    {
+        return B::step();
+    }
+
+    #[Ensures('$result->amount === $built')]
+    public static function built(int $built): R
+    {
+        return new R($built);
+    }
+
+    // Stamp's parent, in a third file, could declare a destructor, which would run for the Stamp built here.
+    #[Ensures('$result->stamp === $stamped')]
+    public static function stamped(int $stamped): Stamp
+    {
+        return new Stamp($stamped);
+    }
+
+    // So could the trait that Tagged uses.
+    #[Ensures('$result->tag === $tagged')]
+    public static function tagged(int $tagged): Tagged
+    {
+        return new Tagged($tagged);
+    }
+
+    // Tax is in lib/, which PHPStan scans but does not analyse.
+    #[Ensures('$result === $taxed')]
+    public static function taxed(int $taxed): int
+    {
+        return \Tax::rate($taxed);
+    }
 }
