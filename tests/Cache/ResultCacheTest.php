@@ -6,7 +6,6 @@ namespace PhpstanContracts\Tests\Cache;
 
 use FilesystemIterator;
 use PhpstanContracts\Tests\Support\RequiresZ3;
-use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use RecursiveDirectoryIterator;
 use RecursiveIteratorIterator;
@@ -14,9 +13,15 @@ use SplFileInfo;
 use Symfony\Component\Process\Process;
 
 /**
- * Runs PHPStan on a copy of tests/CacheProject twice, then edits a file that A's proofs
- * read but PHPStan does not see A depend on, and checks that the third run re-analyses
- * A: its result cache must not keep the proof that the edit broke.
+ * Runs PHPStan on a copy of tests/CacheProject twice, then edits, one at a time, files
+ * that A's proofs read but PHPStan does not see A depend on, and checks after each edit
+ * that the next run re-analyses A: its result cache must not keep a proof that the edit
+ * broke. The edits add up, each one breaking another method of A.
+ *
+ * One row per way a proof can read another file, PHPDoc types included: what PHPStan
+ * resolves a PHPDoc type to often names nothing it was computed from. A row whose
+ * construct the proof does not read (the translation drops it) checks instead that A is
+ * the one file re-analysed after an edit of lib/, which only A uses.
  *
  * The project runs on two workers, one file per job, so the files are spread over both,
  * as in a parallel run of a real project.
@@ -24,6 +29,8 @@ use Symfony\Component\Process\Process;
 final class ResultCacheTest extends TestCase
 {
     use RequiresZ3;
+
+    private const REANALYSED = 'reanalysed';
 
     private string $project = '';
 
@@ -35,6 +42,10 @@ final class ResultCacheTest extends TestCase
     }
 
     /**
+     * The file to edit, the text to replace in it (null to create the file), the new text,
+     * and either what A reports afterwards ("identifier: message fragment") or
+     * {@see self::REANALYSED}.
+     *
      * @return iterable<string, array{string, string|null, string, string}>
      */
     public static function edits(): iterable
@@ -69,13 +80,105 @@ final class ResultCacheTest extends TestCase
             'public const MAX = 11;',
             'contracts.ensuresViolated: #[Ensures(\'$result->amount <= 10\')]',
         ];
+        yield 'value-of<> an enum of another file' => [
+            'src/Priority.php',
+            'case Only = 3;',
+            'case Only = 4;',
+            'contracts.ensuresViolated: #[Ensures(\'$result <= 3\')]',
+        ];
+        yield 'an alias of the typeAliases parameter naming a class constant' => [
+            'src/Ceiling.php',
+            'public const MAX = 10;',
+            'public const MAX = 11;',
+            'contracts.ensuresViolated: Counterexample: $ceiled = 11',
+        ];
+        yield 'key-of<> a class constant' => [
+            'src/Keys.php',
+            '[3 =>',
+            '[4 =>',
+            'contracts.ensuresViolated: Counterexample: $k = 4',
+        ];
+        yield 'an alias of @phpstan-type imported with @phpstan-import-type' => [
+            'src/Shares.php',
+            '@phpstan-type Share int<0, 10>',
+            '@phpstan-type Share int<0, 11>',
+            'contracts.ensuresViolated: Counterexample: $s = 11',
+        ];
+        yield 'a constant of the class a @template is bound to' => [
+            'src/Tiers.php',
+            'public const TOP = 10;',
+            'public const TOP = 11;',
+            'contracts.ensuresViolated: $tiered = 11',
+        ];
+        yield 'a class constant declared by the parent' => [
+            'src/RankBase.php',
+            'public const TOP = 10;',
+            'public const TOP = 11;',
+            'contracts.ensuresViolated: Counterexample: $inherited = 11',
+        ];
+        yield 'a class constant declared by a trait' => [
+            'src/RankTrait.php',
+            'public const LOW = 10;',
+            'public const LOW = 11;',
+            'contracts.ensuresViolated: Counterexample: $used = 11',
+        ];
+        yield 'a class constant whose initializer reads a constant of another file' => [
+            'src/ChainEnd.php',
+            'public const MAX = 10;',
+            'public const MAX = 11;',
+            'contracts.ensuresViolated: Counterexample: $chained = 11',
+        ];
+        yield 'self:: constant whose initializer reads a constant of another file' => [
+            'src/OwnEnd.php',
+            'public const MAX = 10;',
+            'public const MAX = 11;',
+            'contracts.ensuresViolated: Counterexample: $own = 11',
+        ];
+        yield 'value-of<> an enum whose case reads a constant of another file' => [
+            'src/LevelEnd.php',
+            'public const TOP = 3;',
+            'public const TOP = 4;',
+            'contracts.ensuresViolated: Counterexample: $level = 4',
+        ];
+        yield '@extends of a data class naming a constant (not read by the proof)' => [
+            'lib/LibGrades.php',
+            'public const MAX = 10;',
+            'public const MAX = 11;',
+            self::REANALYSED,
+        ];
+        yield 'a conditional return type naming a constant (not read by the proof)' => [
+            'lib/LibCap.php',
+            'public const MAX = 10;',
+            'public const MAX = 11;',
+            self::REANALYSED,
+        ];
+        yield '@mixin (not read by the proof)' => [
+            'lib/LibExtra.php',
+            'public const VERSION = 1;',
+            'public const VERSION = 2;',
+            self::REANALYSED,
+        ];
+        yield '@method (not read by the proof)' => [
+            'lib/LibMagic.php',
+            'public const VERSION = 1;',
+            'public const VERSION = 2;',
+            self::REANALYSED,
+        ];
+        yield 'class-string<> (not read by the proof)' => [
+            'lib/LibClass.php',
+            'public const VERSION = 1;',
+            'public const VERSION = 2;',
+            self::REANALYSED,
+        ];
+        yield 'an enum case as a PHPDoc type' => [
+            'lib/LibTint.php',
+            "    case Blue;\n",
+            "    case Blue;\n    case Green;\n",
+            self::REANALYSED,
+        ];
     }
 
-    /**
-     * @param string|null $search the text to replace in $file, or null to create $file with $replace
-     */
-    #[DataProvider('edits')]
-    public function testAnEditReanalysesTheFilesWhoseProofsReadIt(string $file, ?string $search, string $replace, string $expected): void
+    public function testEachEditReanalysesTheFilesWhoseProofsReadIt(): void
     {
         $z3 = $this->requireZ3();
         $this->project = $this->copyProject($z3);
@@ -85,23 +188,45 @@ final class ResultCacheTest extends TestCase
         self::assertSame([], $warm['errors'], 'warm run');
         self::assertStringContainsString('Result cache restored', $warm['stderr'], 'the warm run uses the result cache');
 
-        $path = $this->project . '/' . $file;
-        if ($search === null) {
-            file_put_contents($path, $replace);
-        } else {
-            $contents = (string) file_get_contents($path);
-            self::assertStringContainsString($search, $contents);
-            file_put_contents($path, str_replace($search, $replace, $contents));
+        // Every row is run, so that one report lists each edit that left a stale proof.
+        $failures = [];
+        foreach (self::edits() as $label => [$file, $search, $replace, $expected]) {
+            $path = $this->project . '/' . $file;
+            if ($search === null) {
+                file_put_contents($path, $replace);
+            } else {
+                $contents = (string) file_get_contents($path);
+                self::assertStringContainsString($search, $contents, $label);
+                file_put_contents($path, str_replace($search, $replace, $contents));
+            }
+
+            $run = $this->analyse(true);
+            self::assertStringContainsString('Result cache restored', $run['stderr'], $label . ': the run uses the result cache');
+            $outside = array_diff(array_keys($run['errors']), ['src/A.php']);
+            self::assertSame([], $outside, $label . ': only A reports errors: ' . json_encode($run['errors']));
+
+            if ($expected === self::REANALYSED) {
+                if (!str_contains($run['stderr'], 'Result cache restored. 1 file will be reanalysed.')) {
+                    $failures[] = sprintf('%s: A is not re-analysed (%s)', $label, self::restored($run['stderr']));
+                }
+                continue;
+            }
+            [$identifier, $fragment] = explode(': ', $expected, 2);
+            $matching = array_filter(
+                $run['errors']['src/A.php'] ?? [],
+                static fn (array $error): bool => $error['identifier'] === $identifier && str_contains($error['message'], $fragment),
+            );
+            if ($matching === []) {
+                $failures[] = sprintf('%s: A does not report %s (%s)', $label, $expected, self::restored($run['stderr']));
+            }
         }
 
-        [$identifier, $fragment] = explode(': ', $expected, 2);
-        $errors = $this->analyse(true)['errors'];
-        self::assertArrayHasKey('src/A.php', $errors, 'A is re-analysed after the edit: ' . json_encode($errors));
-        $matching = array_filter(
-            $errors['src/A.php'],
-            static fn (array $error): bool => $error['identifier'] === $identifier && str_contains($error['message'], $fragment),
-        );
-        self::assertNotEmpty($matching, sprintf('A reports %s: %s', $expected, json_encode($errors['src/A.php'])));
+        self::assertSame([], $failures, 'stale proofs');
+    }
+
+    private static function restored(string $stderr): string
+    {
+        return preg_match('(Result cache restored\. [^\r\n]*)', $stderr, $match) === 1 ? $match[0] : 'no result cache line';
     }
 
     private function copyProject(string $z3): string

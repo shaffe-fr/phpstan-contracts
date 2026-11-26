@@ -7,6 +7,8 @@ parameters:
 	scanDirectories:
 		- lib
 	tmpDir: tmp
+	typeAliases:
+		Ceiled: 'int<0, CacheProject\Ceiling::MAX>'
 	parallel:
 		jobSize: 1
 		maximumNumberOfProcesses: 2
