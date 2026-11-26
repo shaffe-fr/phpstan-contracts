@@ -507,7 +507,7 @@ What a loop body can hold:
 | `throw` and `#[Throws]` | With the same "if and only if" meaning as outside a loop, see [Exceptions](#exceptions): the condition of a `throw` in the third iteration includes the two iterations before it. |
 | `$out[] = $x`, `$out = [...$out, $x]` | On a list built in the method, which is how a result list is built: `$parts = []; foreach (...) { $parts[] = ...; }`. |
 | another `foreach`, within the budget | See [The budget](#the-budget). |
-| a call to a method of the same file | Its own loops are unrolled in place, with the bound of its own `#[Requires]`. |
+| a call to another method, in any file | Its own loops are unrolled in place, with the bound of its own `#[Requires]`. A `contracts.loopBound` of such a loop is reported at the call. |
 
 After the loop, the key and the value hold the last values they had, as in PHP. A variable that is first assigned in the body is not defined after the loop, because the list can be empty: reading it is rejected with `Variable $seen is not defined at this point.`
 
@@ -558,7 +558,7 @@ A loop nest is unrolled as many times as the product of the bounds along the nes
 These nested loops would be unrolled 20 × 20 = 400 times, more than contracts.maxLoopUnroll (100). Bound the lists more tightly with #[Requires], extract the inner loop into a smaller method of this file, or raise contracts.maxLoopUnroll.
 ```
 
-Extracting the inner loop into a method of the same file, with its own `#[Requires]`, keeps each unrolling small. Both parameters are described in [Getting started](getting-started.md#configuration).
+Extracting the inner loop into a smaller method, with its own `#[Requires]`, keeps each unrolling small. Both parameters are described in [Getting started](getting-started.md#configuration).
 
 ### The cost
 
@@ -806,7 +806,7 @@ The rules for a factory:
 - It is a `static` method that the throwing method can access, and its **native** return type is one exception class: the class itself, `self` or `static`. `static` stands for the class that the call names. A PHPDoc `@return` is not enough, since PHP does not enforce it. An interface, a union, a nullable type, `never`, `stdClass` or no return type is rejected.
 - The class that is matched against `#[Throws]` is that return type. A `#[Throws]` on the class or on one of its parents allows the throw. A `#[Throws]` on a subclass only does not, since the object may be of the declared class and not of the subclass.
 - If the return class is not `final`, the object may also be an instance of a subclass, so a `#[Throws]` with a `when` condition on a subclass of it (or on an interface) is rejected: the proof cannot tell which condition the object falls under. Make the return class `final`, or declare a final subclass as the return type.
-- The arguments are translated like any expression, so an overflow or a division by zero in an argument is reported, and they are checked against the parameters like the arguments of a [call to a method of the same file](#calls-to-other-methods): an `int` converts to a parameter whose native type is `float`, and nothing else is converted. A parameter without a default value needs an argument. Named arguments work, and a variadic or by-reference parameter is rejected.
+- The arguments are translated like any expression, so an overflow or a division by zero in an argument is reported, and they are checked against the parameters like the arguments of a [call to another method](#calls-to-other-methods): an `int` converts to a parameter whose native type is `float`, and nothing else is converted. A parameter without a default value needs an argument. Named arguments work, and a variadic or by-reference parameter is rejected.
 - A factory that carries `#[Requires]`, `#[Throws]` or `#[\Deprecated]` is rejected: its precondition would not be checked, and the proof assumes that it returns normally.
 - **The body of the factory is never read**, and it may be in another file. The proof assumes that the factory returns an instance of its declared class without throwing anything itself, see [What it does not guarantee](limits-and-roadmap.md#what-it-does-not-guarantee).
 A `throw` inside an operation, such as `($n ?? throw new E()) + 1`, or in a condition, is rejected: the rest of the expression would be computed on a path that has already ended. `try`/`catch` is still rejected, so an exception always leaves the method.

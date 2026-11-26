@@ -218,7 +218,7 @@ php bin/phpstan-contracts-install-z3
 vendor/bin/phpstan analyse
 ```
 
-The run reports 76 errors, all intended: 71 from this extension (the examples that show a refuted rule, an undecided one or a rejected construct) and 5 from PHPStan's own rules on the deliberately broken methods (`argument.type` twice, `return.missing`, `return.type`, `match.unhandled`). It takes about a minute and a half with a cold cache. Every other annotated method is proven.
+The run reports 79 errors, all intended: 74 from this extension (the examples that show a refuted rule, an undecided one or a rejected construct) and 5 from PHPStan's own rules on the deliberately broken methods (`argument.type` twice, `return.missing`, `return.type`, `match.unhandled`). It takes about a minute and a half with a cold cache. Every other annotated method is proven.
 
 ## Status
 

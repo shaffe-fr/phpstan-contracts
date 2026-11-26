@@ -850,7 +850,7 @@ public static function alwaysApplicable(Cart $cart): bool
 }
 ```
 ## Services without state
-A `final` class with no instance property, of any visibility, inherited and from a trait included, holds no data, so `$this` has nothing to model. It is accepted as the receiver of a call to another method of the same file, which is how such services are written: a public method that delegates to private helpers. Static properties and class constants are not state.
+A `final` class with no instance property, of any visibility, inherited and from a trait included, holds no data, so `$this` has nothing to model. It is accepted as the receiver of a call to another method, in its file or in a parent class of another file, which is how such services are written: a public method that delegates to private helpers. Static properties and class constants are not state.
 | Supported | Notes |
 |---|---|
 | `$this->helper($x)`, `$this->helper($x)->other()` | The call is translated with the body of the helper, and the helper sees the same `$this`. Only in a class without any instance property. |
@@ -997,7 +997,7 @@ An array shape, `array{net: int, vat: int}`, is a PHP array with these string ke
 | a parameter, a return type or a property of type `array{...}` | A range on a field, such as `array{net: int<0, 100>}`, is an assumption on an input and something the method must honour on a returned shape. |
 | `$shape['net']` with a string literal key of the shape | The value, with no warning, since the type requires the key. Inside an attribute, write the key with double quotes: `$result["net"]`. |
 | `$shape['net'] ?? $default`, `isset($shape['note'])` | For a nullable field. |
-| a literal `['net' => $net, 'vat' => $vat]` | The order of the keys is not observable through any supported construct, so a literal may list them in another order than the type. A literal can be returned, passed to a method of the same file, or put in a property. |
+| a literal `['net' => $net, 'vat' => $vat]` | The order of the keys is not observable through any supported construct, so a literal may list them in another order than the type. A literal can be returned, passed to a called method, or put in a property. |
 | a shape inside a list, a list inside a shape, a shape in a data class | Reading through a list element, such as `$lines[$i]['net'] ?? 0`, is rejected: PHP treats a missing element in the middle of the chain as unset. |
 
 | Rejected | Why |

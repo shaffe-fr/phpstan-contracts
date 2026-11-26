@@ -181,7 +181,7 @@ final class Rejected
     }
 }
 
-/** Declared in this file, so that its constructor is read in the file that builds it. */
+/** A constructor that validates its arguments, so `new Percentage(...)` is rejected. */
 final readonly class Percentage
 {
     public function __construct(public int $value)

@@ -16,7 +16,7 @@ Each section follows the same arc: the rule, the contract that states it, what t
 | 6 | Shipping fee | 2 | 1 proven, 1 refuted |
 | 7 | Rate limiting | 3 | 2 proven, 1 refuted (two ways) |
 | 8 | Calendar | 3 | 2 proven, 1 refuted |
-| 9 | Richer types: data classes, strings, floats, nullables, enum parsing, enum methods, class constants, calls, calls across files, `in_array()`, guards that throw, lists, array shapes, loops over lists | 81 | 47 proven, 34 refuted |
+| 9 | Richer types: data classes, strings, floats, nullables, enum parsing, enum methods, class constants, calls, calls across files, `in_array()`, guards that throw, lists, array shapes, loops over lists | 89 | 51 proven, 38 refuted |
 
 ## 1. Pagination
 
