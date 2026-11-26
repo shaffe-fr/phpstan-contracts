@@ -407,9 +407,9 @@ Pure enums and backed enums, with `int` or `string` backing values.
 | `$this` in an instance method | One of the cases: `===`, `!==`, `match ($this)`, `$this->value`, `$this->name`, and in contracts. |
 | `in_array($this, [self::Paid, self::Shipped])` | With or without `strict: true`: enum cases compare by identity either way. The list can be a constant, `in_array($this, self::FINAL_STATES)`. |
 
-`$this->isFinal()` and `$other->level()` work when the method is declared in the same file: the call is translated with the body of the method, see [Calls to other methods](writing-contracts.md#calls-to-other-methods).
+`$this->isFinal()` and `$other->level()` work wherever the method is declared: the call is translated with the body of the method, see [Calls to other methods](writing-contracts.md#calls-to-other-methods). An enum in one file can be used by the rules of another: [`LoyaltyTier.php`](../examples/RealWorld/LoyaltyTier.php) and [`LoyaltyPricing.php`](../examples/RealWorld/LoyaltyPricing.php).
 
-Not supported: `cases()`, and a case marked `#[\Deprecated]`, whose access triggers a deprecation from PHP 8.4 on.
+Not supported: `cases()` (it has no body to translate: write the cases you need as a list, such as `[Suit::Hearts, Suit::Spades]`), and a case marked `#[\Deprecated]`, whose access triggers a deprecation from PHP 8.4 on.
 
 Parsing an untrusted value is the usual place for a bug. `from()` throws on anything unknown, and the prover shows the input that does it. `tryFrom()` with a default is proven, and the contract can state each case:
 
@@ -715,12 +715,12 @@ final readonly class Receipt
 |---|---|
 | `$cart->subtotalCents`, `$cart->coupon->percent` | Nested reads. A nullable object needs a null check or `?->`. |
 | `$cart->coupon?->minimumCents` | |
-| `new Receipt(0, $total, false)` | Positional or named arguments, all of them. Only for classes whose constructor is declared in the same file, does nothing but promote every modelled property, can be called from the verified method and is not `#[\Deprecated]`, and that have no destructor. The properties left out of the model keep their default value, or stay uninitialized, and cannot be read. |
+| `new Receipt(0, $total, false)` | Positional or named arguments, all of them. Only for classes whose constructor, declared in any file, does nothing but promote every modelled property, can be called from the verified method and is not `#[\Deprecated]`, and that have no destructor. The properties left out of the model keep their default value, or stay uninitialized, and cannot be read. |
 | `$this->onHand` in a method of the class, `new self(...)` | `$this` is an implicit parameter of the class, with the same domain as any other. |
 
-A method of the class declared in the same file, such as `$this->available()` or a getter, can be called if the class is `final`, or the method `final` or `private`: see [Calls to other methods](writing-contracts.md#calls-to-other-methods).
+A method of the class, declared in any file, such as `$this->available()` or a getter, can be called if the class is `final`, or the method `final` or `private`: see [Calls to other methods](writing-contracts.md#calls-to-other-methods).
 
-Not supported: calling a method declared in another file, building a class whose constructor is declared in another file, reading a property that is left out of the model, reading `$c->x` from a class that declares a private `$x` when `$c` is an instance of a subclass (PHP reads the private property of the calling class), `$a === $b` and `$a == $b` between objects (identity is not modelled, compare the fields), writing to a property, and `instanceof`.
+Not supported: reading a property that is left out of the model, reading `$c->x` from a class that declares a private `$x` when `$c` is an instance of a subclass (PHP reads the private property of the calling class), `$a === $b` and `$a == $b` between objects (identity is not modelled, compare the fields), writing to a property, and `instanceof`.
 
 A data class can carry its own rules. `$this` is a record of its properties, read like a parameter:
 
@@ -747,10 +747,10 @@ Rejected.php:133: Cannot instantiate Percentage: its constructor contains logic,
 Rejected.php:140: Type PhpstanContracts\Examples\Counter is not supported: only enums, readonly data classes, lists, array shapes with string keys and scalars are. Property PhpstanContracts\Examples\Counter::$count must be public and readonly: only immutable data classes are supported.
 ```
 
-`new` also needs the constructor in the file that builds the object. PHPStan re-analyses a file when the signatures it uses change, not when the body of a constructor in another file does, so a proof that relied on an empty constructor elsewhere could stay green after that constructor gains a check. That is why `Receipt` is declared in `Checkout.php`, next to the methods that build it. A class of another file can still be received as a parameter, returned and read:
+`new` works for a class declared in another file. [`RefundPolicy.php`](../examples/RealWorld/RefundPolicy.php) builds a `Refund` declared in [`Refund.php`](../examples/RealWorld/Refund.php): the proof reads the constructor where it is declared, and is redone when that file changes. If the constructor gains logic, the callers are rejected instead of staying green, with the reason:
 
 ```
-Rejected.php:187: Cannot instantiate Receipt: its constructor is declared in another file. Only classes whose constructor is in the same file can be built: PHPStan re-analyses a file when the signatures it uses change, not when a body in another file does, so the proof would not be redone.
+Cannot instantiate Busy: its constructor contains logic, which is not verified.
 ```
 
 ### Data classes and the return type
@@ -876,7 +876,7 @@ A range on the elements, such as `list<int<0, 10000000>>`, and `non-empty-list` 
 | `foreach ($list as $item)`, `foreach ($list as $i => $item)` | By value, with `break`, `continue`, `return` and `$out[] = $x` in the body. The proof unrolls the loop up to a bound that a `#[Requires('count($list) <= 20')]` gives, and `contracts.loopBound` says when a list can have more elements. See [Loops](writing-contracts.md#loops). |
 | `array_sum($list)` on a `list<int>` | In the body, PHP's sum, with a `contracts.overflow` check on every partial sum because PHP turns the sum into a float when one leaves the `int` range. In a contract, the mathematical sum. |
 | `$a === $b`, `!==`, `match ($list)` on lists of `int`, `bool`, `string`, enum cases and their nullable versions | The same count, and identical elements in the same order. |
-| passing a list to a method of the same file, returning it, a list in a property or in an array shape | The element type must be the same on both sides. |
+| passing a list to a called method, returning it, a list in a property or in an array shape | The element type must be the same on both sides. |
 
 Not supported, each with a message that says what to write instead:
 

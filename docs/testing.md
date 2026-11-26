@@ -23,6 +23,7 @@ Z3 is looked up like the extension does: the per-user cache (see [Install Z3](ge
 | `rule` | yes | For each supported construct, does the real rule, wired by the real `extension.neon`, prove what is true, refute what is false, and reject what is outside the subset with the right message? |
 | `docs` | no | Is every line of code quoted in the documentation still in `examples/`, does every link and anchor resolve, and is every diagnostic identifier documented? |
 | `examples` | yes | Does each example come out as the documentation says: proven, refuted, or rejected? |
+| `cache` | yes | Is a proof that read another file redone when that file changes? Each case runs PHPStan with a result cache on a small project, edits one file (the body of a callee, a private constant, a constructor, a destructor in a parent, a trait, an enum case, a callee in a scanned directory, a class that a name in a contract string now resolves to) and checks the error that the other file reports. |
 
 ## The package verifies itself
 
@@ -76,7 +77,7 @@ Because those laws single out one quotient and one remainder, the proof shows th
 
 ### Why not more
 
-Of all the methods of `src/`, one has only scalar parameters and a scalar result: a private helper that tests for a space in a string. The package is a compiler. Its code builds strings, arrays and objects, which is what the verified subset leaves out: no arrays with arbitrary keys, no loop except a `foreach` over a bounded list, no calls to methods of other files, a handful of string functions, no bitwise operators. So most of the tests stay, for a reason that depends on what they check:
+Of all the methods of `src/`, one has only scalar parameters and a scalar result: a private helper that tests for a space in a string. The package is a compiler. Its code builds strings, arrays and objects, which is what the verified subset leaves out: no arrays with arbitrary keys, no loop except a `foreach` over a bounded list, a handful of string functions, no bitwise operators. So most of the tests stay, for a reason that depends on what they check:
 
 | Tests | Could a contract replace them? |
 |---|---|
@@ -88,7 +89,7 @@ Of all the methods of `src/`, one has only scalar parameters and a scalar result
 
 The semantics tests have to stay because verifying the translator with the translator is circular. A contract is proven relative to the model of PHP that the translator embeds. If that model of floats were wrong, the package would "prove" things about itself on a wrong foundation and report nothing. The only independent reference is PHP's actual behaviour, which is why the tests compare the model with PHP bit for bit. The integer division is the exception, and only because four laws leave a single answer, so that the comparison with PHP shrinks to checking the laws.
 
-Two things would let more tests be replaced. Modular verification, the first item of the [roadmap](limits-and-roadmap.md#roadmap), would let a method be proven in terms of the contracts of the methods it calls in other files. Bitwise operators, which are not on the roadmap, would allow proving that `Smt::floatLiteral` takes a float apart and `ValueFormatter` puts it back together without loss. Neither is a commitment.
+Two things would let more tests be replaced. Contract-based calls, the first item of the [roadmap](limits-and-roadmap.md#roadmap), would let a method be proven in terms of the contracts of the methods it calls, which recursion and large call graphs need. Bitwise operators, which are not on the roadmap, would allow proving that `Smt::floatLiteral` takes a float apart and `ValueFormatter` puts it back together without loss. Neither is a commitment.
 
 ## The semantics tests
 

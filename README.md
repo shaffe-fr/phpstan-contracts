@@ -6,7 +6,7 @@ Write the rule your code must obey, right above the method. PHPStan then *proves
 
 [![CI](https://github.com/shaffe-fr/phpstan-contracts/actions/workflows/ci.yml/badge.svg)](https://github.com/shaffe-fr/phpstan-contracts/actions/workflows/ci.yml)
 ![PHP 8.3+](https://img.shields.io/badge/PHP-8.3%2B-777bb4)
-![PHPStan 2](https://img.shields.io/badge/PHPStan-2.x-4e8cae)
+![PHPStan 2.3+](https://img.shields.io/badge/PHPStan-2.3%2B-4e8cae)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 ## See it in 20 seconds
@@ -192,12 +192,12 @@ The verified subset is small on purpose, so that the answer is a real proof and 
 - `int`, `bool`, `string` (as bytes), enums (pure and backed), nullable versions of all of these, and readonly data classes
 - `float`, modelled exactly as IEEE 754: the prover knows that `0.1 + 0.2 !== 0.3`, and that regrouping a sum changes the result
 - `if` / `elseif` / `else`, `match`, early `return`, local variables, null checks that narrow the type, and guards that throw (with `new` or a static factory), declared with `#[Throws(E::class, when: '...')]` (a `throw` that nothing declares must be unreachable, as in the `default` arm of an exhaustive `match`)
-- enum and value-object code as it is usually written: `self::Case`, class constants, `$this` in the methods of enums (`match ($this)`) and readonly data classes, and calls to other methods of the same file, such as `$this->level() <= $other->level()`, or `$this->helper()` in a final service without properties, or a static helper whose `#[Requires]` is checked at the call
+- enum and value-object code as it is usually written: `self::Case`, class constants, `$this` in the methods of enums (`match ($this)`) and readonly data classes, and calls to other methods, in the same file or in another one, such as `$this->level() <= $other->level()`, or `$this->helper()` in a final service without properties, or a static helper whose `#[Requires]` is checked at the call (the proof is redone when a file it read changes), `new` of a data class declared in another file, and calls to guards that throw
 - `foreach` over a `list<T>`, by value, with or without the key, `break`, `continue` and early `return` in the body, accumulation into local variables and result lists built with `$out[] = ...`, and `array_sum()` over a `list<int>`: the loop is unrolled up to the bound that `#[Requires('count($lines) <= 20')]` gives, and a list that can be longer is reported as `contracts.loopBound` instead of being assumed away, so "the parts of a discount split add up to the discount" can be proven over the lines of an order
 - `list<T>` and array shapes such as `array{net: int, vat: int}`, as parameters, results and properties: `count()`, `$list[$i]` with a proof that the key exists (`contracts.undefinedKey`), `$shape['net']`, literals, `[...$list, $x]`, appending to a list built in the method, `===` on lists, and element ranges such as `list<int<0, 100>>` as assumptions on inputs and goals on results
 - arithmetic, comparisons, `min`, `max`, `abs`, `intdiv`, `in_array` over a list of cases or scalars, or over a `list<T>` (`strict: true` for strings), and the common string checks (length, prefix, suffix, containment, concatenation, with an `int` written in decimal in `.`, interpolation and `(string)`)
 
-Not yet: `while`, `for` and `do` (they need a termination argument), `foreach` by reference or over anything but a list, `array_map()` and the other array functions, loops over lists of any length (they need an invariant), `try`/`catch`, calls to methods of other files and `new` of classes whose constructor is in another file, arrays with arbitrary keys (`array<string, int>`), lists of lists and union element types such as `list<float|string>`, mutable state (the state of a framework base class can stay in a data class, but a verified method cannot read it), and `float` or `bool` in a string. Anything outside the subset is reported as `contracts.unsupported` with the reason, never silently skipped. Floating-point multiplication of two variables can be too slow to decide, so money is better kept as integer cents and rates as basis points. See [Supported types](docs/types.md) for what each type can do, and [Limits and roadmap](docs/limits-and-roadmap.md) for what a green run guarantees and what comes next.
+Not yet: `while`, `for` and `do` (they need a termination argument), `foreach` by reference or over anything but a list, `array_map()` and the other array functions, loops over lists of any length (they need an invariant), `try`/`catch`, recursion, calls through an interface or an abstract method, arrays with arbitrary keys (`array<string, int>`), lists of lists and union element types such as `list<float|string>`, mutable state (the state of a framework base class can stay in a data class, but a verified method cannot read it), and `float` or `bool` in a string. Anything outside the subset is reported as `contracts.unsupported` with the reason, never silently skipped. Floating-point multiplication of two variables can be too slow to decide, so money is better kept as integer cents and rates as basis points. See [Supported types](docs/types.md) for what each type can do, and [Limits and roadmap](docs/limits-and-roadmap.md) for what a green run guarantees and what comes next.
 
 ## Learn more
 
@@ -206,7 +206,7 @@ Not yet: `while`, `for` and `do` (they need a termination argument), `foreach` b
 | [Getting started](docs/getting-started.md) | Install, first proof, configuration |
 | [Writing contracts](docs/writing-contracts.md) | The attributes, the contract language, every diagnostic |
 | [Supported types](docs/types.md) | `int`, `float`, `string`, enums, nullables, data classes, lists, array shapes, with the real bugs found in each |
-| [Real-world examples](docs/real-world-examples.md) | Pagination, VAT, installments, workflows, rate limits, uploads, checkout and more: twenty-nine rules, each with the bug the prover found |
+| [Real-world examples](docs/real-world-examples.md) | Pagination, VAT, installments, workflows, rate limits, uploads, checkout and more: thirty-two rules, each with the bug the prover found |
 | [How it works](docs/how-it-works.md) | From PHP to SMT-LIB to Z3 |
 | [Limits and roadmap](docs/limits-and-roadmap.md) | What is guaranteed, what is next |
 
@@ -222,7 +222,7 @@ The run reports 76 errors, all intended: 71 from this extension (the examples th
 
 ## Status
 
-Early MVP, tested with Z3 5.4.1, PHP 8.3 to 8.5 and PHPStan 2.x. The CI runs the whole suite and the examples on Linux (PHP 8.3, 8.4, 8.5), Windows and macOS (PHP 8.5). Feedback and real-world contracts are very welcome: open an issue.
+Early MVP, tested with Z3 5.4.1, PHP 8.3 to 8.5 and PHPStan 2.3 and later. The CI runs the whole suite and the examples on Linux (PHP 8.3, 8.4, 8.5), Windows and macOS (PHP 8.5). Feedback and real-world contracts are very welcome: open an issue.
 
 ## License
 

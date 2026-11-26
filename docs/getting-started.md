@@ -3,7 +3,7 @@
 ## Requirements
 
 - PHP 8.3 or later
-- PHPStan 2.1 or later
+- PHPStan 2.3 or later
 - A `z3` executable. The extension is tested with Z3 5.4.1.
 
 ## Install Z3
@@ -148,7 +148,7 @@ If the executable cannot be found, every checked method reports `contracts.solve
 
 ## Cost
 
-Each checked method starts one Z3 process. On the Windows machine used for this documentation that costs about 0.2 s per method with a cold PHPStan cache, of which translating the PHP is under 1 ms. PHPStan's result cache skips files that did not change, so a second run on unchanged code does not start Z3 again.
+Each checked method starts one Z3 process. On the Windows machine used for this documentation that costs about 0.2 s per method with a cold PHPStan cache, of which translating the PHP is under 1 ms. PHPStan's result cache skips files that did not change, so a second run on unchanged code does not start Z3 again. A method that calls code from other files is analysed again when any file its proof read changes, even if only a method body changed there, so the proof never outlives the code it was made from.
 
 When a file does change, the proof cache still saves the methods that did not: the answers of Z3 are stored in `cacheDirectory`, keyed by the exact script that was sent and by the Z3 build. A method whose script is identical is answered from disk, even in another file or after a PHPStan cache reset. Only settled answers (`sat` and `unsat`) are stored as proofs, never `unknown`, so raising `timeoutMs` always gives a hard method another chance. The one other thing stored is the memory of undecided checks (`rememberUndecided`), kept apart from the proofs and never read as one. An entry that cannot be read back exactly is ignored. The cache lives in PHPStan's temporary directory and is trusted like it, so keep it out of reach of anyone who should not be able to turn a failing proof green. Entries are small files that are never deleted automatically: remove the directory to clean up. On the repository's `examples` (61 scripts, 30 s timeout), a run with both caches cold took 87 s. With only the proof cache warm it took 64 s, and the time that remains is the methods Z3 cannot decide, which are asked again every time. With both caches warm it took 1.4 s. A method that does floating-point arithmetic is slower, from about a second to several seconds, because the solver reasons about every bit of the numbers (see [what is slow](types.md#what-is-slow)).
 

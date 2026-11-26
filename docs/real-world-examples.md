@@ -1,6 +1,6 @@
 # Real-world examples
 
-Twenty-nine business rules of the kind found in shops, booking engines and APIs. Each one is real code in [`examples/RealWorld`](../examples/RealWorld), checked by `phpstan analyse` with this extension. Sections 1 to 8 use integers, booleans and enums. [Section 9](#9-the-same-rules-over-richer-types) covers data classes, strings, floats, nullable values, enum methods, class constants, calls, `in_array()`, guards that throw, lists, array shapes and loops over lists, which the [types page](types.md) and [Loops](writing-contracts.md#loops) show in detail. The code blocks below are copied from those files with the prose descriptions of the docblocks left out, and the outputs are the actual diagnostics, shown with `--error-format=raw` and shortened paths.
+Thirty-two business rules of the kind found in shops, booking engines and APIs. Each one is real code in [`examples/RealWorld`](../examples/RealWorld), checked by `phpstan analyse` with this extension. Sections 1 to 8 use integers, booleans and enums. [Section 9](#9-the-same-rules-over-richer-types) covers data classes, strings, floats, nullable values, enum methods, class constants, calls (also across files), `in_array()`, guards that throw, lists, array shapes and loops over lists, which the [types page](types.md) and [Loops](writing-contracts.md#loops) show in detail. The code blocks below are copied from those files with the prose descriptions of the docblocks left out, and the outputs are the actual diagnostics, shown with `--error-format=raw` and shortened paths.
 
 Each section follows the same arc: the rule, the contract that states it, what the prover established, and a plausible bug it caught.
 
@@ -16,7 +16,7 @@ Each section follows the same arc: the rule, the contract that states it, what t
 | 6 | Shipping fee | 2 | 1 proven, 1 refuted |
 | 7 | Rate limiting | 3 | 2 proven, 1 refuted (two ways) |
 | 8 | Calendar | 3 | 2 proven, 1 refuted |
-| 9 | Richer types: data classes, strings, floats, nullables, enum parsing, enum methods, class constants, calls, `in_array()`, guards that throw, lists, array shapes, loops over lists | 81 | 47 proven, 34 refuted |
+| 9 | Richer types: data classes, strings, floats, nullables, enum parsing, enum methods, class constants, calls, calls across files, `in_array()`, guards that throw, lists, array shapes, loops over lists | 81 | 47 proven, 34 refuted |
 
 ## 1. Pagination
 
@@ -584,12 +584,68 @@ Real signatures are rarely just integers. The rules below use the types that sec
 | [Splitting a discount over the lines of an order](writing-contracts.md#loops) | `DiscountSplit.php` | `foreach` with a key, `$parts[] = ...` in the body, `array_sum($result)` in a contract, a `#[Requires]` that bounds the list and relates it to the discount | 4 | 2 proven, 2 refuted | the remainder is forgotten, so 4 cents split over three lines add up to 3; without `$discountCents <= array_sum($lineCents)`, part of the discount is lost |
 | [Splitting a discount in proportion to the amounts](writing-contracts.md#a-discount-split-in-proportion-to-the-amounts) | `ProportionalSplit.php` | two `foreach` loops, `intdiv()` of a product by the sum of the lines, a remainder given back line by line, `array_sum($result)` in a contract | 2 | 1 proven, 1 refuted | without the second pass the cents left by the rounding are lost: 2 cents split over lines of 2 and 3 add up to 1 |
 | [Totals over the lines of an order](writing-contracts.md#loops) | `OrderTotals.php` | `foreach` over a list of data classes, an early `return` and `continue` in the body, a filter that builds a list, `contracts.loopBound` | 6 | 3 proven, 3 refuted | the same total without a bound on the lines is not proven beyond 10 lines, and the proof says so; a `return $i + 1` points past the last line; a filter that claims to keep every line |
+| [A discount defined in another file](#rules-that-span-files) | `LoyaltyTier.php`, `LoyaltyPricing.php` | a call to a method of an enum declared in another file | 4 | 2 proven, 2 refuted | a typo gives Gold 105%, and the price rule in the other file breaks |
+| [A refund built in another file](#rules-that-span-files) | `Refund.php`, `RefundPolicy.php` | `new` of a data class declared in another file | 2 | 1 proven, 1 refuted | a full refund of 110% of what was paid |
+| [An export that calls a guard of another file](#rules-that-span-files) | `ErpExport.php`, `ErpCode.php` | a call to a method that throws, with `#[Throws]` | 2 | 1 proven, 1 refuted | the declared range forgets the upper bound of the guard |
 
 Two of them are worth reading first. The checkout shows a rule over an object graph, with a nullable object inside a cart, which is the shape of most real signatures. The float page shows bugs that no unit test with ordinary values finds, such as a regrouped sum that differs in the last bit.
 
+## Rules that span files
+
+A rule rarely lives in one file. The enum or the value object is in one, the rule that uses it in another, and a change in the first must not leave the second green. A verified method can call a method, build an object and rely on a guard that is declared anywhere, and the proof is redone when any of those files changes: see [Calls to other methods](writing-contracts.md#calls-to-other-methods).
+
+**A discount defined in one file, priced in another.** `LoyaltyTier.php` holds the discount of each tier, capped at 20%. `LoyaltyPricing.php` applies it:
+
+```php
+// LoyaltyTier.php
+#[Ensures('$result >= 0 && $result <= 2000')]
+public function discountBasisPoints(): int
+{
+    return match ($this) {
+        self::Bronze => 0,
+        self::Silver => 500,
+        self::Gold => 1500,
+    };
+}
+
+// LoyaltyPricing.php
+/**
+ * @param int<0, 1000000000> $cents
+ */
+#[Ensures('$result >= 0 && $result <= $cents')]
+public static function priceAfterLoyalty(int $cents, LoyaltyTier $tier): int
+{
+    return intdiv($cents * (10000 - $tier->discountBasisPoints()), 10000);
+}
+```
+
+**Proven** for every tier, with the discount read from the other file. **The bug** is a typo in the file of the enum, where Gold becomes 105.00% (`10500` instead of `1500`). The enum method reports its own contract, and so does the rule that relies on it, in its own file:
+
+```
+LoyaltyTier.php:35: Postcondition #[Ensures('$result >= 0 && $result <= 2000')] can be violated.
+Counterexample: $this = LoyaltyTier::Gold => $result = 10500 (return at line 38).
+LoyaltyPricing.php:32: Postcondition #[Ensures('$result >= 0 && $result <= $cents')] can be violated.
+Counterexample: $cents = 20, $tier = LoyaltyTier::Gold => $result = -1 (return at line 35).
+```
+
+A price of 20 cents with 105% off is a refund of a cent, not a price. The second error does not need the first one to be fixed or even to be reported: the pricing rule is checked against the code of the enum, not against its promise.
+
+**A refund built from another file.** `RefundPolicy::refund()` builds a `Refund` of `Refund.php` and promises that it never gives back more than was paid. `refundBroken()` writes the full refund as 110%, to cover a booking fee:
+
+```
+RefundPolicy.php:38: Postcondition #[Ensures('$result->refundedCents <= $result->paidCents')] can be violated.
+Counterexample: $paidCents = 10, $daysBeforeStay = 7 => $result = Refund(paidCents: 10, refundedCents: 11) (return at line 47).
+```
+
+**A guard of another file.** `ErpExport::exportLine()` calls `ErpCode::from()`, which throws for an id outside the reserved range. The `throw` of the guard counts as a `throw` of the export, so the export declares when it throws, and the proof checks the declaration against the guard. `exportLineBroken()` forgets the upper bound:
+
+```
+ErpExport.php:35: `throw new \InvalidArgumentException('The web id is outside the range reserved for the web shop.')` can be reached where the #[Throws] declarations do not allow it: they allow it only where #[Throws(InvalidArgumentException::class, when: '$webId < 0')] holds, in the call to PhpstanContracts\Examples\RealWorld\ErpCode::from(). Counterexample: $webId = 1499292.
+```
+
 ## Structuring real code for verification
 
-A verified method cannot read an entity or call a repository: it has no mutable objects, no loops other than a `foreach` over a bounded list and no calls outside its own file. That is by design, and it suggests a shape for the code: **extract the rule into a small static method that takes scalars, enums, nullable values or small readonly data classes, and keep the glue in the service.**
+A verified method cannot read an entity or call a repository: it has no mutable objects, no loops other than a `foreach` over a bounded list. That is by design, and it suggests a shape for the code: **extract the rule into a small static method that takes scalars, enums, nullable values or small readonly data classes, and keep the glue in the service.**
 
 ```php
 // Application code: not verified. It adapts the domain model to the pure rule.
@@ -609,7 +665,7 @@ final class CheckoutService
 
 A readonly data class can cross the boundary as it is: `Checkout::receipt()` takes a `Cart` and returns a `Receipt`. The service is ordinary code that PHPStan analyses as usual. It also meets the verified method at its boundary: `shippingCents` declares `@param int<0, 100000> $weightGrams`, so PHPStan will ask you to establish that range at this call, for example with `@return int<0, 100000>` on `totalWeightGrams()` or by clamping the value. That request is the check that the proof's assumption is true in production.
 
-Two things are not checked yet: the extension does not verify that a call from ordinary code satisfies the callee's `#[Requires]` (only PHPDoc ranges, which PHPStan enforces), and a verified method can only call methods declared in its own file. See [Limits and roadmap](limits-and-roadmap.md).
+One thing is not checked yet: the extension does not verify that a call from ordinary code satisfies the callee's `#[Requires]` (only PHPDoc ranges, which PHPStan enforces). See [Limits and roadmap](limits-and-roadmap.md).
 
 ## When the solver gives up
 

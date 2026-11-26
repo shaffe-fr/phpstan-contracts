@@ -196,7 +196,10 @@ Everything in the table in [the contract language](#the-contract-language) works
 | an unqualified call to a supported function, such as `abs()` or `in_array()`, in a namespace that declares a function of that name | `Call to PhpstanContracts\Tests\Fixtures\Shadowing\abs() is not part of the verified subset: purity cannot be established.` |
 | an unqualified supported constant, such as `PHP_INT_MAX` or `NAN`, in a namespace that declares a constant of that name | `Constant PhpstanContracts\Tests\Fixtures\Shadowing\PHP_INT_MAX is not part of the verified subset: PHP reads it instead of the built-in constant.` |
 | any other constant, including a supported one written in another case, such as `php_int_max` | `Constant php_int_max is not part of the verified subset.` |
-| a call to a method declared in another file | `PhpstanContracts\Tests\Fixtures\Point::sum() is declared in another file. Only methods of the same file can be called: ...` (see [Calls to other methods](#calls-to-other-methods)) |
+| `Enum::cases()` or another method that PHP provides | `PhpstanContracts\Examples\RealWorld\ShippingZone::cases() is built into PHP, so there is no body to translate; write the cases you need as a list, such as [ShippingZone::Domestic, ShippingZone::Europe, ...].` (see [Calls to other methods](#calls-to-other-methods)) |
+| a chain of more than 16 nested calls | `The call to PhpstanContracts\Tests\Fixtures\CrossFile\Chain::depth1() cannot be verified: the chain of calls ... is deeper than 16 calls, the limit for translating the body of each called method in place. Call a method with a shorter chain of calls, or split the rule into smaller verified methods.` |
+| more than 256 bodies translated for one verified method | `... would translate more than 256 bodies of called methods, counting a method once per call that reaches it (...). Split the rule into smaller verified methods, or call fewer helpers from it.` |
+| a call that can throw, anywhere but the whole value of a return or an assignment | `The call to PhpstanContracts\Tests\Fixtures\CrossFile\WebId::from() can throw, which is only supported where the call is the whole value of a return or an assignment: assign its result to a variable first, such as $value = WebId::from($id);` |
 | a call that PHP binds at runtime to a method a subclass can override | `PhpstanContracts\Tests\Fixtures\OpenShape::sides() can be overridden: PhpstanContracts\Tests\Fixtures\OpenShape is not final, so a subclass can replace the method. Make the class or the method final, or the method private.` |
 | `static::k()` on a class that is not final, for a method that is not final, private or not | `PhpstanContracts\Tests\Fixtures\ShadowParent::k() can be overridden: PhpstanContracts\Tests\Fixtures\ShadowParent is not final, so a subclass can declare its own k(), which static:: calls instead, even though this one is private. Use self::, or make the class or the method final.` |
 | a called method whose parameter has no native type | `Parameter $value of PhpstanContracts\Tests\Fixtures\CallFixture::isOne() has no native type, so PHP passes its argument as it is; declare the type in the signature.` |
@@ -207,7 +210,6 @@ Everything in the table in [the contract language](#the-contract-language) works
 | a method call in a contract | `Method calls are not supported in contract expressions yet.` |
 | a method call on anything but an enum case or a data object | `Method calls are only supported on enums and data classes, not on a string.` |
 | `new` on a class that is not a plain data class | `Cannot instantiate Percentage: its constructor contains logic, which is not verified.` |
-| `new` on a data class whose constructor is declared in another file | `Cannot instantiate Receipt: its constructor is declared in another file. Only classes whose constructor is in the same file can be built: PHPStan re-analyses a file when the signatures it uses change, not when a body in another file does, so the proof would not be redone.` |
 | `new` on a class whose constructor is private or protected and not accessible from the verified method | `Cannot instantiate Sealed: its constructor is not accessible here.` |
 | `new` on a class whose constructor is marked `#[\Deprecated]` | `Cannot instantiate OldStyle: its constructor is #[\Deprecated], and calling it triggers E_USER_DEPRECATED, which runs the error handler.` |
 | `new` on a class with a destructor, its own or inherited | `Cannot instantiate Noisy: its destructor runs code that is not verified.` |
@@ -310,7 +312,7 @@ ErpCode.php:36: Postcondition #[Ensures('implies($result !== null, $result < sel
 Counterexample: $webId = 1000000 => $result = 99000000 (return at line 39).
 ```
 
-PHPStan folds a constant in its own process, so some initializers are rejected, because a run of the code can see another value or none: one that reads a `#[\Deprecated]` constant or enum case, which from PHP 8.4 on triggers a deprecation and runs the error handler (the attribute is checked whatever version of PHP runs PHPStan), and one that turns a float into a string, such as `'v' . (0.1 + 0.2)`, whose digits depend on the `precision` ini setting. An ordering between a float and a string, `<`, `<=`, `>`, `>=` or `<=>`, is rejected for the same reason: PHP 8 orders a float and a non-numeric string by printing the float, so `(0.1 + 0.2) < '0.3!'` is true at the default precision and false at `precision=-1`. `==` and `!=` between them are accepted, because a finite float prints as a numeric string, which never equals a non-numeric one, and `INF` and `NAN` print the same at every precision. A float converted to an int implicitly, such as the operand of `1.5 | 0` or the offset of `self::NAMES[1.5]`, is rejected too: from PHP 8.1 on, it runs the error handler unless the float holds an integer in the range of int. A global constant read by an initializer, such as `public const LABEL = PRINTED;`, is checked for the float-to-string conversion in its own initializer, the `const` statement or top-level `define()` that defines it, and so are the constants that this initializer reads; a deprecation or an implicit float-to-int conversion in there does not matter, because a global constant is evaluated where it is defined, not where it is read. When that definition cannot be read, such as a constant defined by a PHPStan bootstrap file, whose value PHPStan takes from the running process, the read is rejected: `The initializer of constant PhpstanContracts\Tests\Fixtures\DEFINED_AT_RUNTIME cannot be checked for a float converted to a string: no file defines it.` The same holds for reading a `#[\Deprecated]` enum case in the body. PHPStan's result cache does not record the attributes of the enum cases of another file, so adding `#[\Deprecated]` to such a case is only seen once the file that reads it is analysed again.
+PHPStan folds a constant in its own process, so some initializers are rejected, because a run of the code can see another value or none: one that reads a `#[\Deprecated]` constant or enum case, which from PHP 8.4 on triggers a deprecation and runs the error handler (the attribute is checked whatever version of PHP runs PHPStan), and one that turns a float into a string, such as `'v' . (0.1 + 0.2)`, whose digits depend on the `precision` ini setting. An ordering between a float and a string, `<`, `<=`, `>`, `>=` or `<=>`, is rejected for the same reason: PHP 8 orders a float and a non-numeric string by printing the float, so `(0.1 + 0.2) < '0.3!'` is true at the default precision and false at `precision=-1`. `==` and `!=` between them are accepted, because a finite float prints as a numeric string, which never equals a non-numeric one, and `INF` and `NAN` print the same at every precision. A float converted to an int implicitly, such as the operand of `1.5 | 0` or the offset of `self::NAMES[1.5]`, is rejected too: from PHP 8.1 on, it runs the error handler unless the float holds an integer in the range of int. A global constant read by an initializer, such as `public const LABEL = PRINTED;`, is checked for the float-to-string conversion in its own initializer, the `const` statement or top-level `define()` that defines it, and so are the constants that this initializer reads; a deprecation or an implicit float-to-int conversion in there does not matter, because a global constant is evaluated where it is defined, not where it is read. When that definition cannot be read, such as a constant defined by a PHPStan bootstrap file, whose value PHPStan takes from the running process, the read is rejected: `The initializer of constant PhpstanContracts\Tests\Fixtures\DEFINED_AT_RUNTIME cannot be checked for a float converted to a string: no file defines it.` The same holds for reading a `#[\Deprecated]` enum case in the body.
 
 `self::X` and `ClassName::X` are statically bound, so they are always accepted. `static::X` is accepted when the class is final or the constant is declared `final`. Otherwise a subclass can override the constant, and the access is rejected:
 
@@ -328,11 +330,11 @@ CartLimits.php:22: static::MAX_ITEMS is late bound: a subclass of PhpstanContrac
 Use self::MAX_ITEMS, or make the class or the constant final.
 ```
 
-**`$this` in an enum** is one of the cases. An enum instance method is a function of an implicit parameter of the enum type, so `$this === self::InStock`, `match ($this)` with its exhaustiveness check, `$this->value` and `$this->name` all work. **`$this` in a readonly data class** is a record of its properties, read with `$this->onHand`, under the same conditions as a parameter of that class (see [Readonly data classes](types.md#readonly-data-classes)). In both cases `$this` is printed first in a counterexample, like a parameter. A call to another method on `$this`, such as `$this->isFinal()`, works when that method is declared in the same file, see below. **`$this` in a class without any instance property** has no state to model, so it is accepted only as the receiver of such a call, see [Calls to other methods](#calls-to-other-methods).
+**`$this` in an enum** is one of the cases. An enum instance method is a function of an implicit parameter of the enum type, so `$this === self::InStock`, `match ($this)` with its exhaustiveness check, `$this->value` and `$this->name` all work. **`$this` in a readonly data class** is a record of its properties, read with `$this->onHand`, under the same conditions as a parameter of that class (see [Readonly data classes](types.md#readonly-data-classes)). In both cases `$this` is printed first in a counterexample, like a parameter. A call to another method on `$this`, such as `$this->isFinal()`, works too, see below. **`$this` in a class without any instance property** has no state to model, so it is accepted only as the receiver of such a call, see [Calls to other methods](#calls-to-other-methods).
 
 ### Calls to other methods
 
-A method can call another method **declared in the same file**: a helper of the same class, `$this->level()` in an enum, or a getter of a data class. The call is translated by translating the body of the callee, with its parameters bound to the arguments and `$this` to the object the method is called on. The proof sees exactly what the callee computes, so the callee does not need a contract of its own, and its safety checks are made for the arguments of this call:
+A method can call another method, declared in any file: a helper of the same class, `$this->level()` in an enum, a getter of a data class, or a method of a class in another file or in a Composer package. The call is translated by translating the body of the callee, with its parameters bound to the arguments and `$this` to the object the method is called on. The proof sees exactly what the callee computes, so the callee does not need a contract of its own, and its safety checks are made for the arguments of this call:
 
 ```php
 #[Ensures('$result >= 1 && $result <= 4')]
@@ -405,9 +407,70 @@ What can be called:
 
 The callee must itself be in the verified subset; when it is not, the reason is given: ``The call to PhpstanContracts\Tests\Fixtures\CallFixture::loops() cannot be verified: Only foreach over a list is supported: ...``. Recursion, methods from a trait, methods marked `#[\Deprecated]` (calling one triggers `E_USER_DEPRECATED`, which runs the error handler), generators (``PhpstanContracts\Tests\Fixtures\Generators::five() contains a yield, so calling it returns a Generator.``) and calls inside a contract are rejected.
 
-A called method cannot throw yet: ``The call to PhpstanContracts\Tests\Fixtures\ThrowsFixture::guarded() cannot be verified: throw is not supported in a called method yet: ...``.
+**Calls across files.** The callee can be declared in any PHP file on disk: another file of the project, a directory that PHPStan only scans, or a package under `vendor/`. [`LoyaltyTier.php`](../examples/RealWorld/LoyaltyTier.php) holds an enum whose `discountBasisPoints()` is capped at 20%, and [`LoyaltyPricing.php`](../examples/RealWorld/LoyaltyPricing.php) prices an order with it:
 
-**Why the same file.** PHPStan's result cache re-analyses a file when it changes, and the files that depend on it only when a signature they use changes. A proof that read the body of a method in another file would not be redone when that body changes, and could stay green for code that is now wrong. The same holds for `new X(...)`, whose proof relies on the body of the constructor being empty: X's constructor must be declared in the same file. Calls to methods of other files need modular verification, where the caller relies on the callee's contract, which is on the [roadmap](limits-and-roadmap.md#roadmap).
+```php
+/**
+ * @param int<0, 1000000000> $cents
+ */
+#[Ensures('$result >= 0 && $result <= $cents')]
+public static function priceAfterLoyalty(int $cents, LoyaltyTier $tier): int
+{
+    return intdiv($cents * (10000 - $tier->discountBasisPoints()), 10000);
+}
+```
+
+It is proven for every tier. The bug below is in `LoyaltyTier.php`, where a typo gives Gold 105.00% instead of 15.00% (`discountBasisPointsBroken()`). The method that breaks is the one that relies on it, in the other file:
+
+```
+LoyaltyPricing.php:32: Postcondition #[Ensures('$result >= 0 && $result <= $cents')] can be violated.
+Counterexample: $cents = 20, $tier = LoyaltyTier::Gold => $result = -1 (return at line 35).
+```
+
+`new` works the same way: [`RefundPolicy.php`](../examples/RealWorld/RefundPolicy.php) builds a `Refund` declared in [`Refund.php`](../examples/RealWorld/Refund.php), under the conditions of [data classes](types.md#readonly-data-classes). The constructor of that class must still do nothing but promote its properties: when it gains logic, the callers are rejected, with the message of the table below.
+
+**Why it works across files.** The proof translates the body of the callee, so it assumes nothing about it: whether its file is analysed, annotated, proven, or silenced by a baseline does not change the result, and a counterexample is a real run of the code. PHPStan's result cache normally re-analyses a file when the signatures it uses change, not when a body in another file does, so the extension tells it which files each proof read: the bodies and constructors it translated, the constants, enums, parents, interfaces and traits it looked at, and the classes that did not exist. Editing any of them, even only the body of a method, in a project file, a scanned directory or a package in `vendor/`, makes PHPStan analyse the caller again. That needs PHPStan 2.3 or later. The price is that editing a file re-analyses the files whose proofs read it: the answers of Z3 for scripts that did not change come from the [proof cache](getting-started.md#cost).
+
+**Limits.** A chain of more than 16 nested calls, or more than 256 translated bodies for one verified method (a method counts once per call that reaches it), is rejected with the chain of calls, so that a rule does not turn into a very large script:
+
+```
+CrossFileFixture.php:102: The call to PhpstanContracts\Tests\Fixtures\CrossFile\Chain::level1() cannot be verified: PhpstanContracts\Tests\Fixtures\CrossFile\CrossFileFixture::moreBodiesThanTheLimit() would translate more than 256 bodies of called methods, counting a method once per call that reaches it (this call is reached through PhpstanContracts\Tests\Fixtures\CrossFile\CrossFileFixture::moreBodiesThanTheLimit() -> PhpstanContracts\Tests\Fixtures\CrossFile\Chain::level1() -> PhpstanContracts\Tests\Fixtures\CrossFile\Chain::level2()). Split the rule into smaller verified methods, or call fewer helpers from it.
+```
+
+`Enum::cases()` and the other methods that PHP provides have no body to translate. They are rejected with what to write instead:
+
+```
+Rejected.php:180: PhpstanContracts\Examples\RealWorld\ShippingZone::cases() is built into PHP, so there is no body to translate; write the cases you need as a list, such as [ShippingZone::Domestic, ShippingZone::Europe, ...].
+```
+
+A class that is declared twice in its file, such as both branches of an `if (PHP_VERSION_ID < 80300)`, is rejected, because PHPStan reflects the first declaration and PHP runs the one the condition picks. Recursion is not supported, and the callee's own `#[Ensures]` are never assumed: that is [contract-based verification](limits-and-roadmap.md#roadmap), which is not done yet.
+
+### Calls that throw
+
+A called method can throw. The `throw` counts as a `throw` of the verified method, under the path that reaches it: the `#[Throws]` declarations of the caller must allow it, with the meaning of [Exceptions](#exceptions). [`ErpCode::from()`](../examples/RealWorld/ErpCode.php) is a guard that throws when the web id is outside the reserved range. [`ErpExport::exportLine()`](../examples/RealWorld/ErpExport.php) calls it and declares the same range, and is proven:
+
+```php
+#[Throws(\InvalidArgumentException::class, when: '$webId < 0 || $webId >= 1000000')]
+#[Ensures('str_starts_with($result, "ERP-")')]
+public static function exportLine(int $webId): string
+{
+    $code = ErpCode::from($webId);
+
+    return 'ERP-' . $code;
+}
+```
+
+`exportLineBroken()` declares `when: '$webId < 0'` and forgets the upper bound. The guard throws for ids that the declaration says are fine, and the report names the call:
+
+```
+ErpExport.php:35: `throw new \InvalidArgumentException('The web id is outside the range reserved for the web shop.')` can be reached where the #[Throws] declarations do not allow it: they allow it only where #[Throws(InvalidArgumentException::class, when: '$webId < 0')] holds, in the call to PhpstanContracts\Examples\RealWorld\ErpCode::from(). Counterexample: $webId = 1499292.
+```
+
+A caller that does not declare the exception is reported as "can be reached where no #[Throws] allows it", and a caller whose `#[Requires]` make the throw unreachable is proven without any `#[Throws]`. The call must be the whole value of a `return` or of an assignment, or a whole branch of a `match`, `?:` or `??` in such a position. Anywhere else the exception would leave the method from the inside of an expression, and the call is rejected with the rewrite to make:
+
+```
+CrossFileFixture.php:188: The call to PhpstanContracts\Tests\Fixtures\CrossFile\WebId::from() can throw, which is only supported where the call is the whole value of a return or an assignment: assign its result to a variable first, such as $value = WebId::from($id);
+```
 
 ## Loops
 
@@ -764,7 +827,7 @@ Besides your contracts, every checked method must satisfy a set of safety condit
 | Loop bound | a `foreach` over a list that can have more elements than the proof unrolls: a limit of the proof, not a bug in the code | `contracts.loopBound` |
 | Return type respected | the returned value can leave the domain of its declared type, such as a PHPDoc range or a field range of a data class | `contracts.returnType` |
 | No undeclared exception | a `throw` can be reached where the [`#[Throws]`](#exceptions) declarations do not allow it | `contracts.unexpectedThrow` |
-| Callee preconditions respected | a [call to a method of the same file](#calls-to-other-methods) can break one of its `#[Requires]` | `contracts.requiresViolated` |
+| Callee preconditions respected | a [call to another method](#calls-to-other-methods), in any file, can break one of its `#[Requires]` | `contracts.requiresViolated` |
 
 Each condition is checked **under the path that reaches it**. In `$parts > 0 && intdiv($total, $parts) > 3` the division is only checked where `$parts > 0`, so the guard is honoured. The same holds for the arms of `?:`, `??` and `match`.
 
@@ -786,7 +849,7 @@ Each condition is checked **under the path that reaches it**. In `$parts > 0 && 
 | `contracts.returnType` | The method can return a value that its declared type excludes. | Fix the computation, or widen the declared type. |
 | `contracts.unexpectedThrow` | A `throw` can be reached where no `#[Throws]` allows it, or where the `#[Throws]` declarations do not allow it; the message then lists the conditions that allow it. | Declare it with its condition, or fix the guard. |
 | `contracts.throwsViolated` | The method can return although the condition of a `#[Throws]` holds. | Fix the guard, or the condition. |
-| `contracts.requiresViolated` | A call to a method of the same file can break one of the callee's `#[Requires]`. | Guard the call, or establish the precondition first. |
+| `contracts.requiresViolated` | A call from a verified method can break one of the callee's `#[Requires]`. | Guard the call, or establish the precondition first. |
 | `contracts.contradictoryRequires` | No input satisfies the parameter types and `#[Requires]`, so every proof would be empty. | Loosen the preconditions. |
 | `contracts.unknown` | Z3 answered `unknown` within `timeoutMs`. Nothing is proven or refuted. On the method line, it means Z3 could not tell whether any input satisfies the preconditions, so the proofs of the method may be vacuous. | See [when Z3 gives up](#when-z3-gives-up). |
 | `contracts.costly` | Only with `costWarnings`: the structure of the method (a loop unrolled over several divisions or modulos by a variable) makes `contracts.unknown` likely. It is a risk, not a failure, and it is not a measure of time. | Bound the list with `#[Requires('count($list) <= N')]`, simplify the arithmetic, raise `methodBudgetMs`, or ignore it by identifier with `ignoreErrors`. |
