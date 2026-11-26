@@ -172,6 +172,15 @@ final class ExpressionTranslator
     }
 
     /**
+     * The line a diagnostic about `$node` is reported at: the line of the call when this
+     * translates the body of a called method, which can be in another file.
+     */
+    public function reportedLine(Node $node): int
+    {
+        return $this->lineOf($node);
+    }
+
+    /**
      * @param array<string, Term> $env
      */
     private function translateBranch(Expr $expr, array $env, Term $pc, bool $tail): Term

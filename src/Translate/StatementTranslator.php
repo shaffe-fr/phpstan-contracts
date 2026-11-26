@@ -582,7 +582,7 @@ final class StatementTranslator
             $subject = $this->printer->prettyPrintExpr($loop->expr);
             $this->encoding->addObligation(new Obligation(
                 ObligationKind::LoopBound,
-                $line,
+                $this->expressions->reportedLine($loop),
                 sprintf('count(%s) <= %d', $subject, $bound),
                 $current->reached,
                 Smt::compare('<=', $length, Smt::int($bound)),
