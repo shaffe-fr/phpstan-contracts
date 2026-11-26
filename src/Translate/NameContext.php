@@ -5,11 +5,13 @@ declare(strict_types=1);
 namespace PhpstanContracts\Translate;
 
 /**
- * The namespace and `use` imports in effect at a PHPDoc, which resolve its names as
- * PHPStan's NameScope::resolveStringName() and resolveConstantNames() do.
+ * The namespace, `use` imports and class in effect at a PHPDoc, which resolve its names
+ * as PHPStan's NameScope::resolveStringName() and resolveConstantNames() do.
  */
 final class NameContext
 {
+    public ?string $className = null;
+
     /**
      * @param array<string, string> $uses lower-case alias => class
      * @param array<string, string> $constUses lower-case alias => constant

@@ -49,8 +49,11 @@ use PHPStan\Type\Type;
  */
 final class ConstantGuard
 {
-    /** @var array<string, array{Expr|string, Dependencies}> global constant => its initializer with every name resolved, or why it cannot be checked, and what finding it read */
+    /** @var array<string, array{Expr|string, Dependencies}> global constant => its initializer with every name resolved, or why it cannot be found, and what finding it read */
     private array $globalInitializers = [];
+
+    /** @var array{string|null}|null while {@see foldedReads()} runs: why a constant it reached cannot be followed */
+    private ?array $unfollowed = null;
 
     public function __construct(
         private readonly Lookups $lookups,
@@ -99,6 +102,32 @@ final class ConstantGuard
         $seen = [];
 
         return $this->walk($initializer, InitializerExprContext::fromClassReflection($context), $context, 'An initializer in ' . $context->getDisplayName(), $seen, true);
+    }
+
+    /**
+     * Records what PHPStan reads when it folds a constant or an enum case into a PHPDoc
+     * type: the program never evaluates it there, so nothing about its value is refused,
+     * but the files the value comes from decide the type.
+     *
+     * @return string|null why the value of a constant it reads cannot be followed
+     */
+    public function foldedReads(ClassConstFetch|ConstFetch $fetch, ?ClassReflection $context): ?string
+    {
+        $seen = [];
+        $this->unfollowed = [null];
+        try {
+            $types = $context === null ? InitializerExprContext::createEmpty() : InitializerExprContext::fromClassReflection($context);
+            $this->walk($fetch, $types, $context, 'A PHPDoc type', $seen, false);
+
+            return $this->unfollowed();
+        } finally {
+            $this->unfollowed = null;
+        }
+    }
+
+    private function unfollowed(): ?string
+    {
+        return $this->unfollowed[0] ?? null;
     }
 
     /**
@@ -338,7 +367,11 @@ final class ConstantGuard
 
         $initializer = $this->globalInitializer($constant);
         if (is_string($initializer)) {
-            return $initializer;
+            if ($this->unfollowed !== null) {
+                $this->unfollowed[0] ??= sprintf('the constant %s, whose definition cannot be followed (%s)', $constant->getName(), $initializer);
+            }
+
+            return $this->unchecked($constant->getName(), $initializer);
         }
 
         // Every name in the initializer is fully qualified by globalInitializer(), so no namespace is needed.
@@ -372,7 +405,7 @@ final class ConstantGuard
         $file = $constant->getFileName();
         $statements = $file === null ? 'no file defines it' : $this->sources->tryParse($file);
         if (is_string($statements)) {
-            return $this->unchecked($name, $statements);
+            return $statements;
         }
 
         $found = [];
@@ -393,13 +426,13 @@ final class ConstantGuard
             }
         }
         if (count($found) !== 1) {
-            return $this->unchecked($name, sprintf('it is not defined exactly once at the top level of %s', $file));
+            return sprintf('it is not defined exactly once at the top level of %s', $file);
         }
 
         // A copy: the parsed statements are shared with the other readers of the file.
         $initializer = (new NodeTraverser(new CloningVisitor()))->traverse([$found[0]])[0] ?? null;
         if (!$initializer instanceof Expr) {
-            return $this->unchecked($name, sprintf('its initializer in %s cannot be copied', $file));
+            return sprintf('its initializer in %s cannot be copied', $file);
         }
         foreach ((new NodeFinder())->findInstanceOf($initializer, ConstFetch::class) as $fetch) {
             $fetch->name = $this->fullyQualified($fetch->name);

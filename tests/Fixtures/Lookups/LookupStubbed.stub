@@ -1,0 +1,12 @@
+<?php
+
+// A stub, passed to PhpDocReads as the stubFiles parameter is.
+final readonly class LookupStubbed
+{
+    /**
+     * @param int<0, \PhpstanContracts\Tests\Fixtures\Lookups\LookupCeiling::TOP> $amount
+     */
+    public function __construct(public int $amount)
+    {
+    }
+}

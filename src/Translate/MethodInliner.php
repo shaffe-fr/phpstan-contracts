@@ -107,7 +107,7 @@ final class MethodInliner
 
         $owner = $method->getDeclaringClass();
         // The PHPDoc types of its parameters and return value can name constants and aliases of other classes.
-        $this->phpDocs->record($owner);
+        $this->phpDocs->record($owner, $line, $method->getName());
         $label = sprintf('%s::%s()', $owner->getDisplayName(), $method->getName());
 
         $this->checkCallable($class, $method, $owner, $callerScope, $label, $onAnObject, $lateStatic, $line);

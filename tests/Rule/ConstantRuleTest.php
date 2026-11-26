@@ -116,6 +116,7 @@ final class ConstantRuleTest extends RuleFixtureTestCase
                 'readsAGlobalIntConstant' => [],
                 'readsAGlobalConstantThatPrintsAnInt' => [],
                 'readsAConstantOnlyKnownAtRuntime' => ['contracts.unsupported: The initializer of constant PhpstanContracts\Tests\Fixtures\DEFINED_AT_RUNTIME cannot be checked for a float converted to a string: no file defines it.'],
+                'typesAParameterWithAConstantOnlyKnownAtRuntime' => ['contracts.unsupported: reads the constant PhpstanContracts\Tests\Fixtures\DEFINED_AT_RUNTIME, whose definition cannot be followed (no file defines it), so the proof would not be redone when it changes.'],
             ],
         ]);
     }

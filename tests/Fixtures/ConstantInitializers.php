@@ -122,6 +122,15 @@ final class GlobalConstantInitializers
     {
         return self::RUNTIME;
     }
+
+    /**
+     * @param DEFINED_AT_RUNTIME $label
+     */
+    #[Ensures('$result === $label')]
+    public static function typesAParameterWithAConstantOnlyKnownAtRuntime(string $label): string
+    {
+        return $label;
+    }
 }
 
 /**

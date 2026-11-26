@@ -58,7 +58,7 @@ final class MethodEncoder
         $declaringClass = $scope->getClassReflection();
         if ($declaringClass !== null) {
             // Its parents and traits can be in other files, and so can the constants and aliases its PHPDoc names.
-            $this->phpDocs->record($declaringClass);
+            $this->phpDocs->record($declaringClass, $method->getStartLine(), $method->name->toString());
         }
         $thisRefusal = $method->isStatic()
             ? 'There is no $this in a static method.'

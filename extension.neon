@@ -31,7 +31,12 @@ services:
 	- PhpstanContracts\Contract\ContractReader
 	- PhpstanContracts\Translate\Lookups
 	- PhpstanContracts\Translate\SourceFiles
-	- PhpstanContracts\Translate\PhpDocReads
+	-
+		class: PhpstanContracts\Translate\PhpDocReads
+		arguments:
+			typeAliases: %typeAliases%
+			stubFiles: %stubFiles%
+			typeExtensions: tagged(phpstan.phpDoc.typeNodeResolverExtension)
 	- PhpstanContracts\Translate\ConstantGuard
 	- PhpstanContracts\Translate\EnumRegistry
 	- PhpstanContracts\Translate\TypeMapper

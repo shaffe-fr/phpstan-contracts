@@ -269,7 +269,7 @@ final class TypeMapper
     {
         $className = $class->getName();
         // The PHPDoc types of its properties can name constants and aliases of other classes.
-        $this->phpDocs->record($class);
+        $this->phpDocs->record($class, $line, '__construct');
 
         if ($class->isInterface() || $class->isAbstract() || $class->isAnonymous() || $class->isEnum()) {
             throw new VerificationRejected(
