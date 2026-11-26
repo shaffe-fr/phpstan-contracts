@@ -72,7 +72,7 @@ final class Z3Runner implements CheckRunner
         if ($checkCount < 1 || $checkCount > self::MAXIMUM_CHECKS) {
             throw new InvalidArgumentException(sprintf('A script holds between 1 and %d checks, %d given.', self::MAXIMUM_CHECKS, $checkCount));
         }
-        $asked = $checkCount - count($skipped);
+        $asked = min($checkCount - count($skipped), self::MAXIMUM_CHECKS);
         if ($asked < 1) {
             return $this->unanswered($checkCount, $skipped);
         }

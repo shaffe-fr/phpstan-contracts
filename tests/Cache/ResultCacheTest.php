@@ -231,9 +231,12 @@ final class ResultCacheTest extends TestCase
             if ($search === null) {
                 file_put_contents($path, $replace);
             } else {
-                $contents = (string) file_get_contents($path);
+                // Checked out with the line endings of the platform: edit with \n, write back with the file's own.
+                $original = (string) file_get_contents($path);
+                $ending = str_contains($original, "\r\n") ? "\r\n" : "\n";
+                $contents = str_replace("\r\n", "\n", $original);
                 self::assertStringContainsString($search, $contents, $label);
-                file_put_contents($path, str_replace($search, $replace, $contents));
+                file_put_contents($path, str_replace("\n", $ending, str_replace($search, $replace, $contents)));
             }
 
             $run = $this->analyse(true);

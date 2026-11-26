@@ -66,8 +66,8 @@ final class CrossFileInteractionRuleTest extends RuleFixtureTestCase
             }
         }
 
-        $source = (array) file((string) (new \ReflectionClass(CrossFileInteractions::class))->getFileName());
-        $call = array_search("        return Callees::unboundedSum(\$cents);\n", $source, true);
+        $source = (array) file((string) (new \ReflectionClass(CrossFileInteractions::class))->getFileName(), FILE_IGNORE_NEW_LINES);
+        $call = array_search("        return Callees::unboundedSum(\$cents);", $source, true);
         self::assertIsInt($call);
         self::assertSame($call + 1, $actual[CrossFileInteractions::class]['unboundedLoopInACallee'][0]->line);
     }
