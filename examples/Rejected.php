@@ -7,7 +7,7 @@ namespace PhpstanContracts\Examples;
 use PhpstanContracts\Attribute\Ensures;
 use PhpstanContracts\Attribute\Pure;
 use PhpstanContracts\Attribute\Requires;
-use PhpstanContracts\Examples\RealWorld\PriceContext;
+use PhpstanContracts\Examples\RealWorld\ShippingZone;
 
 /**
  * Each method here is expected to be reported by the extension.
@@ -142,13 +142,6 @@ final class Rejected
         return 1;
     }
 
-    /** A method of another file is not translated: the result cache would not redo the proof when its body changes. */
-    #[Ensures('$result >= 0')]
-    public static function callToAnotherFile(PriceContext $context): int
-    {
-        return $context->discountPercent();
-    }
-
     /** Dynamic access is rejected. */
     #[Pure]
     public static function dynamic(object $object, string $name): int
@@ -180,12 +173,11 @@ final class Rejected
         return $x;
     }
 
-    /** Receipt is declared in RealWorld/Checkout.php: the result cache would not redo the proof when its constructor body changes. */
+    /** Enum::cases() is built into PHP, so there is no body to translate. */
     #[Pure]
-    public static function objectOfAnotherFile(): int
+    public static function builtInEnumMethod(): int
     {
-        $receipt = new RealWorld\Receipt(0, 0, false);
-        return $receipt->totalCents;
+        return count(ShippingZone::cases());
     }
 }
 

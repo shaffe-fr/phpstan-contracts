@@ -14,8 +14,11 @@ use PhpstanContracts\Examples\RealWorld\CustomerCode;
 use PhpstanContracts\Examples\RealWorld\DeliveryLabel;
 use PhpstanContracts\Examples\RealWorld\DiscountSplit;
 use PhpstanContracts\Examples\RealWorld\ErpCode;
+use PhpstanContracts\Examples\RealWorld\ErpExport;
 use PhpstanContracts\Examples\RealWorld\Floats;
 use PhpstanContracts\Examples\RealWorld\Invoice;
+use PhpstanContracts\Examples\RealWorld\LoyaltyPricing;
+use PhpstanContracts\Examples\RealWorld\LoyaltyTier;
 use PhpstanContracts\Examples\RealWorld\Nullables;
 use PhpstanContracts\Examples\RealWorld\OrderLines;
 use PhpstanContracts\Examples\RealWorld\OrderTotals;
@@ -25,6 +28,7 @@ use PhpstanContracts\Examples\RealWorld\PriceContext;
 use PhpstanContracts\Examples\RealWorld\ProportionalSplit;
 use PhpstanContracts\Examples\RealWorld\RateLimit;
 use PhpstanContracts\Examples\RealWorld\ReconciliationDeltaGuard;
+use PhpstanContracts\Examples\RealWorld\RefundPolicy;
 use PhpstanContracts\Examples\RealWorld\Shipping;
 use PhpstanContracts\Examples\RealWorld\StockAvailability;
 use PhpstanContracts\Examples\RealWorld\StockLine;
@@ -174,6 +178,22 @@ final class ExamplesTest extends RuleFixtureTestCase
                 'from' => [],
                 'fromBroken' => ['contracts.throwsViolated: the method can return although the condition holds. Counterexample: $webId = '],
             ],
+            LoyaltyTier::class => [
+                'discountBasisPoints' => [],
+                'discountBasisPointsBroken' => ['contracts.ensuresViolated: Counterexample: $this = LoyaltyTier::Gold => $result = 10500'],
+            ],
+            LoyaltyPricing::class => [
+                'priceAfterLoyalty' => [],
+                'priceAfterLoyaltyBroken' => ['contracts.ensuresViolated: Counterexample: $cents = 20, $tier = LoyaltyTier::Gold => $result = -1'],
+            ],
+            RefundPolicy::class => [
+                'refund' => [],
+                'refundBroken' => ['contracts.ensuresViolated: Counterexample: $paidCents = 10, $daysBeforeStay = 7 => $result = Refund(paidCents: 10, refundedCents: 11)'],
+            ],
+            ErpExport::class => [
+                'exportLine' => [],
+                'exportLineBroken' => ['contracts.unexpectedThrow: `throw new \\InvalidArgumentException(\'The web id is outside the range reserved for the web shop.\')` can be reached where the #[Throws] declarations do not allow it'],
+            ],
             UserRole::class => [
                 'hierarchyLevel' => [],
                 'canManage' => [],
@@ -228,12 +248,11 @@ final class ExamplesTest extends RuleFixtureTestCase
                 'effect' => ['contracts.unsupported: Side effects'],
                 'validatedConstructor' => ['contracts.unsupported: its constructor contains logic'],
                 'mutableObject' => ['contracts.unsupported: must be public and readonly'],
-                'callToAnotherFile' => [],
                 'dynamic' => ['contracts.unsupported: Type object is not supported'],
                 'looseInArray' => ['contracts.unsupported: in_array() without strict: true compares with =='],
                 'undeclaredThrow' => ['contracts.unexpectedThrow: `throw new \\InvalidArgumentException(\'Negative.\')` can be reached where no #[Throws] allows it. Counterexample: $x = '],
                 'brokenContract' => ['contracts.invalidContract: is not valid PHP'],
-                'objectOfAnotherFile' => [],
+                'builtInEnumMethod' => ['contracts.unsupported: ShippingZone::cases() is built into PHP, so there is no body to translate'],
             ],
             CartLimits::class => [
                 'itemsLateBound' => ['contracts.unsupported: static::MAX_ITEMS is late bound'],

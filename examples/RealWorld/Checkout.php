@@ -74,8 +74,8 @@ final class Checkout
 }
 
 /**
- * Declared in this file because Checkout builds it: a verified method can only build an
- * object whose constructor is in the same file.
+ * Declared next to Checkout, which builds it. It could be in a file of its own: a verified
+ * method can build an object whose constructor is declared in any file.
  */
 final readonly class Receipt
 {
