@@ -55,7 +55,7 @@ No new language to learn, no test data to invent, no framework to adopt. Rules a
 - **SMT solving**: the method body is translated to SMT-LIB (satisfiability modulo theories: integer arithmetic, IEEE 754 floating point, strings, arrays with a length for lists, enumerations and algebraic datatypes for data classes and array shapes) and sent to the Z3 solver. The extension asks whether the negation of the contract is satisfiable.
   - `unsat`: no input violates the contract. The contract is *proven* and nothing is reported.
   - `sat`: the model returned by Z3 is a *counterexample*, shown with the parameter values, the result and the `return` that produced it.
-  - `unknown` or timeout: reported as `contracts.unknown`, never treated as a pass.
+  - `unknown` or timeout: reported as `contracts.unknown`, never treated as a pass. The effort is bounded by a time limit per check and per method, and a check that stays undecided is remembered, so the next run does not spend the time again.
 - **SSA translation and symbolic execution**: branches, `match` and local variables are put in static single assignment form, so every path is covered at once instead of being sampled.
 - **Verification conditions and safety obligations**: besides your contracts, every arithmetic operation generates proof obligations: no integer overflow, no division by zero, no `UnhandledMatchError`, no read of a missing list key, no missing `return`.
 - **Refinement types for parameters**: PHPDoc ranges such as `int<1, 1000>` define the input domain, which acts like a refinement type on the parameter.
@@ -82,6 +82,8 @@ Point your agent at it: ask it to write the contract first, run `vendor/bin/phps
 - Off-by-one errors on boundaries (exact multiples, first and last item).
 - Negative amounts, zero quantities, and other inputs nobody thought of.
 - Discounts that add up to more than 100%.
+- Rounding that loses a cent: parts of a discount or of a VAT split that do not add up to the total.
+- A guard that does not match what it claims: an exception thrown outside the declared range, or not thrown inside it.
 - Integer overflow and division by zero, checked automatically on every verified method.
 - A `match` that forgets a case, or a code path that returns nothing.
 - A refactoring that quietly weakens a business rule: the proof is redone on every run.
@@ -132,6 +134,13 @@ final class Pricing
 ```
 
 `#[Requires]` is the precondition, `#[Ensures]` is the postcondition. In contracts, `$result` is the returned value, and `implies(a, b)` means "if a then b".
+
+| Attribute | Meaning |
+|---|---|
+| `#[Requires('expr')]` | What callers must respect: the proof assumes it on entry, and a call from verified code is checked against it. |
+| `#[Ensures('expr')]` | What the method promises when it returns. |
+| `#[Throws(E::class, when: 'expr')]` | The method throws `E` if and only if `expr` holds on entry. Any other `throw` must be unreachable. |
+| `#[Pure]` | Opt in with no contract: only the automatic checks (overflow, division by zero, `match`, missing `return`...) run. |
 
 ## It works on your DTOs, not only on numbers
 
@@ -197,7 +206,18 @@ The verified subset is small on purpose, so that the answer is a real proof and 
 - `list<T>` and array shapes such as `array{net: int, vat: int}`, as parameters, results and properties: `count()`, `$list[$i]` with a proof that the key exists (`contracts.undefinedKey`), `$shape['net']`, literals, `[...$list, $x]`, appending to a list built in the method, `===` on lists, and element ranges such as `list<int<0, 100>>` as assumptions on inputs and goals on results
 - arithmetic, comparisons, `min`, `max`, `abs`, `intdiv`, `in_array` over a list of cases or scalars, or over a `list<T>` (`strict: true` for strings), and the common string checks (length, prefix, suffix, containment, concatenation, with an `int` written in decimal in `.`, interpolation and `(string)`)
 
-Not yet: `while`, `for` and `do` (they need a termination argument), `foreach` by reference or over anything but a list, `array_map()` and the other array functions, loops over lists of any length (they need an invariant), `try`/`catch`, recursion, calls through an interface or an abstract method, arrays with arbitrary keys (`array<string, int>`), lists of lists and union element types such as `list<float|string>`, mutable state (the state of a framework base class can stay in a data class, but a verified method cannot read it), and `float` or `bool` in a string. Anything outside the subset is reported as `contracts.unsupported` with the reason, never silently skipped. Floating-point multiplication of two variables can be too slow to decide, so money is better kept as integer cents and rates as basis points. See [Supported types](docs/types.md) for what each type can do, and [Limits and roadmap](docs/limits-and-roadmap.md) for what a green run guarantees and what comes next.
+Not yet: `while`, `for` and `do` (they need a termination argument), `foreach` by reference or over anything but a list, `array_map()` and the other array functions, loops over lists of any length (they need an invariant), `try`/`catch`, recursion, calls through an interface or an abstract method, arrays with arbitrary keys (`array<string, int>`), lists of lists, union types (`int|float`, `float|string`, `list<float|string>`), dates (`DateTimeInterface`, Carbon), `round()` on floats, library objects such as Eloquent models and `Brick\Money`, mutable state (the state of a framework base class can stay in a data class, but a verified method cannot read it), and `float` or `bool` in a string. Anything outside the subset is reported as `contracts.unsupported` with the reason, never silently skipped. Floating-point multiplication of two variables can be too slow to decide, so money is better kept as integer cents and rates as basis points. See [Supported types](docs/types.md) for what each type can do, and [Limits and roadmap](docs/limits-and-roadmap.md) for what a green run guarantees and what comes next.
+
+## What it costs, and when Z3 gives up
+
+Only the methods that carry a contract go through Z3, and most of them take a fraction of a second. A rule that multiplies two variables, divides by a variable inside a loop, or works on floats can be slow or undecidable: the answer is then `contracts.unknown`, never a pass.
+
+- **Limits.** `contracts.timeoutMs` bounds one check (10 s) and `contracts.methodBudgetMs` bounds a method (60 s). `contracts.runBudgetMs` can bound a whole run.
+- **Undecided checks are remembered.** A check that stayed `unknown` is not asked again with the same limits, so a project with a few hard rules does not pay for them on every run.
+- **Seeing it coming.** `contracts.costWarnings` reports `contracts.costly` on methods whose structure makes `unknown` likely, and `contracts.timingReport` writes the measured time of each method to a file.
+- **Continuous integration.** Keep the proof cache directory between runs.
+
+The details, with the configuration table and advice for CI, are in [Getting started](docs/getting-started.md#cost) and [When Z3 gives up](docs/writing-contracts.md#when-z3-gives-up).
 
 ## Learn more
 
@@ -218,7 +238,7 @@ php bin/phpstan-contracts-install-z3
 vendor/bin/phpstan analyse
 ```
 
-The run reports 79 errors, all intended: 74 from this extension (the examples that show a refuted rule, an undecided one or a rejected construct) and 5 from PHPStan's own rules on the deliberately broken methods (`argument.type` twice, `return.missing`, `return.type`, `match.unhandled`). It takes about a minute and a half with a cold cache. Every other annotated method is proven.
+The run reports 79 errors, all intended: 74 from this extension (the examples that show a refuted rule, an undecided one or a rejected construct) and 5 from PHPStan's own rules on the deliberately broken methods (`argument.type` twice, `return.missing`, `return.type`, `match.unhandled`). It takes about two minutes with a cold cache. Every other annotated method is proven.
 
 ## Status
 

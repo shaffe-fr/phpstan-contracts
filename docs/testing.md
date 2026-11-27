@@ -8,8 +8,8 @@ A verifier that is wrong is worse than no verifier: a false proof gives confiden
 composer install
 php bin/phpstan-contracts-install-z3   # most tests run the solver
 composer analyse                    # the package, and its tests, analysed with its own extension
-composer test                       # everything except the examples, about a minute
-composer test:examples              # what the prover says about each example, under a minute
+composer test                       # everything except the examples, about 3 minutes on Linux and 10 on Windows
+composer test:examples              # what the prover says about each example, about two minutes with a cold cache and one minute with a warm one
 ```
 
 Z3 is looked up like the extension does: the per-user cache (see [Install Z3](getting-started.md#install-z3)), then the legacy `.z3/` inside the package, then `PATH`. Tests that need Z3 skip themselves when it is not installed. Set `CONTRACTS_REQUIRE_Z3=1` to make them fail instead, which is what the CI does, so that a missing solver can never look like a green run.
