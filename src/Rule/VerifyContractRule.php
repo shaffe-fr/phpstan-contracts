@@ -11,6 +11,7 @@ use PhpstanContracts\Report\CounterexampleFormatter;
 use PhpstanContracts\Report\TimingReport;
 use PhpstanContracts\Report\UnknownExplainer;
 use PhpstanContracts\Solver\MethodAnswer;
+use PhpstanContracts\Solver\CheckRunner;
 use PhpstanContracts\Solver\MethodSolver;
 use PhpstanContracts\Solver\RunBudgetExhausted;
 use PhpstanContracts\Solver\ScriptRenderer;
@@ -19,7 +20,6 @@ use PhpstanContracts\Solver\SolverFailure;
 use PhpstanContracts\Solver\SolverResult;
 use PhpstanContracts\Solver\UnknownReason;
 use PhpstanContracts\Solver\Verdict;
-use PhpstanContracts\Solver\Z3Runner;
 use PhpstanContracts\Translate\Dependencies;
 use PhpstanContracts\Translate\Encoding;
 use PhpstanContracts\Translate\Lookups;
@@ -55,7 +55,7 @@ final class VerifyContractRule implements Rule
         private readonly ContractReader $contracts,
         private readonly MethodEncoder $encoder,
         private readonly ScriptRenderer $renderer,
-        private readonly Z3Runner $z3,
+        private readonly CheckRunner $z3,
         private readonly MethodSolver $solver,
         private readonly CounterexampleFormatter $formatter,
         private readonly TimingReport $timingReport,

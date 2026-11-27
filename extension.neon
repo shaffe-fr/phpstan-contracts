@@ -11,6 +11,7 @@ parameters:
 		rememberUndecided: true
 		costWarnings: false
 		timingReport: null
+		persistentSolver: false
 
 parametersSchema:
 	contracts: structure([
@@ -25,6 +26,7 @@ parametersSchema:
 		rememberUndecided: bool()
 		costWarnings: bool()
 		timingReport: schema(string(), nullable())
+		persistentSolver: bool()
 	])
 
 services:
@@ -63,11 +65,10 @@ services:
 		arguments:
 			directory: %contracts.cacheDirectory%
 	-
-		class: PhpstanContracts\Solver\Z3Runner
-		arguments:
-			binary: %contracts.z3Binary%
-			timeoutMs: %contracts.timeoutMs%
-			parallelism: %contracts.parallelism%
+		class: PhpstanContracts\Solver\Z3RunnerFactory
+	-
+		factory: @PhpstanContracts\Solver\Z3RunnerFactory::create
+		arguments: [%contracts.z3Binary%, %contracts.timeoutMs%, %contracts.parallelism%, %contracts.persistentSolver%]
 	-
 		class: PhpstanContracts\Solver\MethodSolver
 		arguments:

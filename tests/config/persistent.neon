@@ -1,0 +1,10 @@
+parameters:
+	contracts:
+		timeoutMs: 30000
+		cacheDirectory: null
+		# Far above any method here, so that a slow runner never turns an answer or an expected unknown into a budget cut.
+		methodBudgetMs: 600000
+		# The only difference with default.neon: the scripts of the plain runner are asked of one
+		# persistent Z3 process instead of one process per script. The differential test asserts the
+		# same expectations as the disposable run, so the two must answer identically.
+		persistentSolver: true
